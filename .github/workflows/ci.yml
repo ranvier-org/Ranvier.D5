@@ -1,5 +1,12 @@
 name: Foundation CI
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: foundation-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -36,6 +43,29 @@ jobs:
         run: |
           dotnet pack src/Ranvier.D5 -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
           dotnet pack src/Ranvier.D5.View -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+      - name: Consume packed View and core
+        shell: bash
+        run: |
+          suffix=""
+          if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
+          mkdir -p artifacts/consumer
+          cat > artifacts/consumer/Consumer.fsproj <<EOF
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.0-alpha.1]" /></ItemGroup></Project>
+          EOF
+          cat > artifacts/consumer/Program.fs <<'EOF'
+          open Ranvier
+          open Ranvier.D5
+          use graph = new Graph()
+          graph.Run(fun () ->
+              let source = Api.createSignal 2.
+              let mapped = Reactive.derive (fun () -> source.Value) (Scale.map (Scale.linear (0.,4.) (0.,100.)))
+              if mapped.Value <> 50. then failwith "Packed memo failed"
+              source.Value <- 4.
+              if mapped.Value <> 100. then failwith "Packed signal failed")
+          Ranvier.D5.View.Renderer.passive |> ignore
+          EOF
+          dotnet restore artifacts/consumer/Consumer.fsproj --source "$PWD/artifacts/packages" --source https://api.nuget.org/v3/index.json
+          dotnet run --project artifacts/consumer/Consumer.fsproj -c Release --no-restore
       - uses: actions/upload-artifact@v4
         if: always()
         with:

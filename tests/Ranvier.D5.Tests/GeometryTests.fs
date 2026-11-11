@@ -9,6 +9,26 @@ let near = DataScaleTests.near
 let p x y = Point.create x y
 
 let tests = testList "Geometry and layouts" [
+    testCase "extreme but invertible affine scales retain finite inverses" <| fun _ ->
+        for x,y in [1e200,1e200; 1e-200,1e-200; 1e200,1e-200] do
+            let matrix = Transform.scale x y
+            let inverse = Transform.tryInverse matrix
+            Expect.isSome inverse "representable inverse"
+            let roundtrip = p 1. 1. |> Transform.apply matrix |> Transform.apply inverse.Value
+            near 1. roundtrip.X
+            near 1. roundtrip.Y
+    testCase "stepped zero-thickness areas have zero signed area" <| fun _ ->
+        for curve in [Curve.StepBefore; Curve.StepAfter] do
+            let commands = Shape.area curve [Some(p 0. 0., p 0. 0.); Some(p 10. 10., p 10. 10.)] |> Path.commands
+            let vertices = commands |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+            let closed = vertices @ [vertices.Head]
+            let area = closed |> List.pairwise |> List.sumBy(fun (a,b) -> a.X*b.Y - b.X*a.Y)
+            near 0. area
+            let shifted = Shape.area curve [Some(p 0. 0., p 0. 5.); Some(p 10. 10., p 10. 15.)] |> Path.commands
+            let vertices = shifted |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+            let area = (vertices @ [vertices.Head]) |> List.pairwise |> List.sumBy(fun (a,b) -> a.X*b.Y - b.X*a.Y)
+            near 100. (abs area)
+
     testCase "affine composition inverse and singular transform" <| fun _ ->
         let transform = Transform.scale 2. 3. |> Transform.thenApply (Transform.translate 10. 20.)
         Expect.equal (Transform.apply transform (p 1. 2.)) (p 12. 26.) "scale then translate"

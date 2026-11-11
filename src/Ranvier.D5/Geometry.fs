@@ -68,12 +68,21 @@ module Transform =
     let apply matrix point = Point.create (matrix.A*point.X+matrix.C*point.Y+matrix.E) (matrix.B*point.X+matrix.D*point.Y+matrix.F)
     /// <summary>Returns None for singular matrices or inverses that overflow.</summary>
     let tryInverse matrix =
-        let determinant = matrix.A*matrix.D-matrix.B*matrix.C
-        if determinant=0. || not (Double.IsFinite determinant) then None
+        let row1 = max (abs matrix.A) (abs matrix.C)
+        let row2 = max (abs matrix.B) (abs matrix.D)
+        if row1 = 0. || row2 = 0. then None
         else
-            let values = [matrix.D/determinant; -matrix.B/determinant; -matrix.C/determinant; matrix.A/determinant;
-                          (matrix.C*matrix.F-matrix.D*matrix.E)/determinant; (matrix.B*matrix.E-matrix.A*matrix.F)/determinant]
-            if List.forall Double.IsFinite values then Some (create values[0] values[1] values[2] values[3] values[4] values[5]) else None
+            let a,c = matrix.A / row1, matrix.C / row1
+            let b,d = matrix.B / row2, matrix.D / row2
+            let determinant = a*d-b*c
+            if determinant = 0. then None
+            else
+                let divide numerator row =
+                    let value = numerator / determinant
+                    if Double.IsFinite value then value / row else (numerator / row) / determinant
+                let ia,ib,ic,id = divide d row1, divide -b row1, divide -c row2, divide a row2
+                let values = [ia; ib; ic; id; -(ia*matrix.E+ic*matrix.F); -(ib*matrix.E+id*matrix.F)]
+                if List.forall Double.IsFinite values then Some (create values[0] values[1] values[2] values[3] values[4] values[5]) else None
     /// <summary>Serializes a culture-independent SVG matrix.</summary>
     let toSvg matrix = "matrix(" + ([matrix.A;matrix.B;matrix.C;matrix.D;matrix.E;matrix.F] |> List.map Number.format |> String.concat " ") + ")"
 
@@ -186,7 +195,8 @@ module Shape =
         runs points |> List.collect (fun run ->
             let lower,upper = List.unzip run
             let top = segment curve upper
-            let bottom = segment curve (List.rev lower)
+            let reverseCurve = match curve with Curve.StepBefore -> Curve.StepAfter | Curve.StepAfter -> Curve.StepBefore | other -> other
+            let bottom = segment reverseCurve (List.rev lower)
             top @ (match bottom with MoveTo p::rest -> LineTo p::rest | _ -> bottom) @ [Close]) |> Path.ofCommands
     /// <summary>Creates a circular sector or annulus, with zero radians at twelve o'clock and positive angles clockwise.</summary>
     let arc inner outer start finish =
