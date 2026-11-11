@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Ranvier.D5$(RanvierPackageSuffix)</PackageId>
+    <Description>Functional visualization foundations for F#: data, scales, geometry, layouts and reactive scenes using Ranvier signals and Anime.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Data.fs" />
+    <Compile Include="Scale.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Ranvier$(RanvierPackageSuffix)" Version="[0.1.1-preview.2]" />
+    <PackageReference Include="Ranvier.Anime$(RanvierPackageSuffix)" Version="[0.1.0-rc.1]" />
+    <PackageReference Include="Ranvier.Css$(RanvierPackageSuffix)" Version="[0.1.1-alpha.2]" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

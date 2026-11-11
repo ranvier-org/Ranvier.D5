@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarnOn>$(WarnOn);3390</WarnOn>
+    <Deterministic>true</Deterministic>
+    <Version>0.1.0-alpha.1</Version>
+    <Authors>Ranvier contributors</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/ranvier-org/Ranvier.D5</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/ranvier-org/Ranvier.D5</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RanvierPackageSuffix Condition="'$(RanvierTrace)' == 'true'">.Traced</RanvierPackageSuffix>
+  </PropertyGroup>
+</Project>
