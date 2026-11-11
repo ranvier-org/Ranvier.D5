@@ -11,6 +11,7 @@
     <Compile Include="Scene.fs" />
     <Compile Include="Layout.fs" />
     <Compile Include="Spatial.fs" />
+    <Compile Include="Reactive.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Ranvier$(RanvierPackageSuffix)" Version="[0.1.1-preview.2]" />
