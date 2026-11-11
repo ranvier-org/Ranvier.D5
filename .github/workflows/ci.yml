@@ -66,7 +66,10 @@ jobs:
           Ranvier.D5.View.Renderer.passive |> ignore
           graph.Dispose()
           EOF
-          dotnet restore artifacts/consumer/Consumer.fsproj --source "$PWD/artifacts/packages" --source https://api.nuget.org/v3/index.json
+          cat > artifacts/consumer/NuGet.Config <<'EOF'
+          <configuration><packageSources><clear /><add key="local" value="../packages" /><add key="nuget" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>
+          EOF
+          dotnet restore artifacts/consumer/Consumer.fsproj --configfile artifacts/consumer/NuGet.Config
           dotnet run --project artifacts/consumer/Consumer.fsproj -c Release --no-restore
       - uses: actions/upload-artifact@v4
         if: always()

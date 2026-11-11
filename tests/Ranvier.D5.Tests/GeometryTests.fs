@@ -24,6 +24,13 @@ let tests = testList "Geometry and layouts" [
         let result = p 1e-309 1e307 |> Transform.apply matrix |> Transform.apply inverse.Value
         near 1. (result.X / 1e-309)
         near 1. (result.Y / 1e307)
+    testCase "triangular inverse preserves a small shear coefficient" <| fun _ ->
+        let matrix = Transform.create 1e308 0. 1e-308 1e-308 0. 0.
+        let inverse = Transform.tryInverse matrix |> Option.get
+        let mapped = p 0. 1e308 |> Transform.apply matrix
+        let again = mapped |> Transform.apply inverse |> Transform.apply matrix
+        near mapped.X again.X
+        near mapped.Y again.Y
     testCase "stepped zero-thickness areas have zero signed area" <| fun _ ->
         for curve in [Curve.StepBefore; Curve.StepAfter] do
             let commands = Shape.area curve [Some(p 0. 0., p 0. 0.); Some(p 10. 10., p 10. 10.)] |> Path.commands
