@@ -55,7 +55,7 @@ jobs:
           cat > artifacts/consumer/Program.fs <<'EOF'
           open Ranvier
           open Ranvier.D5
-          use graph = new Graph()
+          let graph = new Graph()
           graph.Run(fun () ->
               let source = Api.createSignal 2.
               let mapped = Reactive.derive (fun () -> source.Value) (Scale.map (Scale.linear (0.,4.) (0.,100.)))
@@ -63,6 +63,7 @@ jobs:
               source.Value <- 4.
               if mapped.Value <> 100. then failwith "Packed signal failed")
           Ranvier.D5.View.Renderer.passive |> ignore
+          graph.Dispose()
           EOF
           dotnet restore artifacts/consumer/Consumer.fsproj --source "$PWD/artifacts/packages" --source https://api.nuget.org/v3/index.json
           dotnet run --project artifacts/consumer/Consumer.fsproj -c Release --no-restore
