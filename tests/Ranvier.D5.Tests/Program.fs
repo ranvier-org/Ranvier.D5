@@ -3,4 +3,4 @@ module Ranvier.D5.Tests.Program
 open Expecto
 
 [<EntryPoint>]
-let main args = runTestsWithCLIArgs [] args DataScaleTests.tests
+let main args = runTestsWithCLIArgs [] args (testList "D5" [DataScaleTests.tests; GeometryTests.tests; ReactiveTests.tests])

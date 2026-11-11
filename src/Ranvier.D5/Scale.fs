@@ -67,6 +67,7 @@ module Scale =
 
     /// <summary>Creates a logarithmic scale; domain endpoints must be nonzero and have the same sign.</summary>
     let log basis ((a,b) as domain) range =
+        Check.interval "domain" domain
         Check.positive "basis" basis
         if basis = 1. then invalidArg "basis" "Logarithm base cannot be one."
         if a = 0. || b = 0. || Math.Sign a <> Math.Sign b then invalidArg "domain" "Log domain must have one nonzero sign."
@@ -121,7 +122,11 @@ module Scale =
                 let a,b = scale.Domain
                 let lo = floor (min a b/step)*step
                 let hi = ceil (max a b/step)*step
-                { scale with Domain=(if a<=b then lo,hi else hi,lo) }
+                let low = if scale.Accepts lo && Double.IsFinite(scale.Forward lo) then lo else min a b
+                let high = if scale.Accepts hi && Double.IsFinite(scale.Forward hi) then hi else max a b
+                let domain = if a <= b then low,high else high,low
+                let candidate = create scale.Forward scale.Backward scale.Accepts domain scale.Range
+                { candidate with Clamped = scale.Clamped }
             | _ -> scale
 
     let private categories domain =

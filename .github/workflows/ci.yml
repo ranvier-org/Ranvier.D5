@@ -1,0 +1,92 @@
+name: Foundation CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: foundation-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-latest]
+        traced: [false, true]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          archive_url=""
+          for candidate in https://archive.ubuntu.com/ubuntu https://mirrors.edge.kernel.org/ubuntu https://mirrors.mit.edu/ubuntu; do
+            if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$candidate/dists/noble/InRelease" -o /dev/null; then
+              archive_url="$candidate"
+              break
+            fi
+          done
+          test -n "$archive_url"
+          sudo tee /etc/apt/sources.list.d/ubuntu.sources >/dev/null <<EOF
+          Types: deb
+          URIs: $archive_url
+          Suites: noble noble-updates noble-backports noble-security
+          Components: main restricted universe multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -q
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends xvfb xauth dbus-x11 fonts-dejavu-core libgl1-mesa-dri libglib2.0-0t64 libharfbuzz0b libharfbuzz-icu0 libicu74 libjpeg-turbo8 libepoxy0 libgcrypt20 libsoup-3.0-0 libtasn1-6 libxkbcommon0 libxml2 libpng16-16t64 libsqlite3-0 libwebp7 libwebpdemux2 libwebpmux3 libatomic1 libfreetype6 libfontconfig1 libwoff1 libdrm2 libegl1 libgles2
+      - name: Core contracts
+        run: dotnet run --project tests/Ranvier.D5.Tests -c Release -p:RanvierTrace=${{ matrix.traced }}
+      - name: Native contracts and performance
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          prefix=()
+          if [[ "$RUNNER_OS" == Linux ]]; then prefix=(xvfb-run -a); fi
+          "${prefix[@]}" dotnet run --project tests/Ranvier.D5.Native.Tests -c Release -p:RanvierTrace=${{ matrix.traced }}
+          "${prefix[@]}" dotnet run --project benchmarks/Ranvier.D5.Benchmarks -c Release -p:RanvierTrace=${{ matrix.traced }} -- artifacts/benchmarks.json
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture artifacts/gallery.bmp
+      - name: Pack
+        run: |
+          dotnet pack src/Ranvier.D5 -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+          dotnet pack src/Ranvier.D5.View -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+      - name: Consume packed View and core
+        shell: bash
+        run: |
+          suffix=""
+          if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
+          mkdir -p artifacts/consumer
+          cat > artifacts/consumer/Consumer.fsproj <<EOF
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.0-alpha.1]" /></ItemGroup></Project>
+          EOF
+          cat > artifacts/consumer/Program.fs <<'EOF'
+          open Ranvier
+          open Ranvier.D5
+          let graph = new Graph()
+          graph.Run(fun () ->
+              let source = Api.createSignal 2.
+              let mapped = Reactive.derive (fun () -> source.Value) (Scale.map (Scale.linear (0.,4.) (0.,100.)))
+              if mapped.Value <> 50. then failwith "Packed memo failed"
+              source.Value <- 4.
+              if mapped.Value <> 100. then failwith "Packed signal failed")
+          Ranvier.D5.View.Renderer.passive |> ignore
+          graph.Dispose()
+          EOF
+          cat > artifacts/consumer/NuGet.Config <<'EOF'
+          <configuration><packageSources><clear /><add key="local" value="../packages" /><add key="nuget" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>
+          EOF
+          dotnet restore artifacts/consumer/Consumer.fsproj --configfile artifacts/consumer/NuGet.Config
+          dotnet run --project artifacts/consumer/Consumer.fsproj -c Release --no-restore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-${{ matrix.os }}-${{ matrix.traced }}
+          path: artifacts/

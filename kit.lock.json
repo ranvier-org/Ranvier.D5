@@ -1,0 +1,62 @@
+{
+    "created":  "2026-11-11",
+    "policy":  "Committed upstream default branch only; source working trees preserved",
+    "repositories":  [
+                         {
+                             "name":  "Ranvier",
+                             "url":  "https://github.com/ranvier-org/Ranvier",
+                             "commit":  "a8a4b78b74fcbbab33bce97621f40f6e24d85502",
+                             "ref":  "refs/remotes/origin/master",
+                             "snapshot":  "snapshots/Ranvier"
+                         },
+                         {
+                             "name":  "Ranvier.Anime",
+                             "url":  "https://github.com/ranvier-org/Ranvier.Anime",
+                             "commit":  "79dabde0d101f9465d27e2f90b577e1f45f81f9f",
+                             "ref":  "refs/remotes/origin/main",
+                             "snapshot":  "snapshots/Ranvier.Anime"
+                         },
+                         {
+                             "name":  "Ranvier.Css",
+                             "url":  "https://github.com/ranvier-org/Ranvier.Css",
+                             "commit":  "18ec734aa82b54ca508c680061ee7aad5055c99b",
+                             "ref":  "refs/remotes/origin/main",
+                             "snapshot":  "snapshots/Ranvier.Css"
+                         },
+                         {
+                             "name":  "Ranvier.View",
+                             "url":  "https://github.com/ranvier-org/Ranvier.View",
+                             "commit":  "a11a584c835ced9bcad234cc0066db3cca857949",
+                             "ref":  "refs/remotes/origin/main",
+                             "snapshot":  "snapshots/Ranvier.View"
+                         },
+                         {
+                             "name":  "Ranvier.WebCore",
+                             "url":  "https://github.com/ranvier-org/Ranvier.WebCore",
+                             "commit":  "819ee8d479588f732c55021d4b7ae0b73975a96f",
+                             "ref":  "refs/remotes/origin/main",
+                             "snapshot":  "snapshots/Ranvier.WebCore"
+                         },
+                         {
+                             "name":  "Ranvier.Persistence",
+                             "url":  "https://github.com/ranvier-org/Ranvier.Persistence",
+                             "commit":  "9376289943a4d99dbf74768f0db64bb26998cd54",
+                             "ref":  "refs/remotes/origin/main",
+                             "snapshot":  "snapshots/Ranvier.Persistence"
+                         },
+                         {
+                             "name":  "Ranvier.Examples",
+                             "url":  "https://github.com/ranvier-org/Ranvier.Examples",
+                             "commit":  "16e51a10a39fa9a31fee54875bb0c5de4f60b900",
+                             "ref":  "refs/remotes/origin/main",
+                             "snapshot":  "snapshots/Ranvier.Examples"
+                         },
+                         {
+                             "name":  "Ranvier.Docs",
+                             "url":  "https://github.com/ranvier-org/Ranvier.Docs",
+                             "commit":  "3a6c132523f9eaefafb6beb729e3c7d9263ad9e3",
+                             "ref":  "refs/remotes/origin/main",
+                             "snapshot":  "snapshots/Ranvier.Docs"
+                         }
+                     ]
+}
