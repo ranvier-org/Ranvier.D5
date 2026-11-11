@@ -9,8 +9,8 @@ open Ranvier.View
 open Ranvier.View.Dom
 open Ranvier.View.WebCore
 
-let tests = testList "native scenes" [
-    testCase "keyed scene updates paint and retain DOM identity" <| fun _ ->
+// Native WebCore must be created on the process main thread on macOS.
+let acceptance () =
         use host = WebCoreHost.Create(320, 200)
         use graph = new Graph()
         let container = host.Document.createElement "div"
@@ -28,6 +28,7 @@ let tests = testList "native scenes" [
         host.Frame()
         let original = container.querySelector "[data-d5-key='a']"
         Expect.isNotNull original "mark exists"
+        Expect.equal original.namespaceURI "http://www.w3.org/2000/svg" "native SVG namespace"
         let struct(width, height) = host.PaintSize
         let before = Array.zeroCreate<byte> (width * height * 4)
         host.Paint before
@@ -42,14 +43,19 @@ let tests = testList "native scenes" [
         Expect.isFalse (before = after) "native pixels changed"
         host.Click(40, 40) |> ignore
         Expect.isTrue (events.Contains ("a", "click")) "retained mark receives pointer event"
-        graph.Run(fun () -> source.Value <- make [Mark.text "a" (Point.create 10. 30.) "Hello"])
+        graph.Run(fun () -> source.Value <- make [Mark.text "a" (Point.create 10. 30.) "<script>&\"Hello\"" |> Mark.withLabel (Some "<unsafe>&\"label\"")])
         host.Cycle()
-        Expect.equal ((container.querySelector "text").textContent) "Hello" "same key can change geometry kind"
+        Expect.equal ((container.querySelector "text").textContent) "<script>&\"Hello\"" "same key can change geometry kind"
         graph.Run(fun () -> source.Value <- make [])
         host.Cycle()
         Expect.isNull (container.querySelector "[data-d5-key='a']") "exit removed"
         mounted.Dispose()
-]
+        graph.Run(fun () -> source.Value <- make [box "after-dispose" 10. (Paint.rgb 0 0 0)])
+        host.Cycle()
+        Expect.isNull (container.querySelector "svg") "disposed mount cannot resurrect scene"
 
 [<EntryPoint>]
-let main args = runTestsWithCLIArgs [] args tests
+let main _ =
+    acceptance ()
+    printfn "Native scene acceptance passed: namespace, identity, reorder, paint, events, escaping and disposal."
+    0
