@@ -26,9 +26,17 @@ jobs:
       - name: Linux native dependencies
         if: runner.os == 'Linux'
         run: |
-          sudo tee /etc/apt/sources.list.d/ubuntu.sources >/dev/null <<'EOF'
+          archive_url=""
+          for candidate in https://archive.ubuntu.com/ubuntu https://mirrors.edge.kernel.org/ubuntu https://mirrors.mit.edu/ubuntu; do
+            if curl --fail --silent --show-error --connect-timeout 5 --max-time 10 "$candidate/dists/noble/InRelease" -o /dev/null; then
+              archive_url="$candidate"
+              break
+            fi
+          done
+          test -n "$archive_url"
+          sudo tee /etc/apt/sources.list.d/ubuntu.sources >/dev/null <<EOF
           Types: deb
-          URIs: https://archive.ubuntu.com/ubuntu
+          URIs: $archive_url
           Suites: noble noble-updates noble-backports noble-security
           Components: main restricted universe multiverse
           Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
