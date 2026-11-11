@@ -17,6 +17,13 @@ let tests = testList "Geometry and layouts" [
             let roundtrip = p 1. 1. |> Transform.apply matrix |> Transform.apply inverse.Value
             near 1. roundtrip.X
             near 1. roundtrip.Y
+    testCase "mixed-magnitude inverse does not lose small columns" <| fun _ ->
+        let matrix = Transform.create 1e308 1e308 1e-308 2e-308 0. 0.
+        let inverse = Transform.tryInverse matrix
+        Expect.isSome inverse "finite raw determinant remains usable"
+        let result = p 1e-309 1e307 |> Transform.apply matrix |> Transform.apply inverse.Value
+        near 1. (result.X / 1e-309)
+        near 1. (result.Y / 1e307)
     testCase "stepped zero-thickness areas have zero signed area" <| fun _ ->
         for curve in [Curve.StepBefore; Curve.StepAfter] do
             let commands = Shape.area curve [Some(p 0. 0., p 0. 0.); Some(p 10. 10., p 10. 10.)] |> Path.commands

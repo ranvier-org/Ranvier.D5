@@ -75,12 +75,17 @@ module Transform =
             let a,c = matrix.A / row1, matrix.C / row1
             let b,d = matrix.B / row2, matrix.D / row2
             let determinant = a*d-b*c
-            if determinant = 0. then None
+            let rawDeterminant = matrix.A*matrix.D-matrix.B*matrix.C
+            let rawUsable = rawDeterminant <> 0. && Double.IsFinite rawDeterminant
+            if determinant = 0. && not rawUsable then None
             else
                 let divide numerator row =
                     let value = numerator / determinant
                     if Double.IsFinite value then value / row else (numerator / row) / determinant
-                let ia,ib,ic,id = divide d row1, divide -b row1, divide -c row2, divide a row2
+                let ia,ib,ic,id =
+                    if determinant = 0. then
+                        matrix.D/rawDeterminant, -matrix.B/rawDeterminant, -matrix.C/rawDeterminant, matrix.A/rawDeterminant
+                    else divide d row1, divide -b row1, divide -c row2, divide a row2
                 let values = [ia; ib; ic; id; -(ia*matrix.E+ic*matrix.F); -(ib*matrix.E+id*matrix.F)]
                 if List.forall Double.IsFinite values then Some (create values[0] values[1] values[2] values[3] values[4] values[5]) else None
     /// <summary>Serializes a culture-independent SVG matrix.</summary>
