@@ -1,0 +1,42 @@
+[
+  {
+    "Name": "join-10000",
+    "MedianMs": 2.4615,
+    "P95Ms": 5.8968,
+    "MedianBytes": 4420648,
+    "LimitMs": 150,
+    "LimitBytes": 12000000
+  },
+  {
+    "Name": "scale-100000",
+    "MedianMs": 3.022,
+    "P95Ms": 5.6991,
+    "MedianBytes": 2400072,
+    "LimitMs": 100,
+    "LimitBytes": 12000000
+  },
+  {
+    "Name": "nearest-1000-in-10000",
+    "MedianMs": 1.2748,
+    "P95Ms": 1.695,
+    "MedianBytes": 304584,
+    "LimitMs": 100,
+    "LimitBytes": 12000000
+  },
+  {
+    "Name": "line-10000",
+    "MedianMs": 2.925,
+    "P95Ms": 5.7719,
+    "MedianBytes": 3527696,
+    "LimitMs": 150,
+    "LimitBytes": 16000000
+  },
+  {
+    "Name": "native-retained-500-paint",
+    "MedianMs": 8.1766,
+    "P95Ms": 14.2873,
+    "MedianBytes": 1788632,
+    "LimitMs": 250,
+    "LimitBytes": 32000000
+  }
+]

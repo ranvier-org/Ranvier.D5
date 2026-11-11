@@ -5,6 +5,10 @@ open Ranvier
 open Ranvier.D5
 
 let tests = testList "reactivity and interaction" [
+    testCase "nice preserves logarithmic domains" <| fun _ ->
+        let scale = Scale.log 10. (0.1, 9.) (0., 1.) |> Scale.nice 4
+        Expect.isTrue (System.Double.IsFinite(Scale.map scale 1.)) "nice log remains usable"
+        Expect.throwsT<System.ArgumentException> (fun () -> Scale.log 10. (nan, 9.) (0., 1.) |> ignore) "nonfinite domain rejected clearly"
     testCase "transition retargets from its current sample" <| fun _ ->
         let ease = Ranvier.Anime.Ease.named "linear"
         let segment = Transition.start 0. 100. ease Ranvier.Anime.Utils.lerp 0. 10.
