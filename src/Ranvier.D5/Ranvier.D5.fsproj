@@ -7,7 +7,7 @@
   <ItemGroup>
     <Compile Include="Contracts.fs" />
     <Compile Include="Data.fs" />
-    <Compile Include="Statistics.fs" />
+    <Compile Include="Statistics.fs" /><Compile Include="Random.fs" />
     <Compile Include="Scale.fs" />
     <Compile Include="TimeTicks.fs" />
     <Compile Include="Format.fs" />

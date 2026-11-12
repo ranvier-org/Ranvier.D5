@@ -24,7 +24,7 @@ Baseline: alpha.1 / 52ef102. This ledger separates algorithms from native infras
 | path | Immutable SVG commands | Task 2 shapes use existing paths |
 | polygon | Absent | Task 6 |
 | quadtree | Absent; immutable k-d tree is a different algorithm | Task 6 |
-| random | Anime seeded closure available | Task 11 explicit-state distributions; no hidden random use now |
+| random | Anime seeded closure available | Task 11 [explicit-state distributions](random.md) implemented: immutable xoshiro256** state and the d3-random distribution set |
 | scale | Partial continuous/categorical/threshold/quantile/UTC | Task 2 ticks, piecewise, inversion extents |
 | scale-chromatic | Absent beyond user colors | Task 2 palettes with upstream attribution |
 | selection | View keyed regions plus immutable Scene/Data.join | Reuse; task 1 groups/definitions, no mutable selection DSL |
