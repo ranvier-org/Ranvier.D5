@@ -124,6 +124,19 @@ let tests = testList "conic and transverse Mercator projections" [
             let expected=item.GetProperty("area").GetDouble()
             let tolerance=max (1e-4*expected) (item.GetProperty("perimeter").GetDouble()*2.*precision)
             Expect.isLessThan (abs(abs(actual |> List.sumBy Polygon.area)-expected)) tolerance (sprintf "%A projected world area" kind)
+    testCase "meridians into a clamped conformal pole stay within precision at the depth limit" <| fun _ ->
+        let projection=Projection.create {ProjectionConfig.defaultValue (ProjectionKind.ConicConformal(20.,50.)) with Scale=40.} |> ok
+        let grid=GeoGeometry.MultiLineString (Graticule.create GraticuleConfig.defaultValue |> ok).Lines
+        Expect.isOk (GeoPath.project {GeoPathOptions.defaultValue with Precision=0.25} projection grid) "straight stretched meridians are accurate"
+        let meridian=GeoGeometry.LineString[p 30. 0.;p 30. -89.999999]
+        let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=0.25} projection meridian |> ok
+        let points=paths |> List.collect vertices
+        let first,last=List.head points,List.last points
+        for point in points do
+            let cross=(last.X-first.X)*(point.Y-first.Y)-(last.Y-first.Y)*(point.X-first.X)
+            Expect.isLessThan (abs cross/Double.Hypot(last.X-first.X,last.Y-first.Y)) 0.25 "meridian stays on its straight image"
+        let large=Projection.create {ProjectionConfig.defaultValue (ProjectionKind.ConicConformal(20.,50.)) with Scale=4000.} |> ok
+        Expect.isError (GeoPath.project {GeoPathOptions.defaultValue with Precision=0.25;MaxSubdivisionDepth=1} large (GeoGeometry.LineString[p -60. 40.;p 60. 40.])) "a curved arc still reports unmet precision"
     testCase "equal-area conics preserve the sphere's area" <| fun _ ->
         let projection=Projection.create {ProjectionConfig.defaultValue (ProjectionKind.ConicEqualArea(29.5,45.5)) with Scale=100.} |> ok
         let world=GeoPath.project {GeoPathOptions.defaultValue with Precision=0.01} projection GeoGeometry.Sphere |> ok |> rings

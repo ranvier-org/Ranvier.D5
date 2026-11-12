@@ -115,6 +115,11 @@ let tests = testList "azimuthal projections" [
                     let reference=expected[index]
                     for point,target in [actual.Head,reference[0];List.last actual,reference[reference.GetArrayLength()-1]] do
                         Expect.isLessThan (Double.Hypot(point.X-target[0].GetDouble(),point.Y-target[1].GetDouble())) 1e-6 (name+" fragment endpoint")
+    testCase "arcs ending exactly on the orthographic limb keep their snapped boundary point" <| fun _ ->
+        let projection=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Orthographic with Scale=92.;Rotation=GeoRotation.create -120. -20. 0. |> ok} |> ok
+        let lines=(Graticule.create GraticuleConfig.defaultValue |> ok).Lines
+        Expect.isOk (GeoPath.project GeoPathOptions.defaultValue projection (GeoGeometry.MultiLineString lines)) "graticule touching the limb"
+        Expect.isOk (GeoPath.project GeoPathOptions.defaultValue projection (GeoGeometry.LineString[p -152.5 0.;p -150. 0.])) "edge ending on the limb"
     testCase "Sphere draws the projected clip circle" <| fun _ ->
         for kind in ProjectionKind.Orthographic::azimuthal do
             for angle in [30.;60.] do

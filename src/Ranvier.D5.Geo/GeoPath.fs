@@ -46,24 +46,35 @@ module GeoPath =
                     else
                         let ux,uy=dx/length,dy/length
                         abs(ux*my-uy*mx),(ux*mx+uy*my)/length
+                // Returns (screen deviation exceeds precision, sample spacing is uneven) for a quarter sample.
+                let quarter amount =
+                    spend 1L
+                    let sample=interpolate amount |> screen
+                    let qx,qy=sample.X-a.X,sample.Y-a.Y
+                    if not(Double.IsFinite qx && Double.IsFinite qy) then
+                        raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
+                    if length=0. then struct(Double.Hypot(qx,qy)>options.Precision,false)
+                    else
+                        let ux,uy=dx/length,dy/length
+                        struct(abs(ux*qy-uy*qx)>options.Precision,abs((ux*qx+uy*qy)/length-amount)>0.3)
                 let mutable subdivide=error>options.Precision || abs(parameter-0.5)>0.3 || arc.Angle>Math.PI/6.
                 if not subdivide then
-                    let quarterExceeds amount =
-                        spend 1L
-                        let sample=interpolate amount |> screen
-                        let qx,qy=sample.X-a.X,sample.Y-a.Y
-                        if not(Double.IsFinite qx && Double.IsFinite qy) then
-                            raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
-                        if length=0. then Double.Hypot(qx,qy)>options.Precision
-                        else
-                            let ux,uy=dx/length,dy/length
-                            abs(ux*qy-uy*qx)>options.Precision || abs((ux*qx+uy*qy)/length-amount)>0.3
-                    subdivide<-quarterExceeds 0.25 || quarterExceeds 0.75
+                    let struct(firstDeviates,firstUneven)=quarter 0.25
+                    let struct(secondDeviates,secondUneven)=quarter 0.75
+                    subdivide<-firstDeviates || firstUneven || secondDeviates || secondUneven
                 if subdivide then
                     if depth>=options.MaxSubdivisionDepth then
-                        raise(Rejected(BudgetExceeded "Projected line cannot meet precision within its subdivision depth."))
-                    subdivideArc (depth+1) first midpoint firstHalf a middle
-                    subdivideArc (depth+1) midpoint last secondHalf middle b
+                        // Spacing and arc-length rules only guard folds the deviation test could miss. At the depth limit a
+                        // chord whose midpoint lies on it and whose samples stay within precision is accurate, as near a
+                        // stretched conformal pole; otherwise the requested screen precision is genuinely unmet.
+                        let struct(firstDeviates,_)=quarter 0.25
+                        let struct(secondDeviates,_)=quarter 0.75
+                        if error>options.Precision || parameter<0. || parameter>1. || firstDeviates || secondDeviates then
+                            raise(Rejected(BudgetExceeded "Projected line cannot meet precision within its subdivision depth."))
+                        emit b
+                    else
+                        subdivideArc (depth+1) first midpoint firstHalf a middle
+                        subdivideArc (depth+1) midpoint last secondHalf middle b
                 else emit b
         // The precision test is monotone in arc length, so a cheap upper bound that passes lets short
         // cylindrical arcs skip solving their great circle.

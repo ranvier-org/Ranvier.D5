@@ -230,7 +230,8 @@ module Projection =
             | ProjectionKind.Orthographic ->
                 let struct(_,cosLongitude)=GeoMath.sinCosDegrees rotated.Longitude
                 let struct(_,cosLatitude)=GeoMath.sinCosDegrees rotated.Latitude
-                cosLongitude*cosLatitude >= 0.
+                // Points snapped onto the limb by cap clipping can round a unit roundoff behind it.
+                cosLongitude*cosLatitude >= -1e-12
             | _ -> true
         if not visible then ValueNone
         else
