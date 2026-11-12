@@ -116,6 +116,15 @@ let main args =
         results.Add(measure "hexbin-100000" 150. 40000000L (fun () ->
             let bins=Hexbin.aggregate hexConfig densityPoints |> Result.defaultWith(fun errors -> failwithf "%A" errors)
             if (bins |> List.sumBy(fun bin -> bin.Members.Length))<>100000 then failwith "Hexbin lost source identities."))
+        let densityChartSpec=Ranvier.D5.Charts.DensityChartSpec.create (Ranvier.D5.Charts.ChartFrame.create 800. 600. "Density") (fun _ -> Paint.currentColor)
+        let heatGrid=Density.grid (DensityConfig.create (Bounds.create 0. 0. 1024. 1024.) 64 64) densityPoints |> Result.defaultWith(fun e -> failwithf "%A" e)
+        results.Add(measure "density-heatmap-chart-4096" 75. 24000000L (fun () ->
+            Ranvier.D5.Charts.DensityChart.heatmap densityChartSpec heatGrid |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+        let hexChart()=Ranvier.D5.Charts.DensityChart.hexbin densityChartSpec hexConfig densityPoints |> Result.defaultWith(fun e -> failwithf "%A" e)
+        results.Add(measure "hexbin-chart-100000" 200. 64000000L (fun () -> hexChart() |> ignore))
+        let hexOutput=(hexChart()).Chart
+        results.Add(measure "hexbin-region-pick-100" 100. 1000000L (fun () ->
+            for i in 0..99 do Ranvier.D5.Charts.HitTest.at (Point.create (40.+float i*7.) (20.+float(i%50)*10.)) hexOutput |> ignore))
         let series=[for i in 0..99999 -> {SeriesSample.Id=string i;X=float i;Y=Some(sin(float i*0.01)+(if i%997=0 then 3. else 0.))}]
         for label,reduce,limit,bytes in ["minmax",Sampling.minMax,50.,16000000L;"lttb",Sampling.lttb,75.,24000000L] do
             results.Add(measure ("sampling-"+label+"-100000-to-1000") limit bytes (fun () ->

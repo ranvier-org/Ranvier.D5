@@ -35,6 +35,9 @@ module Facet =
                     | Group(group,children) -> Group({group with Clip=Option.map rename group.Clip},List.map node children)
                 let translate point=Point.create (point.X+x) (point.Y+y)
                 let geometry = function
+                    | HitRegion(included,excluded,anchor) ->
+                        let polygon (p:HitPolygon)={Outer=List.map translate p.Outer;Holes=List.map (List.map translate) p.Holes}
+                        HitRegion(List.map polygon included,List.map polygon excluded,translate anchor)
                     | HitPoint(center,radius) -> HitPoint(translate center,radius)
                     | HitBounds b -> HitBounds(Bounds.create (Bounds.x b+x) (Bounds.y b+y) (Bounds.width b) (Bounds.height b))
                     | HitSector(center,inner,outer,start,finish) -> HitSector(translate center,inner,outer,start,finish)

@@ -5,7 +5,9 @@ open Ranvier.D5
 type Margin = { Top:float; Right:float; Bottom:float; Left:float }
 type ChartFrame = { Viewport:Viewport; Margin:Margin; Title:string }
 type SemanticMark = { MarkPath:string list; DataIds:string list; Description:string }
-type HitGeometry = HitBounds of Bounds | HitPoint of Point * radius:float | HitSector of center:Point * inner:float * outer:float * start:float * finish:float
+/// A polygon with boundary-inclusive outer ring and boundary-exclusive holes; winding order is immaterial.
+type HitPolygon = { Outer:Point list; Holes:Point list list }
+type HitGeometry = HitBounds of Bounds | HitPoint of Point * radius:float | HitSector of center:Point * inner:float * outer:float * start:float * finish:float | HitRegion of included:HitPolygon list * excluded:HitPolygon list * anchor:Point
 type HitTarget = { MarkPath:string list; DataIds:string list; Geometry:HitGeometry; Clip:Bounds option }
 type ChartOutput = { Scene:Scene; PlotBounds:Bounds; Semantics:SemanticMark list; HitTargets:HitTarget list; Description:string }
 type DomainPolicy = Auto | IncludeZero | Fixed of float * float
@@ -19,11 +21,24 @@ module ChartFrame =
 
 [<RequireQualifiedAccess>]
 module HitTest =
+    let private containsPolygon point (polygon:HitPolygon) =
+        let mutable left,right,top,bottom=infinity,-infinity,infinity,-infinity
+        for vertex in polygon.Outer do
+            left<-min left vertex.X;right<-max right vertex.X
+            top<-min top vertex.Y;bottom<-max bottom vertex.Y
+        point.X>=left && point.X<=right && point.Y>=top && point.Y<=bottom &&
+        Polygon.contains point polygon.Outer &&
+        not (polygon.Holes |> List.exists (Polygon.contains point))
+    let rec private containsAny point polygons =
+        match polygons with
+        | [] -> false
+        | polygon::rest -> containsPolygon point polygon || containsAny point rest
     let visibleAt point target = target.Clip |> Option.forall (Bounds.contains point)
     let at point output =
         output.HitTargets |> List.filter (fun target ->
             visibleAt point target &&
             match target.Geometry with
+            | HitRegion(included,excluded,_) -> containsAny point included && not (containsAny point excluded)
             | HitBounds bounds -> Bounds.contains point bounds
             | HitPoint(center,radius) -> System.Double.Hypot(point.X-center.X,point.Y-center.Y)<=radius
             | HitSector(center,inner,outer,start,finish) ->

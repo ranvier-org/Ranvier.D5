@@ -79,6 +79,7 @@ module Hexbin =
           | HexbinAbort error -> Error [error]
           | :? System.ArgumentException -> Error [InvalidObservation "Hexbin geometry exceeds the finite coordinate range."]
     let aggregate config points = aggregateWithCancellation System.Threading.CancellationToken.None config points
+    let polygon (bin:HexBin) = vertices bin.Center bin.Radius |> Array.toList
     let path (bin:HexBin) =
-        let points=vertices bin.Center bin.Radius |> Array.toList
+        let points=polygon bin
         Path.ofCommands(MoveTo points.Head::(points.Tail |> List.map LineTo) @ [Close])
