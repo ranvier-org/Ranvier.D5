@@ -37,10 +37,8 @@ module internal ForceKernels =
                         if i<>j then add i positions[j] masses[j] j
             else
                 let tree=Quadtree.buildWithCancellation token (fun i -> positions[i]) (fun i -> masses[i]) (seq{0..positions.Length-1})
-                for i in 0..positions.Length-1 do
-                    check token i
-                    let point=positions[i]
-                    Quadtree.visit (fun cell ->
+                Quadtree.visitIndexed positions.Length (fun i cell ->
+                        let point=positions[i]
                         token.ThrowIfCancellationRequested()
                         if bounded && near point cell.Extent>config.MaxDistance then false else
                         let e=cell.Extent
@@ -66,9 +64,7 @@ module internal ForceKernels =
                     check token i
                     predicted[i]<-if pinned[i] then positions[i] else Point.create (positions[i].X+vx[i]) (positions[i].Y+vy[i])
                 let tree=Quadtree.buildWithCancellation token (fun i -> predicted[i]) (fun _ -> 1.) (seq{0..positions.Length-1})
-                for i in 0..positions.Length-1 do
-                    check token i
-                    Quadtree.visit(fun cell ->
+                Quadtree.visitIndexed positions.Length (fun i cell ->
                         token.ThrowIfCancellationRequested()
                         if near predicted[i] cell.Extent>radii[i]+maxRadius then false else
                         cell.Items |> List.iteri(fun index item ->
