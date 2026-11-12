@@ -82,6 +82,16 @@ not include the constant-size axes or the line mark. `Sampling.MaxInput` bounds
 source validation and summary work. Median calculation sorts the original
 measured values, so this is background work for large inputs, not a pointer handler.
 
+Use `ChartInteraction.attachWithSelectionDomain` for reduced or windowed views.
+Its domain callback supplies the valid, nonmissing source IDs separately from
+visible chart semantics. Selected IDs survive changes to the visible subset and
+clear when removed from the source domain. Hover and keyboard focus remain
+visible-only; a reappearing point regains selection, not its previous focus.
+Compute the source-ID set on the worker when source data changes and reuse it for
+budget-only updates. The gallery does this once for its immutable source.
+Reconciliation with 100,000 source IDs and 1,000 visible IDs measured 0.57 ms median,
+1.18 ms p95 and 699 KB allocated locally; CI gates this operation at 10 ms/1 MB.
+
 The native examples start with 100,000 rows, including five missing intervals.
 Captures assert 95,000 original measurements, a budget of 600 visible records,
 all five gaps, the latest worker result, native hover and keyboard selection.

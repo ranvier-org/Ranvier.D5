@@ -148,6 +148,13 @@ let main args =
             results.Add(measure ("reduced-series-"+label+"-100000-to-1000") 150. bytes (fun () ->
                 let output=Ranvier.D5.Charts.ReducedSeriesChart.build spec series |> Result.defaultWith(fun e -> failwithf "%A" e)
                 if output.Summary.Count<>100000 || output.Visible.Length>1000 then failwith "Series summary used reduced observations or output exceeded budget."))
+        let sourceIds=series |> List.map(fun sample -> sample.Id) |> Set.ofList
+        let visibleIds=[for i in 0..999 -> string(i*100)]
+        let selectedIds=set ["1";"99999"]
+        let selection={Ranvier.D5.Charts.Selection.empty with Selected=selectedIds}
+        results.Add(measure "selection-reconcile-100000-source-1000-visible" 10. 1000000L (fun () ->
+            let output=Ranvier.D5.Charts.Selection.reconcile sourceIds visibleIds selection
+            if output.Selected<>selectedIds || output.Available.Length<>1000 then failwith "Source selection was lost or visible interaction expanded."))
         let kdeSamples=[for i in 0..999 -> float i,1.]
         let kdeQueries=[for i in 0..511 -> float i*2.]
         results.Add(measure "density-kde-1000-by-512" 30. 1000000L (fun () -> Density.kde1d 10. kdeSamples kdeQueries |> Result.defaultWith(fun errors -> failwithf "%A" errors) |> ignore))

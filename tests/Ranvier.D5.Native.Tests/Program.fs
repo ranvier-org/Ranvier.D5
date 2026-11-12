@@ -182,6 +182,28 @@ let acceptance () =
         graph.Run(fun () -> scopedChart.Value<-{scopedChart.Value with Semantics=[scopedChart.Value.Semantics[1]]})
         Expect.isEmpty (graph.Run(fun () -> scopedInput.Gesture.Pointers)) "removed scoped target cancels despite identical sibling leaf"
         scopedOwner.Dispose()
+        let seriesOwner,seriesInput,seriesData,seriesBudget=graph.Run(fun () -> Api.createRoot(fun owner ->
+            let data=Api.createSignal [for i in 0..4 -> {SeriesSample.Id=string i;X=float i;Y=Some(if i=2 then 10. else 0.)}]
+            let budget=Api.createSignal 5
+            let frame=Ranvier.D5.Charts.ChartFrame.create 300. 180. "Selection reduction"
+            let chart=Reactive.derive (fun () -> data.Value,budget.Value) (fun (values,count) ->
+                let spec={Ranvier.D5.Charts.ReducedSeriesSpec.create frame count with Reduction=Ranvier.D5.Charts.SeriesReduction.Lttb}
+                Ranvier.D5.Charts.ReducedSeriesChart.build spec values |> Result.defaultWith(fun e -> failwithf "%A" e))
+            let domain=Reactive.derive (fun () -> data.Value) (List.choose(fun sample -> sample.Y |> Option.map(fun _ -> sample.Id)) >> Set.ofList)
+            let svg=host.Document.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
+            let input=ChartInteraction.attachWithSelectionDomain svg (fun () -> config) (fun () -> chart.Value.Chart) (fun () -> domain.Value) ignore
+            owner,input,data,budget))
+        for _ in 1..3 do seriesInput.Send(InputEvent.Key "ArrowRight")
+        seriesInput.Send(InputEvent.Key "Enter")
+        Expect.equal (graph.Run(fun () -> seriesInput.Selection.Selected)) (set ["2"]) "keyboard selects original sample"
+        graph.Run(fun () -> seriesBudget.Value<-2)
+        Expect.equal (graph.Run(fun () -> seriesInput.Selection.Selected)) (set ["2"]) "sampling does not delete source selection"
+        Expect.equal (graph.Run(fun () -> seriesInput.Selection.Focused)) None "hidden sample leaves keyboard targets"
+        graph.Run(fun () -> seriesBudget.Value<-5)
+        Expect.equal (graph.Run(fun () -> seriesInput.Selection.Selected)) (set ["2"]) "visible sample regains selection"
+        graph.Run(fun () -> seriesData.Value<-seriesData.Value |> List.map(fun sample -> if sample.Id="2" then {sample with Y=None} else sample))
+        Expect.isEmpty (graph.Run(fun () -> seriesInput.Selection.Selected)) "missing measurement is no longer selectable"
+        seriesOwner.Dispose()
         linkedOwner.Dispose()
         host.Cycle()
         Expect.equal (host.Document.querySelectorAll("svg").length) 0u "linked owner removes both views"

@@ -12,6 +12,25 @@ let private group id values : ViolinGroup =
 let private spec={ViolinSpec.create frame (-5.,5.) 0.5 with Resolution=101}
 
 let tests=testList "Density distribution recipes" [
+    testCase "reduced-series selection survives sampling but clears actual source exits" <| fun _ ->
+        let source=[for i in 0..4 -> {SeriesSample.Id=string i;X=float i;Y=Some(if i=2 then 10. else 0.)}]
+        let build count=ReducedSeriesChart.build {ReducedSeriesSpec.create frame count with Reduction=SeriesReduction.Lttb} source |> ok
+        let ids (output:ReducedSeriesOutput)=output.Chart.Semantics |> List.collect(fun item -> item.DataIds)
+        let original=build 5
+        let selected=Selection.empty |> Selection.update(SelectionMessage.Available(ids original))
+                     |> Selection.update(SelectionMessage.Focus(Some "2"))
+                     |> Selection.update SelectionMessage.SelectFocused
+                     |> Selection.update(SelectionMessage.Hover(Some "2"))
+        let domain=set ["0";"1";"2";"3";"4"]
+        let reduced=Selection.reconcile domain (ids(build 2)) selected
+        Expect.equal reduced.Selected (set ["2"]) "source observation survives visible reduction"
+        Expect.equal reduced.Focused None "hidden points are not keyboard targets"
+        Expect.equal reduced.Hovered None "hidden points are not tooltip targets"
+        let restored=Selection.reconcile domain (ids original) reduced
+        Expect.equal restored.Selected (set ["2"]) "selection reappears with original sample"
+        let removed=Selection.reconcile (Set.remove "2" domain) ["0";"4"] restored
+        Expect.isEmpty removed.Selected "actual source exit or missing observation clears selection"
+
     testCase "reduced series retain original statistics even when reduction drops a spike" <| fun _ ->
         let source=[for i in 0..4 -> {SeriesSample.Id=string i;X=float i;Y=Some(if i=2 then 10. else 0.)}]
         let config={ReducedSeriesSpec.create frame 2 with Reduction=SeriesReduction.Lttb}
