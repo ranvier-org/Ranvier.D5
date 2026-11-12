@@ -10,7 +10,7 @@
     <Compile Include="Statistics.fs" /><Compile Include="Random.fs" />
     <Compile Include="Scale.fs" />
     <Compile Include="TimeTicks.fs" />
-    <Compile Include="Format.fs" />
+    <Compile Include="Format.fs" /><Compile Include="Dsv.fs" />
     <Compile Include="Geometry.fs" />
     <Compile Include="Chord.fs" />
     <Compile Include="Ribbon.fs" />

@@ -62,6 +62,10 @@ let main args =
             Distribution.samples 100000 normalDistribution (RandomState.create 7UL) |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
         results.Add(measure "random-poisson-250-100000" 30. 1000000L (fun () ->
             Distribution.samples 100000 poissonDistribution (RandomState.create 7UL) |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+        let dsvText=Dsv.format DsvConfig.csv {Header=[for column in 0..9 -> sprintf "c%d" column];Rows=[for row in 0..9999 -> [for column in 0..9 -> if column%3=0 then sprintf "\"q%d, %d\"" row column else string(row*column)]]}
+        results.Add(measure "dsv-parse-10000x10" 120. 12000000L (fun () ->
+            let table=Dsv.parse DsvConfig.csv dsvText |> Result.defaultWith(fun e -> failwithf "%A" e)
+            if table.Rows.Length<>10000 then failwith "DSV row count"))
         results.Add(measure "orientation-100000" 10. 1000000L (fun () -> for i in 0..99999 do Predicates.orient2d points[i%9998] points[i%9998+1] (Point.create 200. 300.) |> ignore))
         results.Add(measure "orientation-exact-10000" 30. 10000000L (fun () -> for _ in 0..9999 do Predicates.orient2d (Point.create 0. 0.) (Point.create 1e-300 0.) (Point.create 0. 1e-300) |> ignore))
         results.Add(measure "polygon-hull-10000" 60. 20000000L (fun () -> Polygon.hull (Array.toList points) |> ignore))
