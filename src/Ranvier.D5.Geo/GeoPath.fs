@@ -65,7 +65,18 @@ module GeoPath =
                     subdivideArc (depth+1) first midpoint firstHalf a middle
                     subdivideArc (depth+1) midpoint last secondHalf middle b
                 else emit b
+        // The precision test is monotone in arc length, so a cheap upper bound that passes lets short
+        // cylindrical arcs skip solving their great circle.
+        let shortEnough (first:GeoPosition) (last:GeoPosition) =
+            cylindrical &&
+            let bound=GeoMath.distanceBound first last*(Math.PI/180.)
+            let latitudeLimit=min (abs first.Latitude) (abs last.Latitude)*(Math.PI/180.)+bound
+            bound<=Math.PI/6. && latitudeLimit<Math.PI/2. && scale*bound/cos(latitudeLimit)*(1.+1e-12)<=options.Precision
         fun depth (first:GeoPosition) (last:GeoPosition) (a:Point) (b:Point) ->
+            if shortEnough first last then
+                spend 1L
+                emit b
+            else
             match GeoArc.create first last with
             | Ok arc -> subdivideArc depth first last arc a b
             | Error errors -> raise(Rejected errors.Head)

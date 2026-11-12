@@ -70,6 +70,11 @@ module internal GeoMath =
         let north=sinDifference*cosHalf*cosHalf+sinSum*sinHalf*sinHalf
         struct(atan2 (Double.Hypot(east,north)) (sin0*sin1+cos0*cos1*cosDelta),east,north)
 
+    /// <summary>An upper bound in degrees on the great-circle distance: travel along a meridian, then a parallel, is never shorter.</summary>
+    let distanceBound (first:GeoPosition) (last:GeoPosition) =
+        let turn=abs(first.Longitude-last.Longitude)%360.
+        abs(first.Latitude-last.Latitude)+(if turn>180. then 360.-turn else turn)
+
 /// <summary>Angular measurements on a unit sphere.</summary>
 module Geodesic =
     /// <summary>Returns the shortest great-circle distance in radians, in [0,pi].</summary>
