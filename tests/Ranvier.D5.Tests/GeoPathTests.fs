@@ -26,11 +26,114 @@ let private polygonRings paths =
 
 [<Tests>]
 let tests = testList "geographic paths" [
+    testCase "Mercator clips pole endpoints and outside-to-outside arcs to its finite world" <| fun _ ->
+        let projected=projection ProjectionKind.Mercator
+        let options={GeoPathOptions.defaultValue with Precision=0.0001}
+        for source in [[p 0. -89.;p 0. 89.];[p 25. -90.;p 25. 0.;p 25. 90.]] do
+            let paths=GeoPath.project options projected (GeoGeometry.LineString source) |> ok
+            Expect.equal paths.Length 1 "continuous visible meridian"
+            let vertices=Path.commands paths.Head |> List.choose(function MoveTo point|LineTo point -> Some point | _ -> None)
+            Expect.isLessThan (abs(vertices.Head.Y-Math.PI)) 1e-10 "south boundary"
+            Expect.isLessThan (abs((List.last vertices).Y+Math.PI)) 1e-10 "north boundary"
+            for point in vertices do Expect.isLessThanOrEqual (abs point.Y) (Math.PI+1e-10) "finite world"
+    testCase "Mercator removes wholly polar arcs and splits a visible route over a pole" <| fun _ ->
+        let projected=projection ProjectionKind.Mercator
+        let run points=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString points) |> ok
+        Expect.isEmpty (run [p -20. 89.;p 20. 89.]) "north cap is hidden"
+        let paths=run [p -90. 80.;p 90. 80.]
+        Expect.equal paths.Length 2 "no bridge across the excluded pole"
+        for path in paths do
+            for command in Path.commands path do
+                match command with
+                | MoveTo point | LineTo point -> Expect.isLessThanOrEqual (abs point.Y) (Math.PI+1e-10) "clipped before projecting"
+                | _ -> failtest "line commands only"
+    testCase "Mercator boundary touches do not create fragments and crossings keep seam signs" <| fun _ ->
+        let limit=atan(sinh Math.PI)*180./Math.PI
+        let projected=projection ProjectionKind.Mercator
+        let run points=GeoPath.project {GeoPathOptions.defaultValue with Precision=0.0001} projected (GeoGeometry.LineString points) |> ok
+        Expect.isEmpty (run [p -20. limit;p 20. limit]) "outside arc touching the band only at its endpoints"
+        for latitude in [limit;limit-1e-8] do
+            Expect.equal (run [p 0. latitude;p 0. 0.]).Length 1 "boundary entry survives"
+        Expect.equal (run [p -30. 84.9;p 30. 84.9]).Length 2 "two visible endpoints can have an invisible middle"
+        let seam=run [p 170. 80.;p 180. 89.;p -170. 80.]
+        Expect.equal seam.Length 2 "polar seam excursion"
+        let first=Path.commands seam.Head |> List.choose(function MoveTo point|LineTo point -> Some point | _ -> None)
+        let last=Path.commands seam[1] |> List.choose(function MoveTo point|LineTo point -> Some point | _ -> None)
+        Expect.isTrue (first |> List.forall(fun point -> point.X>0.)) "east side remains positive"
+        Expect.isTrue (last |> List.forall(fun point -> point.X<0.)) "west side remains negative"
+        Expect.isError (GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString[p 0. -90.;p 0. 90.])) "ambiguous polar antipodes need a waypoint"
+    testCase "Mercator clipping composes with rotation center viewport and budgets" <| fun _ ->
+        let rotation=GeoRotation.create 30. 20. 10. |> ok
+        let baseConfig={ProjectionConfig.defaultValue ProjectionKind.Mercator with Scale=100.;Center=p 10. 20.;Translate={X=230.;Y=170.}}
+        let projected=Projection.create {baseConfig with Rotation=rotation} |> ok
+        let unrotated=Projection.create baseConfig |> ok
+        let points=[p -60. -89.;p -45. 0.;p 50. 89.]
+        let options={GeoPathOptions.defaultValue with Precision=0.01;ClipExtent=Some(Bounds.create -100. -100. 600. 600.)}
+        let actual=GeoPath.project options projected (GeoGeometry.LineString points) |> ok
+        let expected=GeoPath.project options unrotated (GeoGeometry.LineString(List.map (GeoRotation.apply rotation) points)) |> ok
+        let vertices paths=paths |> List.collect(Path.commands >> List.choose(function MoveTo point|LineTo point -> Some point | _ -> None))
+        Expect.equal actual.Length expected.Length "rotation precedes band clipping"
+        for a,b in List.zip (vertices actual) (vertices expected) do
+            Expect.isLessThan (Point.distanceSquared a b) 1e-18 "same transformed stream"
+        let geometry=GeoGeometry.LineString[p 0. -89.;p 0. 89.]
+        for bounded in [{GeoPathOptions.defaultValue with MaxOutputPoints=1};{GeoPathOptions.defaultValue with MaxWork=12L};{GeoPathOptions.defaultValue with MaxBufferedPoints=1}] do
+            Expect.isError (GeoPath.project bounded unrotated geometry) "atomic budget rejection"
+    testCase "Mercator polygon complement emits the finite boundary and preserves its hole" <| fun _ ->
+        let ring=[p -10. -10.;p -10. 10.;p 10. 10.;p 10. -10.;p -10. -10.]
+        let projected=projection ProjectionKind.Mercator
+        let small=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.Polygon[ring]) |> ok |> polygonRings
+        let complement=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.Polygon[List.rev ring]) |> ok |> polygonRings
+        Expect.equal small.Length 1 "small region"
+        Expect.equal complement.Length 2 "world and reversed hole"
+        let area=List.sumBy Polygon.area small+List.sumBy Polygon.area complement
+        Expect.isLessThan (abs(area-4.*Math.PI*Math.PI)) 1e-9 "complements cover finite world"
+    testCase "Mercator reversed polar routes preserve fragments and remain inside the world" <| fun _ ->
+        let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Mercator with Scale=100.} |> ok
+        let options={GeoPathOptions.defaultValue with Precision=0.01}
+        let endpoints paths =
+            paths |> List.map(fun path ->
+                let vertices=Path.commands path |> List.choose(function MoveTo point|LineTo point -> Some point | _ -> None)
+                for point in vertices do
+                    Expect.isLessThanOrEqual (abs point.X) (100.*Math.PI+1e-9) "longitude extent"
+                    Expect.isLessThanOrEqual (abs point.Y) (100.*Math.PI+1e-9) "latitude extent"
+                vertices.Head,List.last vertices)
+        for index in 1..160 do
+            let first=p (float((index*71)%360)-180.) (if index%2=0 then 84.9 else -89.)
+            let last=p (float((index*137)%360)-180.) (float((index*37)%178)-89.)
+            let forward=GeoPath.project options projected (GeoGeometry.LineString[first;last]) |> ok |> endpoints
+            let backward=GeoPath.project options projected (GeoGeometry.LineString[last;first]) |> ok |> endpoints |> List.rev |> List.map(fun (a,b) -> b,a)
+            Expect.equal forward.Length backward.Length "reversal preserves fragments"
+            for (a,b),(c,d) in List.zip forward backward do
+                Expect.isLessThan (Point.distanceSquared a c) 1e-14 "entry invariant under reversal"
+                Expect.isLessThan (Point.distanceSquared b d) 1e-14 "exit invariant under reversal"
+    testCase "Mercator polar clipping observes cancellation during a large stream" <| fun _ ->
+        let points=[for index in 0..99999 -> p 25. (if index%2=0 then -89. else 89.)]
+        use cancelled=new CancellationTokenSource()
+        cancelled.CancelAfter(1)
+        Expect.throwsT<OperationCanceledException> (fun () ->
+            GeoPath.projectWithCancellation GeoPathOptions.defaultValue cancelled.Token (projection ProjectionKind.Mercator) (GeoGeometry.LineString points) |> ignore) "cooperative cancellation"
+    testCase "Mercator polar polygon intersections remain bounded and closed" <| fun _ ->
+        let ring=[p -30. 80.;p -30. 89.;p 30. 89.;p 30. 80.;p -30. 80.]
+        let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=0.001} (projection ProjectionKind.Mercator) (GeoGeometry.Polygon[ring]) |> ok
+        let rings=polygonRings paths
+        Expect.equal rings.Length 1 "visible polar strip"
+        Expect.isGreaterThan (List.sumBy Polygon.area rings) 0. "positive filled strip"
+        for point in List.concat rings do
+            Expect.isLessThanOrEqual (abs point.Y) (Math.PI+1e-10) "bounded polygon"
+    testCase "Mercator streamed points respect the finite world while point projection remains mathematical" <| fun _ ->
+        let projected=projection ProjectionKind.Mercator
+        Expect.isSome (Projection.project projected (p 0. 89.)) "finite mathematical projection remains available"
+        Expect.isEmpty (GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.Point(Some(p 0. 89.))) |> ok) "outside world omitted"
+
     testCase "polygon topology and filled area match pinned spherical stream fixtures" <| fun _ ->
         use json=JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory,"fixtures","polygon-streams.json")))
         for item in json.RootElement.GetProperty("cases").EnumerateArray() do
             let name=item.GetProperty("name").GetString()
-            let kind=if item.GetProperty("kind").GetString()="Orthographic" then ProjectionKind.Orthographic else ProjectionKind.Equirectangular
+            let kind=
+                match item.GetProperty("kind").GetString() with
+                | "Orthographic" -> ProjectionKind.Orthographic
+                | "Mercator" -> ProjectionKind.Mercator
+                | _ -> ProjectionKind.Equirectangular
             let rotation =
                 match item.TryGetProperty("rotate") with
                 | true,angles -> GeoRotation.create (angles[0].GetDouble()) (angles[1].GetDouble()) (angles[2].GetDouble()) |> ok
@@ -189,9 +292,10 @@ let tests = testList "geographic paths" [
         Expect.isError (GeoPath.project options projected (GeoGeometry.LineString[p 0. 0.])) "malformed input remains invalid"
     testCase "cylindrical resampling stays within precision across scales and near-pole arcs" <| fun _ ->
         for kind in [ProjectionKind.Equirectangular;ProjectionKind.Mercator] do
-            for latitude in [-70.;0.;45.;80.;88.] do
+            let latitudeLimit=if kind=ProjectionKind.Mercator then 84. else 89.
+            for latitude in [-70.;0.;45.;80.;latitudeLimit-1.] do
                 for scale,precision in [1.,0.5;3.,0.1;100.,0.01] do
-                    let first,last=p -20. latitude,p 20. (latitude+min 5. (89.-latitude))
+                    let first,last=p -20. latitude,p 20. (latitude+min 5. (latitudeLimit-latitude))
                     let projected=Projection.create {ProjectionConfig.defaultValue kind with Scale=scale} |> ok
                     let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=precision} projected (GeoGeometry.LineString[first;last]) |> ok
                     Expect.equal paths.Length 1 "continuous arc"
@@ -484,7 +588,11 @@ let tests = testList "geographic paths" [
     testCase "hemisphere and rectangle fragments match pinned stream references" <| fun _ ->
         use json=JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory,"fixtures","clipped-streams.json")))
         for item in json.RootElement.GetProperty("cases").EnumerateArray() do
-            let kind=if item.GetProperty("kind").GetString()="Orthographic" then ProjectionKind.Orthographic else ProjectionKind.Equirectangular
+            let kind=
+                match item.GetProperty("kind").GetString() with
+                | "Orthographic" -> ProjectionKind.Orthographic
+                | "Mercator" -> ProjectionKind.Mercator
+                | _ -> ProjectionKind.Equirectangular
             let projected=Projection.create {ProjectionConfig.defaultValue kind with Scale=item.GetProperty("scale").GetDouble()} |> ok
             let positions=item.GetProperty("points").EnumerateArray() |> Seq.map(fun value -> p (value[0].GetDouble()) (value[1].GetDouble())) |> Seq.toList
             let extent =

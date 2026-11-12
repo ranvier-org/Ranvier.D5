@@ -61,8 +61,9 @@ module internal GeoPolygon =
 
     let project projection precision maxDepth maxBuffer spend makeSampler (rings:GeoPosition array array) =
         try
-            if Projection.kind projection=ProjectionKind.Mercator then
-                raise(Rejected(InvalidObservation "Mercator polygon clipping requires its world singularity policy."))
+            let mercator=Projection.kind projection=ProjectionKind.Mercator
+            let halfHeight=if mercator then Math.PI else Math.PI/2.
+            let latitude y=if mercator then atan(sinh y)*180./Math.PI else y*180./Math.PI
             let screen point =
                 match Projection.projectRotatedValue projection point with
                 | ValueSome value -> value
@@ -79,17 +80,17 @@ module internal GeoPolygon =
                 if orthographic then
                     let sine,cosine=sin t,cos t
                     GeoMath.position(struct(0.,sine,cosine))
-                elif t<=1. then position (-180.+360.*t) 90.
-                elif t<=2. then position 180. (90.-180.*(t-1.))
-                elif t<=3. then position (180.-360.*(t-2.)) -90.
-                else position -180. (-90.+180.*(t-3.))
+                elif t<=1. then position (-180.+360.*t) (latitude halfHeight)
+                elif t<=2. then position 180. (latitude(halfHeight-2.*halfHeight*(t-1.)))
+                elif t<=3. then position (180.-360.*(t-2.)) (latitude -halfHeight)
+                else position -180. (latitude(-halfHeight+2.*halfHeight*(t-3.)))
             let boundaryPoint amount = boundaryPosition amount |> screen
             let parameter (point:Point) =
                 let x,y=(point.X-origin.X)/scale,(origin.Y-point.Y)/scale
                 if orthographic then normalize(atan2 x y)
-                elif abs(abs x-Math.PI)<=abs(abs y-Math.PI/2.) then
-                    if x>=0. then 1.+Math.Clamp((Math.PI/2.-y)/Math.PI,0.,1.)
-                    else normalize(3.+Math.Clamp((y+Math.PI/2.)/Math.PI,0.,1.))
+                elif abs(abs x-Math.PI)<=abs(abs y-halfHeight) then
+                    if x>=0. then 1.+Math.Clamp((halfHeight-y)/(2.*halfHeight),0.,1.)
+                    else normalize(3.+Math.Clamp((y+halfHeight)/(2.*halfHeight),0.,1.))
                 elif y>=0. then Math.Clamp((x+Math.PI)/(2.*Math.PI),0.,1.)
                 else 2.+Math.Clamp((Math.PI-x)/(2.*Math.PI),0.,1.)
             let maxAngle=4.*asin(sqrt(min 0.5 (precision/scale/2.)))

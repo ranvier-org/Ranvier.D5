@@ -66,7 +66,11 @@ let main args =
     let hole=[p -3. -3.;p 3. -3.;p 3. 3.;p -3. 3.;p -3. -3.]
     let seamOuter=[p 170. -20.;p 170. 20.;p -170. 20.;p -170. -20.;p 170. -20.]
     let seamHole=[p 175. -5.;p -175. -5.;p -175. 5.;p 175. 5.;p 175. -5.]
+    let mercatorProjection=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Mercator with Scale=100.} |> ok
+    let polarRing=[p -30. 80.;p -30. 89.;p 30. 89.;p 30. 80.;p -30. 80.]
+    let polarLine=GeoGeometry.LineString[for index in 0..9999 -> p 25. (if index%2=0 then -89. else 89.)]
     let polygonCases=[
+        "geo-mercator-polar-polygons-1000",75.,12000000L,mercatorProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [polarRing])
         "geo-polygons-holes-1000",50.,5000000L,polygonProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [outer;hole])
         "geo-polygons-seam-holes-1000",75.,9000000L,polygonProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [seamOuter;seamHole])
         "geo-polygons-globe-complements-1000",100.,20000000L,globeProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [List.rev outer])
@@ -86,6 +90,12 @@ let main args =
     let radians=100.*Math.PI/180.
     let concaveOptions={polygonOptions with ClipExtent=Some(Ranvier.D5.Bounds.create (-50.*radians) (-15.*radians) (100.*radians) (10.*radians))}
     let results=[|
+        measure "geo-mercator-line-100000" 100. 16000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue mercatorProjection line |> ok
+            if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100000 then failwith "Mercator ordinary line count")
+        measure "geo-mercator-polar-line-10000" 150. 16000000L (fun () ->
+            let paths=GeoPath.project polygonOptions mercatorProjection polarLine |> ok
+            if paths.Length<>9999 then failwith "Mercator polar fragment count")
         measure "geo-rectangle-polygon-100000" 150. 28000000L (fun () ->
             let paths=GeoPath.project denseClipOptions polygonProjection densePolygon |> ok
             if paths.Length<>1 then failwith "Dense clipped polygon count")

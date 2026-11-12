@@ -1,5 +1,5 @@
 import {writeFileSync} from 'node:fs';
-import {geoEquirectangular,geoOrthographic,geoStream} from 'd3-geo';
+import {geoEquirectangular,geoMercator,geoOrthographic,geoStream} from 'd3-geo';
 
 const small=[[-10,-10],[-10,10],[10,10],[10,-10],[-10,-10]];
 const hole=[[-3,-3],[3,-3],[3,3],[-3,3],[-3,-3]];
@@ -45,9 +45,17 @@ for(const input of [...inputs]){
   const width=20+random()*80,height=20+random()*80;
   inputs.push({...input,name:input.name+'-rectangle',clip:[[x-width/2,y-height/2],[x+width/2,y+height/2]]});
 }
+for(const input of inputs.filter(input=>!input.clip)){
+  inputs.push({...input,name:'mercator-'+input.name,kind:'Mercator'});
+}
+for(const latitude of [-89,-85,85,89]){
+  const ring=[[-30,latitude-0.5],[-30,latitude+0.5],[30,latitude+0.5],[30,latitude-0.5],[-30,latitude-0.5]];
+  inputs.push({name:'mercator-polar-'+latitude,kind:'Mercator',rings:[ring]});
+  inputs.push({name:'mercator-polar-complement-'+latitude,kind:'Mercator',rings:[[...ring].reverse()]});
+}
 const cases=inputs.map(input=>{
   const output=[]; let current;
-  const projection=(input.kind==='Orthographic'?geoOrthographic().clipAngle(90):geoEquirectangular())
+  const projection=(input.kind==='Orthographic'?geoOrthographic().clipAngle(90):input.kind==='Mercator'?geoMercator():geoEquirectangular())
     .scale(100).translate([0,0]).precision(0.1).rotate(input.rotate??[0,0,0]);
   if(input.clip) projection.clipExtent(input.clip);
   geoStream({type:'Polygon',coordinates:input.rings},projection.stream({

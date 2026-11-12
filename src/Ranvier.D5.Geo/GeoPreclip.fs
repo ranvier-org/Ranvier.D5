@@ -24,8 +24,74 @@ module internal GeoPreclip =
         | Ok value -> value
         | Error errors -> raise(Rejected errors.Head)
 
+    let mercatorLatitude = atan(sinh Math.PI)*180./Math.PI
+
+    let private mercatorBand spend (sink:GeoClipSink) =
+        let limit=tanh Math.PI
+        let roots=ResizeArray<struct(float*float voption)>(8)
+        let mutable tail=ValueNone
+        let finish () =
+            if ValueOption.isSome tail then sink.Finish()
+            tail<-ValueNone
+        let emit first last =
+            match tail with
+            | ValueSome previous when previous=first -> ()
+            | _ -> finish();sink.Start first
+            sink.Arc first last
+            tail<-ValueSome last
+        let clip (first:GeoPosition) (last:GeoPosition) =
+            spend 1L
+            let arc=arcBetween first last
+            // A unit-speed spherical arc cannot change latitude faster than its arc length.
+            if min first.Latitude last.Latitude>=mercatorLatitude || max first.Latitude last.Latitude<= -mercatorLatitude then
+                finish()
+            elif max(abs first.Latitude)(abs last.Latitude)+arc.Angle*180./Math.PI<=mercatorLatitude then
+                emit first last
+            else
+                roots.Clear()
+                roots.Add(struct(0.,ValueNone))
+                let amplitude=Double.Hypot(arc.Z,arc.TangentZ)
+                if amplitude>=limit then
+                    let phase=atan2 arc.TangentZ arc.Z
+                    for sign in [-1.;1.] do
+                        let offset=acos(Math.Clamp(sign*limit/amplitude,-1.,1.))
+                        for direction in [-1.;1.] do
+                            for turn in -1..1 do
+                                spend 1L
+                                let angle=phase+direction*offset+float turn*2.*Math.PI
+                                if angle>0. && angle<arc.Angle then
+                                    roots.Add(struct(angle,ValueSome(sign*mercatorLatitude)))
+                roots.Add(struct(arc.Angle,ValueNone))
+                roots.Sort(Comparison(fun struct(a,_) struct(b,_) -> compare a b))
+                let endpoint angle latitude =
+                    let point=GeoArc.atFraction (angle/arc.Angle) arc
+                    let longitude=
+                        if first.Longitude=last.Longitude && abs first.Longitude=180. then first.Longitude
+                        else point.Longitude
+                    position longitude (ValueOption.defaultValue point.Latitude latitude)
+                for index=1 to roots.Count-1 do
+                    spend 1L
+                    let struct(a,latitudeA)=roots[index-1]
+                    let struct(b,latitudeB)=roots[index]
+                    if b>a then
+                        let middle=(a+b)/2.
+                        let z=arc.Z*cos middle+arc.TangentZ*sin middle
+                        if abs z<=limit then
+                            let before=if a=0. then first else endpoint a latitudeA
+                            let after=if b=arc.Angle then last else endpoint b latitudeB
+                            emit before after
+                        else finish()
+        {
+            Start=fun _ -> finish()
+            Arc=clip
+            // Seam connectors run along the geographic poles, wholly outside this band.
+            Boundary=fun _ -> finish()
+            Finish=finish
+        }
+
     let line projection spend sink (input:IReadOnlyList<GeoPosition>) =
         try
+            let sink=if Projection.kind projection=ProjectionKind.Mercator then mercatorBand spend sink else sink
             let cylindrical=Projection.kind projection<>ProjectionKind.Orthographic
             let mutable tail=ValueNone
             let same (a:GeoPosition) (b:GeoPosition) =

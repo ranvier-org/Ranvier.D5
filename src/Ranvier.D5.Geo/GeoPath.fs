@@ -12,7 +12,7 @@ type GeoPathOptions = {
     Precision: float
     /// <summary>Nonnegative finite point-symbol radius in screen units; zero omits point symbols.</summary>
     PointRadius: float
-    /// <summary>Optional rectangular output clipping extent in screen coordinates.</summary>
+    /// <summary>Optional rectangular output extent, intersected with the projection boundary. Mercator retains its finite canonical world even with an explicit extent.</summary>
     ClipExtent: Bounds option
     /// <summary>Maximum emitted path endpoints, counting repeated closing and arc endpoints.</summary>
     MaxOutputPoints: int
@@ -33,6 +33,7 @@ module GeoPathOptions =
     }
 
 /// <summary>Builds existing toolkit paths from validated geographic streams.</summary>
+/// <remarks>Mercator streams are clipped after rotation to latitudes +/-atan(sinh(pi)), about 85.051129 degrees, before projection. Point-symbol centers outside the band are omitted; symbols centered inside retain their configured radius. Direct Projection.project remains a mathematical point mapping. Exact antipodal edges require a waypoint.</remarks>
 module GeoPath =
     exception private Rejected of LayoutError
 
@@ -361,9 +362,11 @@ module GeoPath =
                                 raise(Rejected(BudgetExceeded "Input line exceeds its projection buffer budget."))
                             lineInput.Add position
                         else
-                            match Projection.projectValue projection position with
-                            | ValueSome point -> circle options.PointRadius point
-                            | ValueNone -> ()
+                            let rotated=Projection.rotate projection position
+                            if Projection.kind projection<>ProjectionKind.Mercator || abs rotated.Latitude<=GeoPreclip.mercatorLatitude then
+                                match Projection.projectRotatedValue projection rotated with
+                                | ValueSome point -> circle options.PointRadius point
+                                | ValueNone -> ()
                     | GeoStreamEvent.Sphere -> if not emptyViewport then sphere()
                     | GeoStreamEvent.LineStart -> lineInput.Clear(); inLine<-true
                     | GeoStreamEvent.LineEnd ->
