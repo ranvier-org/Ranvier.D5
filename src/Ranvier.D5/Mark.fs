@@ -42,6 +42,7 @@ module Mark =
         Point.create point.X point.Y |> ignore
         if isNull value then nullArg "value"
         create key (TextGeometry(point,value))
+    let internal reframe key geometry style matrix mark = {mark with Identity=key;Geometry=geometry;Style=style;Matrix=matrix}
     let key mark = mark.Identity
     let geometry mark = mark.Geometry
     let style mark = mark.Style

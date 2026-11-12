@@ -52,6 +52,7 @@ module Transform =
     let create a b c d e f =
         [a;b;c;d;e;f] |> List.iter (Check.finite "matrix")
         { A=a; B=b; C=c; D=d; E=e; F=f }
+    let internal coefficients matrix = matrix.A,matrix.B,matrix.C,matrix.D,matrix.E,matrix.F
     let identity = create 1. 0. 0. 1. 0. 0.
     let translate x y = create 1. 0. 0. 1. x y
     let scale x y = create x 0. 0. y 0. 0.
