@@ -109,7 +109,22 @@ let main args =
                                             [[p longitude latitude;p longitude (latitude+0.5);p (longitude+0.5) (latitude+0.5);p (longitude+0.5) latitude;p longitude latitude]]]
     let usa=CompositeProjection.albersUsa 1070. (Ranvier.D5.Point.create 480. 250.) |> ok
     let fitConfig=ProjectionConfig.defaultValue(ProjectionKind.ConicConformal(20.,50.))
+    let mapFeatures=[for index in 0..999 ->
+                        let longitude,latitude=float(index%50)*7.-175.,float(index/50)*7.-70.
+                        {MapFeature.Id=string index;Name="Region "+string index;Geometry=GeoGeometry.Polygon[[p longitude latitude;p longitude (latitude+5.);p (longitude+5.) (latitude+5.);p (longitude+5.) latitude;p longitude latitude]]}]
+    let mapFrame=Ranvier.D5.Geo.MapFrame.create (Ranvier.D5.Charts.ChartFrame.create 960. 500. "Map benchmark") (MapProjection.Single(Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Scale=150.;Translate=Ranvier.D5.Point.create 480. 250.} |> ok))
+    let mapValues=[for index in 0..999 -> string index,float(index%17)]
+    let choropleth={Map=mapFrame;Key=fst;Value=Ranvier.D5.Charts.Encoding.create "Value" (snd >> Some);Domain=Ranvier.D5.Charts.Auto
+                    Color=(fun t -> Ranvier.D5.Paint.rgb (int(255.*t)) 80 120);Missing=Ranvier.D5.Paint.rgb 200 200 200;Stroke=Ranvier.D5.Paint.rgb 255 255 255;Selected=Set.empty}
+    let bubbleSpec={Map=mapFrame;Key=fst;Position=(fun (id:string,_) -> let index=int id in p (float(index%50)*7.-172.5) (float(index/50)*7.-67.5));Size=Ranvier.D5.Charts.Encoding.create "Size" snd
+                    MaxRadius=6.;Color=(fun _ -> Ranvier.D5.Paint.rgb 20 20 20);Selected=Set.empty}
     let results=[|
+        measure "map-choropleth-1000-regions" 150. 32000000L (fun () ->
+            let output=MapChart.choropleth choropleth mapFeatures mapValues |> ok
+            if output.HitTargets.Length<>output.Semantics.Length || output.HitTargets.Length<900 then failwith "Choropleth region ownership")
+        measure "map-bubbles-1000" 40. 7000000L (fun () ->
+            let output=MapChart.bubbles bubbleSpec mapValues |> ok
+            if output.HitTargets.Length<>output.Semantics.Length || output.HitTargets.Length<900 then failwithf "Bubble visibility %d" output.HitTargets.Length)
         measure "albers-usa-paths-1000" 100. 13000000L (fun () ->
             let paths=CompositeProjection.paths polygonOptions usa states |> ok
             if paths.Length<>1000 then failwith "Albers USA inset ownership")

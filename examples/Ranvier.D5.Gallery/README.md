@@ -11,6 +11,15 @@ One signal rotates all four panels. The capture paints two phases and fails unle
 native pixels show filled polygons, open holes and the clipped Mercator polar cap.
 [Source](ProjectionGallery.fs) · [Pipeline contracts](../../docs/geographic-projections.md).
 
+## Reactive map charts
+
+![Native choropleth, routes and cities on a reactive globe](../../docs/images/map.png)
+
+Run `--map`; capture with `--capture-map artifacts/map.bmp`. Regions load from GeoJSON on the
+owned worker; a signal rotates the globe; hover, arrows and Enter select. The capture checks
+region fills, the lake hole, native hover, keyboard selection and a rotation update.
+[Source](MapGallery.fs) · [Contracts](../../docs/map-charts.md).
+
 ## Projection families and fitting
 
 ![Native azimuthal, conic, transverse Mercator and Albers USA panels](../../docs/images/projection-families.png)
