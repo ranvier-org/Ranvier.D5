@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><IsPackable>false</IsPackable><GenerateDocumentationFile>false</GenerateDocumentationFile></PropertyGroup>
-  <ItemGroup><Compile Include="Program.fs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../examples/Shared/NativeDispatcher.fs" Link="NativeDispatcher.fs" /><Compile Include="Program.fs" /></ItemGroup>
   <ItemGroup><ProjectReference Include="../../src/Ranvier.D5.View/Ranvier.D5.View.fsproj" /><ProjectReference Include="../../src/Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj" /><PackageReference Include="Ranvier.View.WebCore$(RanvierPackageSuffix)" Version="[0.1.0-rc.6]" /></ItemGroup>
 </Project>

@@ -25,6 +25,18 @@ let acceptance () =
         Expect.isGreaterThan measured.Width 0. "native width"
         Expect.isGreaterThan (textCache.Measure {textRequest with FontSize=24.}).Width measured.Width "native font size changes"
         Expect.equal context.font "10px sans-serif" "measurement restores host font"
+        let ownerThread=Environment.CurrentManagedThreadId
+        let worker=graph.Run(fun () -> ReactiveLayout.create (Ranvier.D5.Examples.HostDispatcher.forHost host) (fun () -> 42) (fun token value ->
+            token.ThrowIfCancellationRequested()
+            Expect.notEqual Environment.CurrentManagedThreadId ownerThread "kernel is off the host thread"
+            Ok value))
+        let timeout=Diagnostics.Stopwatch.StartNew()
+        while graph.Run(fun () -> worker.LastGood.IsNone) && timeout.Elapsed.TotalSeconds<5. do
+            host.Cycle()
+            host.Frame()
+            Threading.Thread.Yield() |> ignore
+        Expect.equal (graph.Run(fun () -> worker.LastGood)) (Some 42) "native owner/frame publication"
+        (worker :> IDisposable).Dispose()
         let container = host.Document.createElement "div"
         host.Document.body.appendChild container |> ignore
         let box key x color =
