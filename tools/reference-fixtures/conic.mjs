@@ -74,6 +74,12 @@ const lines=[
   {name:'polar',points:[[-60,60],[120,60]]},
   {name:'parallel',points:[[-150,40],[-50,40],[50,40],[150,40]]}
 ];
+// Tests compare topology, oriented area and perimeter for polygons and endpoints for lines, so store only those.
+const ringArea=ring=>ring.reduce((sum,[x,y],i)=>{const [u,v]=ring[(i+1)%ring.length];return sum+x*v-u*y;},0)/2;
+const ringPerimeter=ring=>ring.reduce((sum,[x,y],i)=>{const [u,v]=ring[(i+1)%ring.length];return sum+Math.hypot(u-x,v-y);},0);
+const summarize=(collect,output)=>collect==='output'
+  ?{ringCount:output.length,area:output.reduce((sum,ring)=>sum+ringArea(ring),0),perimeter:output.reduce((sum,ring)=>sum+ringPerimeter(ring),0)}
+  :{fragments:output.map(fragment=>[fragment[0],fragment[fragment.length-1]])};
 const streamCases=[];
 for(const entry of kinds){
   const record=(input,geometry,collect)=>{
@@ -87,7 +93,7 @@ for(const entry of kinds){
       lineStart(){current=[];},point(x,y){current.push([x,y]);},lineEnd(){output.push(current);},
       polygonStart(){},polygonEnd(){},sphere(){throw new Error('Unexpected sphere');}
     }));
-    streamCases.push({...input,kind:entry.kind,parallels:entry.parallels,scale:100,precision:0.1,extent,[collect]:output});
+    streamCases.push({...input,kind:entry.kind,parallels:entry.parallels,scale:100,precision:0.1,extent,...summarize(collect,output)});
   };
   for(const input of polygons) record(input,{type:'Polygon',coordinates:input.rings},'output');
   for(const input of lines) record({...input,line:true},{type:'LineString',coordinates:input.points},'fragments');
@@ -99,6 +105,6 @@ const spheres=kinds.map(entry=>{
   return {kind:entry.kind,parallels:entry.parallels,scale:100,precision:0.1,area:path.area({type:'Sphere'}),perimeter:path.measure({type:'Sphere'})};
 });
 writeFileSync(new URL('../../tests/fixtures/conic-streams.json',import.meta.url),JSON.stringify({schema:1,seed:42,source:{'d3-geo':'3.1.1'},
-  comparison:'Polygons: ring topology and oriented filled area within perimeter times combined precision. Lines: fragment count and endpoints within combined precision. Spheres: projected world area within perimeter times combined precision.',
+  comparison:'Polygons: ring count, summed oriented area and perimeter of the D3 output (area tolerance is perimeter times combined precision). Lines: first and last point of each fragment. Spheres: projected world area within perimeter times combined precision.',
   cases:streamCases,spheres},null,2)+'\n');
 console.log(`Generated ${pointCases.length} conic point cases and ${streamCases.length} conic stream cases.`);

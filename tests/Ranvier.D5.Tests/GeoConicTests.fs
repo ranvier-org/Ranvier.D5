@@ -32,8 +32,6 @@ let private rings paths =
             | Close -> rings.Add(List.rev current);current<-[]
             | _ -> failtest "sampled polygon commands"
         List.ofSeq rings)
-let private perimeter rings =
-    rings |> List.sumBy(fun ring -> match ring with [] -> 0. | first::_ -> (ring@[first]) |> List.pairwise |> List.sumBy(fun (a,b) -> sqrt(Point.distanceSquared a b)))
 let private configured (item:JsonElement) =
     let rotation =
         match item.TryGetProperty("rotate") with
@@ -87,11 +85,10 @@ let tests = testList "conic and transverse Mercator projections" [
                 let input=ringsJson.EnumerateArray() |> Seq.map(fun ring -> ring.EnumerateArray() |> Seq.map(fun point -> p (point[0].GetDouble()) (point[1].GetDouble())) |> Seq.toList) |> Seq.toList
                 let precision=item.GetProperty("precision").GetDouble()
                 let actual=GeoPath.project {GeoPathOptions.defaultValue with Precision=precision} (configured item) (GeoGeometry.Polygon input) |> ok |> rings
-                let expected=item.GetProperty("output").EnumerateArray() |> Seq.map(fun ring -> ring.EnumerateArray() |> Seq.map(fun point -> {X=point[0].GetDouble();Y=point[1].GetDouble()}) |> Seq.toList) |> Seq.toList
-                Expect.equal actual.Length expected.Length (name+" ring topology")
+                Expect.equal actual.Length (item.GetProperty("ringCount").GetInt32()) (name+" ring topology")
                 let combined=2.*precision
-                let expectedArea=expected |> List.sumBy Polygon.area
-                let tolerance=max (1e-6*abs expectedArea) (perimeter expected*combined+Math.PI*combined*combined)
+                let expectedArea=item.GetProperty("area").GetDouble()
+                let tolerance=max (1e-6*abs expectedArea) (item.GetProperty("perimeter").GetDouble()*combined+Math.PI*combined*combined)
                 Expect.isLessThan (abs((actual |> List.sumBy Polygon.area)-expectedArea)) tolerance (name+" oriented filled area")
     testCase "line fragments match pinned D3 conic streams" <| fun _ ->
         use json=fixture "conic-streams.json"
@@ -111,7 +108,7 @@ let tests = testList "conic and transverse Mercator projections" [
                 for index=0 to paths.Length-1 do
                     let actual=vertices paths[index]
                     let reference=expected[index]
-                    for point,target in [actual.Head,reference[0];List.last actual,reference[reference.GetArrayLength()-1]] do
+                    for point,target in [actual.Head,reference[0];List.last actual,reference[1]] do
                         Expect.isLessThan (Double.Hypot(point.X-target[0].GetDouble(),point.Y-target[1].GetDouble())) tolerance (name+" fragment endpoint")
     testCase "Sphere outlines match the D3 projected world" <| fun _ ->
         use json=fixture "conic-streams.json"

@@ -93,12 +93,10 @@ let tests = testList "azimuthal projections" [
                         | Close -> rings.Add(List.rev current);current<-[]
                         | _ -> failtest "sampled polygon commands"
                     List.ofSeq rings)
-                let expected=item.GetProperty("output").EnumerateArray() |> Seq.map(fun ring -> ring.EnumerateArray() |> Seq.map(fun point -> {X=point[0].GetDouble();Y=point[1].GetDouble()}) |> Seq.toList) |> Seq.toList
-                Expect.equal actual.Length expected.Length (name+" ring topology")
-                let perimeter=expected |> List.sumBy(fun ring -> match ring with [] -> 0. | first::_ -> (ring@[first]) |> List.pairwise |> List.sumBy(fun (a,b) -> sqrt(Point.distanceSquared a b)))
+                Expect.equal actual.Length (item.GetProperty("ringCount").GetInt32()) (name+" ring topology")
                 let combined=2.*precision
-                let tolerance=max 1e-8 (perimeter*combined+Math.PI*combined*combined)
-                Expect.isLessThan (abs((actual |> List.sumBy Polygon.area)-(expected |> List.sumBy Polygon.area))) tolerance (name+" oriented filled area")
+                let tolerance=max 1e-8 (item.GetProperty("perimeter").GetDouble()*combined+Math.PI*combined*combined)
+                Expect.isLessThan (abs((actual |> List.sumBy Polygon.area)-item.GetProperty("area").GetDouble())) tolerance (name+" oriented filled area")
     testCase "line fragments and analytic cap intersections match pinned D3 streams" <| fun _ ->
         use json=fixture "azimuthal-streams.json"
         for item in json.RootElement.GetProperty("cases").EnumerateArray() do
@@ -113,7 +111,7 @@ let tests = testList "azimuthal projections" [
                 for index=0 to paths.Length-1 do
                     let actual=vertices paths[index]
                     let reference=expected[index]
-                    for point,target in [actual.Head,reference[0];List.last actual,reference[reference.GetArrayLength()-1]] do
+                    for point,target in [actual.Head,reference[0];List.last actual,reference[1]] do
                         Expect.isLessThan (Double.Hypot(point.X-target[0].GetDouble(),point.Y-target[1].GetDouble())) 1e-6 (name+" fragment endpoint")
     testCase "arcs ending exactly on the orthographic limb keep their snapped boundary point" <| fun _ ->
         let projection=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Orthographic with Scale=92.;Rotation=GeoRotation.create -120. -20. 0. |> ok} |> ok
