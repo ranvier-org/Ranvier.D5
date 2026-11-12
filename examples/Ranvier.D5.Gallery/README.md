@@ -118,3 +118,9 @@ Prefix each invocation with
 `dotnet run --project examples/Ranvier.D5.Gallery -c Release --`.
 Convert captures to checked-in lossless PNGs with
 `python tools/document-snapshots.py` (Pillow required).
+
+## Reactive density
+
+![Native density view](../../docs/images/density.png)
+
+Run --density; Left/Right adjusts bandwidth. Capture with --capture-density artifacts/density.bmp. The example aggregates 100,000 observations in the owned worker and paints 768 cells. [Source](DensityGallery.fs) and [density contracts](../../docs/density.md).
