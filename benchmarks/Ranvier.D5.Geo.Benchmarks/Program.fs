@@ -89,7 +89,20 @@ let main args =
     let concavePolygons=GeoGeometry.MultiPolygon(List.replicate 1000 [concaveRing])
     let radians=100.*Math.PI/180.
     let concaveOptions={polygonOptions with ClipExtent=Some(Ranvier.D5.Bounds.create (-50.*radians) (-15.*radians) (100.*radians) (10.*radians))}
+    let planarProjection=IdentityProjection.create IdentityProjectionConfig.defaultValue |> ok
+    let planarLine=PlanarGeometry.LineString[for index in 0..99999 -> Ranvier.D5.Point.create (float index) (float(index%2))]
+    let planarPolygon=PlanarGeometry.Polygon[denseRing |> List.map(fun point -> Ranvier.D5.Point.create (point.Longitude*10.) (point.Latitude*10.))]
+    let planarPoints=PlanarGeometry.MultiPoint(List.replicate 1000 (Ranvier.D5.Point.create 0. 0.))
     let results=[|
+        measure "identity-line-100000" 50. 12000000L (fun () ->
+            let paths=PlanarPath.project GeoPathOptions.defaultValue planarProjection planarLine |> ok
+            if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100000 then failwith "Identity line output")
+        measure "identity-clipped-polygon-100000" 50. 8000000L (fun () ->
+            let paths=PlanarPath.project denseClipOptions planarProjection planarPolygon |> ok
+            if paths.Length<>1 then failwith "Identity clipped polygon output")
+        measure "identity-clipped-point-paths-1000" 50. 2000000L (fun () ->
+            let paths=PlanarPath.project clippedPointOptions planarProjection planarPoints |> ok
+            if paths.Length<>1000 then failwith "Identity clipped point output")
         measure "geo-mercator-line-100000" 100. 16000000L (fun () ->
             let paths=GeoPath.project GeoPathOptions.defaultValue mercatorProjection line |> ok
             if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100000 then failwith "Mercator ordinary line count")

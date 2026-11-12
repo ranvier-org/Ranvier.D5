@@ -160,6 +160,11 @@ jobs:
               let bounds = Ranvier.D5.Geo.GeoMeasure.bounds Ranvier.D5.Geo.GeoStreamConfig.defaultValue geometry |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> Option.get
               if bounds.West <> 20. || bounds.North <> 30. then failwith "Packed geographic bounds failed"
           | _ -> failwith "Packed GeoJSON failed"
+          let planar = Ranvier.D5.Geo.IdentityProjection.create Ranvier.D5.Geo.IdentityProjectionConfig.defaultValue |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          let planarPoint = Point.create 1234. 5678.
+          if Ranvier.D5.Geo.IdentityProjection.project planar planarPoint <> Some planarPoint then failwith "Packed planar identity units failed"
+          let planarPaths = Ranvier.D5.Geo.PlanarPath.project Ranvier.D5.Geo.GeoPathOptions.defaultValue planar (Ranvier.D5.Geo.PlanarGeometry.LineString [Point.create 0. 0.;planarPoint]) |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if planarPaths.Length <> 1 then failwith "Packed planar path failed"
           graph.Dispose()
           EOF
           cat > artifacts/consumer/NuGet.Config <<'EOF'
