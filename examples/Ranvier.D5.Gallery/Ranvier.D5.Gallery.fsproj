@@ -3,6 +3,6 @@
   <ItemGroup><Compile Include="Scenes.fs" /><Compile Include="ReactiveChart.fs" /><Compile Include="../Shared/LinkedCharts.fs" Link="LinkedCharts.fs" /><Compile Include="HierarchyGallery.fs" /><Compile Include="TilingGallery.fs" /><Compile Include="HierarchyChartsGallery.fs" /><Compile Include="../Shared/NativeDispatcher.fs" Link="NativeDispatcher.fs" /><Compile Include="HierarchyExplorer.fs" /><Compile Include="PlanarGallery.fs" /><Compile Include="QuadtreeGallery.fs" /><Compile Include="SpatialGallery.fs" /><Compile Include="ForceGallery.fs" /><Compile Include="NetworkGallery.fs" /><Compile Include="ChordGallery.fs" /><Compile Include="SankeyGallery.fs" /><Compile Include="FlowGallery.fs" /><Compile Include="DensityGallery.fs" /><Compile Include="ContourGallery.fs" /><Compile Include="ReductionGallery.fs" /><Compile Include="DensityRecipesGallery.fs" /><Compile Include="DistributionRecipesGallery.fs" /><Compile Include="Program.fs" /></ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Ranvier.D5.View/Ranvier.D5.View.fsproj" /><ProjectReference Include="../../src/Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj" />
-    <PackageReference Include="Ranvier.View.WebCore.Sdl$(RanvierPackageSuffix)" Version="[0.1.0-rc.10]" />
+    <PackageReference Include="Ranvier.View.WebCore.Sdl$(RanvierPackageSuffix)" Version="[0.1.0-rc.12]" />
   </ItemGroup>
 </Project>

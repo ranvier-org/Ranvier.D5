@@ -67,3 +67,21 @@ by 528,880 bytes. The paired network median-time ratio was 0.981; this is an
 allocation improvement, not evidence of a large latency improvement or a macOS
 tail-latency fix. The network allocation gate is tightened from 32 MB to 13 MB;
 the 100 ms p95 gate and paired comparison tolerances remain unchanged.
+
+## Native dependency update
+
+The alpha.6 candidate updates View rc.2 to rc.3, View.WebCore rc.6 to rc.8,
+WebCore native rc.7 to rc.8, and SDL rc.10 to rc.12. Anime rc.2 remains the
+latest published native package and retains its exact Ranvier/CSS dependencies.
+
+Three alternating Windows Traced full-suite process pairs measured a network
+median-time ratio of 0.9025 (-2.563 ms), flow ratio 0.9730 (-0.294 ms), and
+retained-500 ratio 1.1968 (+1.790 ms). Allocations were unchanged. All six
+absolute suites passed. Because every full-suite retained pair was slower, a
+focused follow-up ran three pairs under each runtime policy: default tiering
+measured ratio 1.0208 (+0.207 ms), and fully optimized code measured 1.0155
+(+0.081 ms), again with unchanged allocations. Both passed the existing paired
+tolerance. These measurements support compatibility within the performance
+budget, not a universal speedup or a proven explanation for runner variability.
+The native release also targets hover repainting; these scene-update workloads
+do not independently establish its pointer-motion improvement.
