@@ -34,10 +34,8 @@ module HitTest =
         | [] -> false
         | polygon::rest -> containsPolygon point polygon || containsAny point rest
     let visibleAt point target = target.Clip |> Option.forall (Bounds.contains point)
-    let at point output =
-        output.HitTargets |> List.filter (fun target ->
-            visibleAt point target &&
-            match target.Geometry with
+    let contains point geometry =
+            match geometry with
             | HitRegion(included,excluded,_) -> containsAny point included && not (containsAny point excluded)
             | HitBounds bounds -> Bounds.contains point bounds
             | HitPoint(center,radius) -> System.Double.Hypot(point.X-center.X,point.Y-center.Y)<=radius
@@ -48,4 +46,6 @@ module HitTest =
                 let angle=normalize(atan2 (point.X-center.X) (center.Y-point.Y))
                 let sweep=abs(finish-start)
                 let position=if finish>=start then normalize(angle-start) else normalize(start-angle)
-                sweep>0. && outer>inner && radius>=inner && radius<=outer && (sweep>=tau || position<=sweep))
+                sweep>0. && outer>inner && radius>=inner && radius<=outer && (sweep>=tau || position<=sweep)
+    let at point output =
+        output.HitTargets |> List.filter (fun target -> visibleAt point target && contains point target.Geometry)

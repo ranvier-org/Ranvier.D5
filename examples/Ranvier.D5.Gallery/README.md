@@ -136,3 +136,11 @@ Run --contour; Left/Right adjusts levels. Capture with --capture-contour artifac
 ![Native reduction view](../../docs/images/reduction.png)
 
 Run --reduction; Left/Right adjusts the visible sample budget. Capture with --capture-reduction artifacts/reduction.bmp. [Source](ReductionGallery.fs) and [membership, gap and sampling contracts](../../docs/reduction.md).
+
+## Density chart recipes
+
+Run `--density-recipe heatmap`, `hexbin`, `contours` or `isobands`. Hover shows original membership; arrows and Enter select; `+` / `-` changes bandwidth or radius through the owned worker. Capture with `--capture-density-recipe isobands artifacts/isobands.bmp`.
+
+![Native isobands with selection](../../docs/images/isobands-recipe.png)
+
+[All four native snapshots and contracts](../../docs/density-charts.md) · [source](DensityRecipesGallery.fs)

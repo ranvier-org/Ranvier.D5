@@ -107,6 +107,11 @@ let main args =
             results.Add(measure (sprintf "contour-grid-%d-three-levels" size) limit bytes (fun () ->
                 let polygons=Contour.compute (ContourConfig.create [0.025;0.075;0.15]) field |> Result.defaultWith(fun errors -> failwithf "%A" errors)
                 if polygons.Length<>3 || polygons |> List.exists(fun polygon -> polygon.Holes.Length<>1) then failwith "Contour benchmark lost ring topology."))
+            let spec=Ranvier.D5.Charts.DensityChartSpec.create (Ranvier.D5.Charts.ChartFrame.create 800. 600. "Bands") (fun _ -> Paint.currentColor)
+            let chartLimit,chartBytes=if size=256 then 100.,32000000L else 400.,100000000L
+            results.Add(measure (sprintf "isoband-chart-%d-three-levels" size) chartLimit chartBytes (fun () ->
+                let chart=Ranvier.D5.Charts.ContourChart.isobands spec (ContourConfig.create [0.025;0.075;0.15]) field |> Result.defaultWith(fun e -> failwithf "%A" e)
+                if chart.Chart.HitTargets.Length<>3 then failwith "Isoband chart lost levels."))
         let fragmented=DensityGrid.create (Bounds.create 0. 0. 64. 64.) 64 64 [for row in 0..63 do for column in 0..63 -> Some(if (row+column)%2=0 then 1. else -1.)]
                        |> Result.defaultWith(fun errors -> failwithf "%A" errors)
         results.Add(measure "contour-fragments-2048" 100. 32000000L (fun () ->

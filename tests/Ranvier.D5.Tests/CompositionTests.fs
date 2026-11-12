@@ -8,6 +8,96 @@ open Ranvier.D5.Charts
 let frame=ChartFrame.create 500. 400. "Composition"
 let ok = function Ok value -> value | Error e -> failwithf "%A" e
 let tests = testList "Radial and composition recipes" [
+    testCase "isobands have disjoint picking and valid anchors without intermediate samples" <| fun _ ->
+        let grid=DensityGrid.create (Bounds.create 0. 0. 2. 2.) 2 2 [Some 0.;Some 10.;Some 0.;Some 10.] |> ok
+        let localFrame={ChartFrame.create 200. 200. "bands" with Margin={Top=0.;Right=0.;Bottom=0.;Left=0.}}
+        let spec=DensityChartSpec.create localFrame (fun _ -> Paint.currentColor)
+        let result=ContourChart.isobands spec (ContourConfig.create [2.;8.]) grid |> ok
+        Expect.equal result.Chart.HitTargets.Length 2 "lower band and unbounded top band"
+        for target in result.Chart.HitTargets do
+            match target.Geometry with
+            | HitRegion(_,_,anchor) ->
+                Expect.isTrue (HitTest.contains anchor target.Geometry) "anchor belongs to actual band"
+                Expect.equal (HitTest.at anchor result.Chart).Length 1 "bands do not overlap"
+            | _ -> failwith "region"
+        Expect.equal (HitTest.at (Point.create 100. 100.) result.Chart).Length 1 "interpolated lower band"
+        Expect.equal (HitTest.at (Point.create 145. 100.) result.Chart).Length 1 "upper band"
+        Expect.isEmpty (HitTest.at (Point.create 10. 100.) result.Chart) "below lowest threshold"
+        let reordered=ContourChart.isobands spec (ContourConfig.create [8.;2.]) grid |> ok
+        Expect.equal reordered.Membership result.Membership "threshold order canonical"
+    testCase "contour composition preserves holes and removes empty bands" <| fun _ ->
+        let values=[for y in 0..4 do for x in 0..4 -> Some(if x=2 && y=2 then 0. else 10.)]
+        let grid=DensityGrid.create (Bounds.create 0. 0. 5. 5.) 5 5 values |> ok
+        let localFrame={ChartFrame.create 200. 200. "ring" with Margin={Top=0.;Right=0.;Bottom=0.;Left=0.}}
+        let spec=DensityChartSpec.create localFrame (fun _ -> Paint.currentColor)
+        let result=ContourChart.contours spec (ContourConfig.create [5.]) grid |> ok
+        Expect.isEmpty (HitTest.at (Point.create 100. 100.) result.Chart) "central hole"
+        Expect.equal (HitTest.at (Point.create 50. 100.) result.Chart).Length 1 "filled shell"
+        let constant=DensityGrid.create (Bounds.create 0. 0. 2. 2.) 2 2 (List.replicate 4 (Some 10.)) |> ok
+        let bands=ContourChart.isobands spec (ContourConfig.create [2.;8.]) constant |> ok
+        Expect.equal bands.Chart.HitTargets.Length 1 "identical superlevels make an empty lower band"
+
+    testCase "generated masked isobands match the contour union without double picking" <| fun _ ->
+        let localFrame={ChartFrame.create 200. 200. "bands" with Margin={Top=0.;Right=0.;Bottom=0.;Left=0.}}
+        let spec=DensityChartSpec.create localFrame (fun _ -> Paint.currentColor)
+        for seed in 0..15 do
+            let values=[for i in 0..24 -> if (i+seed)%9=0 then None else Some(float((i*17+seed*11)%19)-9.)]
+            let grid=DensityGrid.create (Bounds.create 0. 0. 5. 5.) 5 5 values |> ok
+            let config=ContourConfig.create [-2.;2.;5.]
+            let contours=Contour.compute config grid |> ok
+            let result=ContourChart.isobands spec config grid |> ok
+            for y in 0..19 do
+                for x in 0..19 do
+                    let point=Point.create (float x*0.25+0.125) (float y*0.25+0.125)
+                    let project (p:Point)=Point.create (p.X/5.*200.) (p.Y/5.*200.)
+                    let screen=Point.create (point.X*40.) (point.Y*40.)
+                    let expected=contours |> List.exists(fun p ->
+                        p.Threshold= -2. && Polygon.contains screen (List.map project p.Outer) &&
+                        not(p.Holes |> List.exists(fun ring -> Polygon.contains screen (List.map project ring))))
+                    let hits=HitTest.at screen result.Chart
+                    Expect.equal hits.Length (if expected then 1 else 0) (sprintf "same union; disjoint bands: seed %d x %d y %d" seed x y)
+    testCase "contour recipes retain membership and handle masks limits and cancellation" <| fun _ ->
+        let config=DensityConfig.create (Bounds.create 0. 0. 3. 1.) 3 1
+        let grid=Density.grid config [{Id="low";Position=Point.create 0.5 0.5;Weight=3.};{Id="high";Position=Point.create 2.5 0.5;Weight=9.}] |> ok
+        let spec=DensityChartSpec.create frame (fun _ -> Paint.currentColor)
+        let layout=ContourConfig.create [2.;8.]
+        let result=ContourChart.isobands spec layout grid |> ok
+        Expect.equal (result.Membership |> Map.toList |> List.collect snd |> List.sort) ["high";"low"] "disjoint memberships conserve sources above cutoff"
+        let changed=ContourChart.isobands {spec with Frame={frame with Viewport={Width=900.;Height=700.}}} layout grid |> ok
+        Expect.equal changed.Membership result.Membership "resize retains level identity"
+        let missing=DensityGrid.create config.Bounds 3 1 [None;None;None] |> ok
+        Expect.isEmpty (ContourChart.isobands spec layout missing |> ok).Chart.HitTargets "all missing"
+        Expect.isEmpty (ContourChart.contours spec (ContourConfig.create []) grid |> ok).Chart.HitTargets "empty thresholds"
+        Expect.isError (ContourChart.isobands spec (ContourConfig.create [2.;2.]) grid) "duplicate thresholds"
+        Expect.isError (ContourChart.isobands spec {layout with MaxWork=1L} grid) "work limit"
+        match ContourChart.isobands {spec with MaxMarks=1} layout grid with
+        | Error [BudgetExceeded _] -> ()
+        | other -> failwithf "Expected visible mark limit: %A" other
+        use cancel=new System.Threading.CancellationTokenSource()
+        cancel.Cancel()
+        Expect.throwsT<System.OperationCanceledException> (fun () -> ContourChart.isobandsWithCancellation cancel.Token spec layout grid |> ignore) "pre-cancel"
+        use during=new System.Threading.CancellationTokenSource()
+        let cancelling={spec with Color=(fun _ -> during.Cancel();Paint.currentColor)}
+        Expect.throwsT<System.OperationCanceledException> (fun () -> ContourChart.contoursWithCancellation during.Token cancelling layout grid |> ignore) "composition cancel"
+    testCase "density recipes observe cancellation before and during composition" <| fun _ ->
+        use cancel=new System.Threading.CancellationTokenSource()
+        let grid=DensityGrid.create (Bounds.create 0. 0. 10. 10.) 2 2 [Some 1.;Some 2.;Some 3.;Some 4.] |> ok
+        let spec=DensityChartSpec.create frame (fun _ -> Paint.currentColor)
+        cancel.Cancel()
+        Expect.throwsT<System.OperationCanceledException> (fun () -> DensityChart.heatmapWithCancellation cancel.Token spec grid |> ignore) "heatmap pre-cancel"
+        Expect.throwsT<System.OperationCanceledException> (fun () -> DensityChart.hexbinWithCancellation cancel.Token spec (HexbinConfig.create (Bounds.create 0. 0. 10. 10.) 1.) [] |> ignore) "hex pre-cancel"
+        use during=new System.Threading.CancellationTokenSource()
+        let mutable calls=0
+        let cancelling={spec with Color=(fun _ -> calls<-calls+1;during.Cancel();Paint.currentColor)}
+        Expect.throwsT<System.OperationCanceledException> (fun () -> DensityChart.heatmapWithCancellation during.Token cancelling grid |> ignore) "cancelled output never returned"
+        Expect.isLessThanOrEqual calls 2 "stop during composition"
+    testCase "density heatmap output limits use typed budget errors" <| fun _ ->
+        let grid=DensityGrid.create (Bounds.create 0. 0. 2. 1.) 2 1 [Some 0.;Some 1.] |> ok
+        let spec={DensityChartSpec.create frame (fun _ -> Paint.currentColor) with MaxMarks=1}
+        match DensityChart.heatmap spec grid with
+        | Error [BudgetExceeded _] -> ()
+        | result -> failwithf "Expected output budget error, got %A" result
+
     testCase "hexbin charts retain aggregate membership and polygon picking" <| fun _ ->
         let config=HexbinConfig.create (Bounds.create 0. 0. 10. 10.) 1.
         let points=[{Id="a";Position=Point.create (3.*sqrt 3.) 3.;Weight=1.};{Id="b";Position=Point.create 5.2 3.1;Weight=2.}]
