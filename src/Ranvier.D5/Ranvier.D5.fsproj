@@ -17,6 +17,9 @@
     <Compile Include="SceneNode.fs" />
     <Compile Include="Scene.fs" />
     <Compile Include="Layout.fs" />
+    <Compile Include="Curves.fs" />
+    <Compile Include="ShapeExtensions.fs" />
+    <Compile Include="Stack.fs" />
     <Compile Include="Spatial.fs" />
     <Compile Include="Reactive.fs" />
   </ItemGroup>
@@ -24,6 +27,7 @@
     <PackageReference Include="Ranvier$(RanvierPackageSuffix)" Version="[0.1.1-preview.2]" />
     <PackageReference Include="Ranvier.Anime$(RanvierPackageSuffix)" Version="[0.1.0-rc.1]" />
     <PackageReference Include="Ranvier.Css$(RanvierPackageSuffix)" Version="[0.1.1-alpha.2]" />
+    <None Include="../../tools/reference-fixtures/licenses/d3-shape.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>
