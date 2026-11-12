@@ -104,3 +104,12 @@ and velocities. Allocation fell from 1,690,016 to 913,912 bytes per step (45.9
 percent), independently enforced by a regression test that failed before reuse.
 The fixture's allocation gate is tightened from 8 MB to 1 MB; its 25 ms p95 gate,
 workload and sampling policy remain unchanged.
+
+Retained rendering also caches the option wrappers used by appearance and
+transform attributes. Three further alternating Windows Traced pairs reduced
+allocation by 180,000 bytes per 500-mark update. Default-tiering median time
+ratio was 0.9002 (-0.966 ms); fully optimized ratio was 0.9422 (-0.334 ms).
+The focused allocations were 1,886,448 and 1,854,280 bytes respectively. The
+retained allocation gate tightens from 32 MB to 2 MB, with unchanged timing
+limits and paired tolerances. These local results do not establish the macOS
+result; all platform checks remain release requirements.
