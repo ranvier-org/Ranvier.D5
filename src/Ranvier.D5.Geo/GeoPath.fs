@@ -157,25 +157,49 @@ module GeoPath =
                         if options.ClipExtent.IsSome then
                             raise(Rejected(InvalidObservation "Rectangular line clipping is not yet implemented."))
                         lineCommands.Clear()
-                        let add command =
-                            reserve 1
-                            if lineCommands.Count>=options.MaxBufferedPoints then
+                        let mutable pending=ValueNone
+                        let mutable tail=ValueNone
+                        let startFragment point =
+                            lineCommands.Clear()
+                            pending<-ValueSome point
+                            tail<-ValueSome point
+                        let addLine point =
+                            let count=if pending.IsSome then 2 else 1
+                            reserve count
+                            if count>options.MaxBufferedPoints-lineCommands.Count then
                                 raise(Rejected(BudgetExceeded "Projected line exceeds its buffer budget."))
-                            lineCommands.Add command
+                            match pending with
+                            | ValueSome first -> lineCommands.Add(MoveTo first); pending<-ValueNone
+                            | ValueNone -> ()
+                            lineCommands.Add(LineTo point)
+                            tail<-ValueSome point
+                        let flush () =
+                            if lineCommands.Count>1 then
+                                let mutable commands=[]
+                                for index=lineCommands.Count-1 downto 0 do
+                                    spend 1L
+                                    commands<-lineCommands[index]::commands
+                                paths.Add(Path.ofCommands commands)
+                            lineCommands.Clear()
+                            pending<-ValueNone
+                            tail<-ValueNone
                         let screen position =
-                            match Projection.projectValue projection position with
+                            match Projection.projectRotatedValue projection position with
                             | ValueSome value -> value
                             | ValueNone -> raise(Rejected(InvalidObservation "This line requires spherical preclipping before projection."))
                         let rec segment depth (first:GeoPosition) (last:GeoPosition) (a:Point) (b:Point) =
                             spend 1L
-                            let start,finish=GeoPosition.normalize first,GeoPosition.normalize last
-                            if abs(start.Longitude-finish.Longitude)>=180. then
-                                raise(Rejected(InvalidObservation "Antimeridian and pole-crossing line preclipping is not yet implemented."))
                             let arc =
                                 match GeoArc.create first last with
                                 | Ok value -> value
                                 | Error errors -> raise(Rejected errors.Head)
-                            let interpolate amount = GeoArc.atFraction amount arc
+                            let interpolate amount =
+                                let value=GeoArc.atFraction amount arc
+                                if first.Longitude=last.Longitude && abs first.Longitude=180. then
+                                    match GeoPosition.create first.Longitude value.Latitude with
+                                    | Ok signed -> signed
+                                    | Error errors -> raise(Rejected errors.Head)
+                                else value
                             let midpoint=interpolate 0.5
                             let middle=screen midpoint
                             let dx,dy=b.X-a.X,b.Y-a.Y
@@ -206,22 +230,89 @@ module GeoPath =
                                     raise(Rejected(BudgetExceeded "Projected line cannot meet precision within its subdivision depth."))
                                 segment (depth+1) first midpoint a middle
                                 segment (depth+1) midpoint last middle b
-                            else add(LineTo b)
-                        let mutable previous=lineInput[0]
-                        let mutable previousScreen=screen previous
-                        add(MoveTo previousScreen)
+                            else addLine b
+                        let position longitude latitude =
+                            match GeoPosition.create longitude latitude with
+                            | Ok value -> value
+                            | Error errors -> raise(Rejected errors.Head)
+                        let tailPoint () =
+                            match tail with
+                            | ValueSome point -> point
+                            | ValueNone -> raise(Rejected(InvalidObservation "Projected line fragment has no starting point."))
+                        let arcBetween first last =
+                            match GeoArc.create first last with
+                            | Ok value -> value
+                            | Error errors -> raise(Rejected errors.Head)
+                        let ensureStart first =
+                            let point=screen first
+                            match tail with
+                            | ValueSome current when current=point -> ()
+                            | _ -> flush(); startFragment point
+                        let cylindrical=Projection.kind projection<>ProjectionKind.Orthographic
+                        let edge (source:GeoPosition) (destination:GeoPosition) =
+                            let first=if abs source.Latitude=90. then position destination.Longitude source.Latitude else source
+                            let last=if abs destination.Latitude=90. then position first.Longitude destination.Latitude else destination
+                            if abs source.Latitude=90. then flush()
+                            let delta=abs(first.Longitude-last.Longitude)
+                            let side longitude=if longitude>0. then 180. else -180.
+                            if cylindrical && abs first.Longitude=180. && abs last.Longitude=180. then
+                                let positive=position 180. first.Latitude
+                                let longitude =
+                                    match tail with
+                                    | ValueSome current when current=screen positive -> 180.
+                                    | _ -> -180.
+                                let before,after=position longitude first.Latitude,position longitude last.Latitude
+                                ensureStart before
+                                segment 0 before after (tailPoint()) (screen after)
+                            elif cylindrical && delta=180. then
+                                ensureStart first
+                                arcBetween first last |> ignore
+                                let latitude=if first.Latitude+last.Latitude>0. then 90. else -90.
+                                let before=position first.Longitude latitude
+                                let seamBefore=position (side first.Longitude) latitude
+                                let seamAfter=position (side last.Longitude) latitude
+                                let after=position last.Longitude latitude
+                                segment 0 first before (tailPoint()) (screen before)
+                                if screen seamBefore<>tailPoint() then addLine(screen seamBefore)
+                                flush()
+                                startFragment(screen seamAfter)
+                                if screen after<>tailPoint() then addLine(screen after)
+                                segment 0 after last (tailPoint()) (screen last)
+                            elif cylindrical && delta>180. then
+                                let arc=arcBetween first last
+                                let latitude =
+                                    if abs first.Longitude=180. then first.Latitude
+                                    elif abs last.Longitude=180. then last.Latitude
+                                    else
+                                        let root=atan2 (-arc.Y) arc.TangentY
+                                        let root=if root<0. then root+Math.PI else root
+                                        if root<0. || root>arc.Angle+1e-12 then
+                                            raise(Rejected(InvalidObservation "Antimeridian intersection lies outside its great-circle arc."))
+                                        (GeoArc.atFraction (Math.Clamp(root/arc.Angle,0.,1.)) arc).Latitude
+                                let before=position (side first.Longitude) latitude
+                                let after=position (side last.Longitude) latitude
+                                if abs first.Longitude=180. then
+                                    ensureStart after
+                                    if Geodesic.distance after last>0. then segment 0 after last (tailPoint()) (screen last)
+                                elif abs last.Longitude=180. then
+                                    ensureStart first
+                                    segment 0 first before (tailPoint()) (screen before)
+                                else
+                                    ensureStart first
+                                    segment 0 first before (tailPoint()) (screen before)
+                                    flush()
+                                    startFragment(screen after)
+                                    segment 0 after last (tailPoint()) (screen last)
+                            else
+                                ensureStart first
+                                segment 0 first last (tailPoint()) (screen last)
+                        let mutable previous=Projection.rotate projection lineInput[0]
                         for index=1 to lineInput.Count-1 do
                             spend 1L
-                            let current=lineInput[index]
-                            let currentScreen=screen current
-                            segment 0 previous current previousScreen currentScreen
+                            let current=Projection.rotate projection lineInput[index]
+                            edge previous current
                             previous<-current
-                            previousScreen<-currentScreen
-                        let mutable commands=[]
-                        for index=lineCommands.Count-1 downto 0 do
-                            spend 1L
-                            commands<-lineCommands[index]::commands
-                        paths.Add(Path.ofCommands commands)
+                        flush()
                 let folder () event =
                     spend 1L
                     match event with

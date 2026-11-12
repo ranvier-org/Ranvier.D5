@@ -45,7 +45,7 @@ module Projection =
     let private degrees = 180. / Math.PI
 
     let private raw kind (position:GeoPosition) =
-        let canonical=GeoPosition.normalize position
+        let canonical=position
         match kind with
         | ProjectionKind.Equirectangular ->
             ValueSome (struct(canonical.Longitude*radians, canonical.Latitude*radians))
@@ -63,14 +63,16 @@ module Projection =
            not(Double.IsFinite config.Translate.X && Double.IsFinite config.Translate.Y) then
             Error [InvalidObservation "Projection requires positive finite scale and finite screen translation."]
         else
-            match raw config.Kind config.Center with
+            match raw config.Kind (GeoPosition.normalize config.Center) with
             | ValueNone -> Error [InvalidObservation "The projection center is singular."]
             | ValueSome struct(x,y) -> Ok {Config=config;CenterX=x;CenterY=y}
 
-    /// <summary>Maps a position to screen coordinates, or None at a singularity, behind the orthographic limb, or on overflow.</summary>
-    let internal projectValue projection position =
+    let internal rotate projection position = GeoRotation.apply projection.Config.Rotation position
+
+    let internal kind projection = projection.Config.Kind
+
+    let internal projectRotatedValue projection (rotated:GeoPosition) =
         let config=projection.Config
-        let rotated=GeoRotation.apply config.Rotation position
         let visible =
             match config.Kind with
             | ProjectionKind.Orthographic ->
@@ -87,6 +89,8 @@ module Projection =
                 let screenY=config.Translate.Y - config.Scale*(y-projection.CenterY)
                 if Double.IsFinite screenX && Double.IsFinite screenY then ValueSome {X=screenX;Y=screenY}
                 else ValueNone
+
+    let internal projectValue projection position = projectRotatedValue projection (rotate projection position)
 
     /// <summary>Maps a position to screen coordinates, or None at a singularity, behind the orthographic limb, or on overflow.</summary>
     let project projection position = projectValue projection position |> ValueOption.toOption

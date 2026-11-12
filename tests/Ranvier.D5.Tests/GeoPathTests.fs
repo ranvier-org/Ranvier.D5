@@ -2,6 +2,7 @@ module Ranvier.D5.Tests.GeoPathTests
 
 open System
 open System.Threading
+open System.Text.Json
 open Expecto
 open Ranvier.D5
 open Ranvier.D5.Geo
@@ -120,6 +121,71 @@ let tests = testList "geographic paths" [
             match GeoPath.project options projected geometry with
             | Error [BudgetExceeded _] -> ()
             | result -> failtestf "Expected bounded resampling failure, got %A" result
+    testCase "seam stream endpoints and topology match pinned reference fixtures" <| fun _ ->
+        use json=JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory,"fixtures","seam-streams.json")))
+        for item in json.RootElement.GetProperty("cases").EnumerateArray() do
+            let kind=if item.GetProperty("kind").GetString()="Mercator" then ProjectionKind.Mercator else ProjectionKind.Equirectangular
+            let angles=item.GetProperty("rotate")
+            let rotation=GeoRotation.create (angles[0].GetDouble()) (angles[1].GetDouble()) (angles[2].GetDouble()) |> ok
+            let projected=Projection.create {ProjectionConfig.defaultValue kind with Scale=item.GetProperty("scale").GetDouble();Rotation=rotation} |> ok
+            let positions=item.GetProperty("points").EnumerateArray() |> Seq.map(fun value -> p (value[0].GetDouble()) (value[1].GetDouble())) |> Seq.toList
+            let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=item.GetProperty("precision").GetDouble()} projected (GeoGeometry.LineString positions) |> ok
+            let expected=item.GetProperty("fragments").EnumerateArray() |> Seq.toArray
+            Expect.equal paths.Length expected.Length (item.GetProperty("name").GetString())
+            for index=0 to paths.Length-1 do
+                let vertices=Path.commands paths[index] |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+                let reference=expected[index]
+                for actual,target in [vertices.Head,reference[0];List.last vertices,reference[reference.GetArrayLength()-1]] do
+                    Expect.isLessThan (Double.Hypot(actual.X-target[0].GetDouble(),actual.Y-target[1].GetDouble())) 1e-9 "fragment endpoint"
+    testCase "splits antimeridian arcs without a cross-map connector" <| fun _ ->
+        let projected=projection ProjectionKind.Equirectangular
+        for first,last,sign in [p 170. 10.,p -170. 10.,1.;p -170. 10.,p 170. 10.,-1.] do
+            let paths=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString[first;last]) |> ok
+            Expect.equal paths.Length 2 "two seam fragments"
+            let vertices path=Path.commands path |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+            let before,after=vertices paths[0],vertices paths[1]
+            let latitude=atan(tan(Math.PI/18.)/cos(Math.PI/18.))
+            Expect.isLessThan (abs((List.last before).X-sign*Math.PI)) 1e-12 "outgoing seam"
+            Expect.isLessThan (abs(after.Head.X+sign*Math.PI)) 1e-12 "incoming seam"
+            Expect.isLessThan (abs(after.Head.Y+latitude)) 1e-12 "great-circle intersection latitude"
+            for fragment in [before;after] do
+                Expect.isTrue (List.pairwise fragment |> List.forall(fun (a,b) -> abs(a.X-b.X)<Math.PI)) "no world-spanning segment"
+    testCase "seam endpoints do not create phantom fragments or consume phantom output" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with MaxOutputPoints=2}
+        let projected=projection ProjectionKind.Equirectangular
+        for positions in [[p 180. 10.;p 170. 15.];[p 170. 15.;p 180. 10.]] do
+            let paths=GeoPath.project options projected (GeoGeometry.LineString positions) |> ok
+            Expect.equal paths.Length 1 "one nonempty fragment"
+            let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+            Expect.equal vertices.Length 2 "only real endpoints count"
+            Expect.isTrue (vertices |> List.exists(fun point -> point.X=Math.PI)) "positive seam representation"
+    testCase "seam touches remain connected while seam-vertex crossings split" <| fun _ ->
+        let projected=projection ProjectionKind.Equirectangular
+        let touches=GeoPath.project {GeoPathOptions.defaultValue with MaxOutputPoints=3} projected (GeoGeometry.LineString[p 170. 10.;p 180. 10.;p 170. 15.]) |> ok
+        Expect.equal touches.Length 1 "touching the seam does not break the stroke"
+        let crossing=GeoPath.project {GeoPathOptions.defaultValue with MaxOutputPoints=4} projected (GeoGeometry.LineString[p 170. 10.;p 180. 10.;p -170. 10.]) |> ok
+        Expect.equal crossing.Length 2 "a true crossing at an existing vertex splits"
+    testCase "runs along the seam preserve the incident side" <| fun _ ->
+        let paths=GeoPath.project {GeoPathOptions.defaultValue with MaxOutputPoints=4} (projection ProjectionKind.Equirectangular) (GeoGeometry.LineString[p 170. 10.;p 180. 10.;p 180. 20.;p 170. 25.]) |> ok
+        Expect.equal paths.Length 1 "one connected seam run"
+        let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+        Expect.isTrue (vertices |> List.forall(fun point -> point.X>0.)) "run stays on positive seam"
+    testCase "pole-crossing lines follow the map boundary and preserve pole aliases" <| fun _ ->
+        let projected=projection ProjectionKind.Equirectangular
+        let paths=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString[p -90. 60.;p 90. 60.]) |> ok
+        Expect.equal paths.Length 2 "pole crossing split"
+        for path in paths do
+            let vertices=Path.commands path |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+            Expect.isTrue (vertices |> List.exists(fun point -> point.Y= -Math.PI/2.)) "north boundary included"
+            Expect.isTrue (vertices |> List.forall(fun point -> abs point.X<=Math.PI && abs point.Y<=Math.PI/2.)) "bounded world"
+        let alias=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString[p 123. 90.;p 170. 80.]) |> ok
+        let vertices=Path.commands alias.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+        Expect.isTrue (vertices |> List.forall(fun point -> abs(point.X-170.*Math.PI/180.)<1e-12)) "pole representation follows the incident meridian"
+    testCase "preclipping is applied after spherical rotation" <| fun _ ->
+        let rotation=GeoRotation.create 180. 0. 0. |> ok
+        let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Rotation=rotation} |> ok
+        let paths=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString[p -10. 10.;p 10. 10.]) |> ok
+        Expect.equal paths.Length 2 "rotation moves the arc across the seam"
     testCase "rejects point-radius overflow instead of emitting nonfinite path commands" <| fun _ ->
         let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Translate={X=Double.MaxValue;Y=0.}} |> ok
         Expect.isError (GeoPath.project {GeoPathOptions.defaultValue with PointRadius=Double.MaxValue} projected (GeoGeometry.Point(Some(p 0. 0.)))) "overflow is explicit"
