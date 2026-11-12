@@ -49,7 +49,12 @@ let main args =
                 if count=0 || not(Double.IsFinite checksum) then failwith "Projection output"))
     let pointProjection=Projection.create (ProjectionConfig.defaultValue ProjectionKind.Equirectangular) |> ok
     let pointGeometry=GeoGeometry.MultiPoint(List.take 10000 points)
+    let clippedPointGeometry=GeoGeometry.MultiPoint(List.replicate 1000 (p 0. 0.))
+    let clippedPointOptions={GeoPathOptions.defaultValue with PointRadius=2.;Precision=0.01;ClipExtent=Some(Ranvier.D5.Bounds.create 0. -3. 3. 6.)}
     let results=[|
+        measure "geo-clipped-point-paths-1000" 50. 4000000L (fun () ->
+            let paths=GeoPath.project clippedPointOptions pointProjection clippedPointGeometry |> ok
+            if paths.Length<>1000 then failwith "Clipped point path count")
         measure "geo-point-paths-10000" 50. 8000000L (fun () ->
             let paths=GeoPath.project GeoPathOptions.defaultValue pointProjection pointGeometry |> ok
             if paths.Length<>10000 then failwith "Point path count")
