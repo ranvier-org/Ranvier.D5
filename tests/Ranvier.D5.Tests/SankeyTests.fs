@@ -124,6 +124,32 @@ let tests = testList "Sankey" [
         Expect.throwsT<OperationCanceledException> (fun () ->
             Sankey.layoutWithCancellation cancel.Token {config with NodePadding=0.;Iterations=256} input |> ignore) "cooperative cancellation"
         Expect.isLessThan timer.Elapsed.TotalSeconds 5. "cancellation bound"
+    testCase "explicit stages retain gaps and reject missing backwards or excessive stages" <| fun _ ->
+        let graph=FlowGraph.create ["a";"b";"c"] [link "ac" "a" "c" 2.;link "bc" "b" "c" 1.] |> ok
+        let stages=Map.ofList ["a",0;"b",1;"c",3]
+        let result=Sankey.layoutStaged config stages graph |> ok
+        Expect.equal (result.Nodes |> List.map(fun node -> node.Layer)) [0;1;3] "explicit stages survive justification"
+        for bad in [stages.Remove "b";stages.Add("extra",2);stages.Add("a",3);stages.Add("a",-1);stages.Add("c",config.MaxNodes)] do
+            Expect.isError (Sankey.layoutStaged config bad graph) "invalid stages"
+    testCase "node movement changes only incident endpoints and respects neighbor slots" <| fun _ ->
+        let initial=Sankey.layout {config with Iterations=0} (graph()) |> ok
+        let node=initial.Nodes |> List.find(fun node -> node.Id="d")
+        let moved=Sankey.moveNode config "d" (Bounds.y node.Bounds+10.) initial |> ok
+        let after=moved.Nodes |> List.find(fun node -> node.Id="d")
+        let delta=Bounds.y after.Bounds-Bounds.y node.Bounds
+        Expect.isGreaterThan delta 0. "move within remaining viewport"
+        for before,next in List.zip initial.Nodes moved.Nodes do
+            if before.Id<>"d" then Expect.equal next before "unrelated nodes unchanged"
+        for before,next in List.zip initial.Links moved.Links do
+            Expect.equal next.Width before.Width "link widths unchanged"
+            Expect.equal next.Start before.Start "nonincident start unchanged"
+            Expect.floatClose Accuracy.high next.Finish.Y (before.Finish.Y+(if before.Target="d" then delta else 0.)) "only incident target moves"
+        let blocked=Sankey.moveNode config "b" 10000. initial |> ok
+        let b=blocked.Nodes |> List.find(fun node -> node.Id="b")
+        let c=blocked.Nodes |> List.find(fun node -> node.Id="c")
+        Expect.isTrue (Bounds.y b.Bounds+Bounds.height b.Bounds+config.NodePadding<=Bounds.y c.Bounds+1e-9) "cannot cross neighbor"
+        Expect.isError (Sankey.moveNode config "missing" 0. initial) "missing identity"
+        Expect.isError (Sankey.moveNode config "d" nan initial) "finite position"
     testCase "pre-cancelled layout never publishes" <| fun _ ->
         use cancel=new Threading.CancellationTokenSource()
         cancel.Cancel()

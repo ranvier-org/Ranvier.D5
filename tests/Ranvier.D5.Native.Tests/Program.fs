@@ -67,7 +67,9 @@ let acceptance () =
         Expect.equal (retained.getAttribute "fill") "#00ff00" "paint updated"
         Expect.equal (retained.getAttribute "stroke") "#010203" "stroke updated"
         Expect.equal (retained.getAttribute "stroke-width") "2" "stroke width updated"
-        Expect.equal (retained.getAttribute "opacity") "0.75" "opacity updated"
+        Expect.isFalse (retained.hasAttribute "opacity") "wrapper does not create an opacity group"
+        Expect.equal ((retained.querySelector "path").getAttribute "opacity") "0.75" "path opacity updated"
+        Expect.equal ((retained.querySelector "text").getAttribute "opacity") "0.75" "text opacity ready for geometry changes"
         Expect.equal (retained.getAttribute "font-size") "18" "font size updated"
         Expect.equal (retained.getAttribute "font-family") "serif" "font family updated"
         Expect.equal (retained.getAttribute "font-weight") "700" "font weight updated"
@@ -77,6 +79,28 @@ let acceptance () =
         let after = Array.zeroCreate<byte> before.Length
         host.Paint after
         Expect.isFalse (before = after) "native pixels changed"
+        retained.setAttribute("opacity","0.75")
+        (retained.querySelector "path").setAttribute("opacity","1")
+        (retained.querySelector "text").setAttribute("opacity","1")
+        host.Cycle()
+        host.Frame()
+        let reference=Array.zeroCreate<byte> after.Length
+        host.Paint reference
+        let maxDifference=Array.map2(fun a b -> abs(int a-int b)) after reference |> Array.max
+        Expect.isLessThanOrEqual maxDifference 1 "visible-element opacity preserves filled/stroked pixel compositing"
+        retained.removeAttribute "opacity"
+        (retained.querySelector "path").setAttribute("opacity","0.75")
+        (retained.querySelector "text").setAttribute("opacity","0.75")
+        host.Cycle()
+        graph.Run(fun () -> source.Value <- make [box "b" 90. (Paint.rgb 0 0 255); updated |> Mark.withStroke Paint.none 0.])
+        host.Cycle()
+        Expect.equal ((retained.querySelector "path").getAttribute "opacity") "1" "removing stroke disables combined opacity"
+        Expect.equal ((retained.querySelector "path").getAttribute "fill-opacity") "0.75" "fill-only alpha updates after style change"
+        Expect.equal ((retained.querySelector "path").getAttribute "stroke-opacity") "1" "unused stroke alpha resets"
+        graph.Run(fun () -> source.Value <- make [box "b" 90. (Paint.rgb 0 0 255); updated])
+        host.Cycle()
+        Expect.equal ((retained.querySelector "path").getAttribute "opacity") "0.75" "adding stroke restores combined opacity"
+        Expect.equal ((retained.querySelector "path").getAttribute "fill-opacity") "1" "fill alpha resets for combined paint"
         host.Click(40, 40) |> ignore
         Expect.isTrue (events.Contains ("a", "click")) "retained mark receives pointer event"
         let svg=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
@@ -200,6 +224,73 @@ let acceptance () =
         Expect.equal (graph.Run(fun () -> networkInput.Selection.Selected)) (set ["node"]) "keyboard selects semantic node"
         networkInput.Send(InputEvent.Down(1,Point.create 130. 110.,target))
         forceOwner.Dispose()
+        host.Cycle()
+        let flowOwner,flowState,flowInput,flowSvg=graph.Run(fun () -> Api.createRoot(fun owner ->
+            let frame=Ranvier.D5.Charts.ChartFrame.create 300. 180. "Flow drag"
+            let bounds=Ranvier.D5.Charts.ChartLayout.plot frame |> Result.defaultWith(fun e -> failwithf "%A" e)
+            let config={SankeyConfig.create bounds with NodeWidth=18.;NodePadding=Bounds.height bounds/2.;Iterations=0}
+            let topology=FlowGraph.create ["a";"b";"spacer"] [{FlowLink.Id="ab";Source="a";Target="b";Value=1.}]
+                         |> Result.defaultWith(fun e -> failwithf "%A" e)
+            let initial=Sankey.layout config topology |> Result.defaultWith(fun e -> failwithf "%A" e)
+            let state=Api.createSignal initial
+            let spec={Ranvier.D5.Charts.FlowSpec.create frame with ShowLabels=false}
+            let chart=Reactive.derive (fun () -> state.Value) (fun layout -> Ranvier.D5.Charts.FlowChart.sankey spec layout |> Result.defaultWith(fun e -> failwithf "%A" e))
+            let mounted=Mounting.mount graph None (fun errors -> raise(AggregateException errors)) container None
+                            (fun context -> Program.run (Component.render Renderer.passive (fun () -> chart.Value.Scene)) context.Backend)
+            Api.onCleanup(fun () -> mounted.Dispose())
+            host.Cycle()
+            let svg=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
+            let input=FlowInteraction.attach svg (fun () -> chart.Value) (fun () -> config) (fun () -> state.Value)
+                          (fun next -> state.Value<-next) (fun errors -> failwithf "%A" errors)
+            owner,state,input,svg))
+        host.Cycle()
+        host.Frame()
+        host.Paint before
+        let flowPath=flowSvg.querySelector "[data-d5-key='4:link2:ab'] path"
+        Expect.equal (flowPath.getAttribute "opacity") "1" "single stroke avoids element opacity layer"
+        Expect.floatClose Accuracy.high (Double.Parse(flowPath.getAttribute "stroke-opacity",Globalization.CultureInfo.InvariantCulture)) 0.4 "link alpha applies directly to stroke paint"
+        let paintOnly=Array.zeroCreate<byte> before.Length
+        host.Paint paintOnly
+        flowPath.setAttribute("stroke-opacity","1")
+        flowPath.setAttribute("opacity","0.4")
+        host.Cycle()
+        host.Frame()
+        let elementOpacity=Array.zeroCreate<byte> before.Length
+        host.Paint elementOpacity
+        Expect.isLessThanOrEqual (Array.map2(fun a b -> abs(int a-int b)) paintOnly elementOpacity |> Array.max) 1 "stroke opacity preserves element-opacity pixels"
+        flowPath.setAttribute("stroke-opacity","0.4")
+        flowPath.setAttribute("opacity","1")
+        host.Cycle()
+        let initialFlow=graph.Run(fun () -> flowState.Value)
+        let flowBox=(flowSvg.querySelector "[data-d5-key='4:node1:a']").getBoundingClientRect()
+        let fx,fy=int(flowBox.x+flowBox.width/2.),int(flowBox.y+flowBox.height/2.)
+        host.Mouse(1,fx,fy,0,1,0) |> ignore
+        Expect.isTrue (flowSvg.hasPointerCapture 1) "flow captures pointer"
+        host.Mouse(0,fx,fy+5,0,0,0) |> ignore
+        host.Mouse(2,fx,fy+10,0,1,0) |> ignore
+        let movedFlow=graph.Run(fun () -> flowState.Value)
+        Expect.floatClose Accuracy.high (Bounds.y movedFlow.Nodes.Head.Bounds) (Bounds.y initialFlow.Nodes.Head.Bounds+10.) "native final-up flow delta"
+        Expect.equal movedFlow.Nodes.Tail initialFlow.Nodes.Tail "drag leaves unrelated nodes"
+        Expect.floatClose Accuracy.high movedFlow.Links.Head.Start.Y (initialFlow.Links.Head.Start.Y+10.) "incident source endpoint moves"
+        Expect.equal movedFlow.Links.Head.Finish initialFlow.Links.Head.Finish "nonincident endpoint fixed"
+        Expect.isFalse (flowSvg.hasPointerCapture 1) "flow releases pointer"
+        let flowTarget=Some ["plot";"4:node1:a"]
+        for ending in [InputEvent.Cancel;InputEvent.FocusLost] do
+            flowInput.Send(InputEvent.Down(1,Point.create 50. 50.,flowTarget))
+            flowInput.Send ending
+            flowInput.Send(InputEvent.Move(1,Point.create 50. 80.))
+            Expect.equal (graph.Run(fun () -> flowState.Value)) movedFlow "cancel/focus loss prevents late movement"
+        flowInput.Send(InputEvent.Key "ArrowRight")
+        flowInput.Send(InputEvent.Key "Enter")
+        Expect.equal (graph.Run(fun () -> flowInput.Selection.Selected)) (set ["a"]) "flow keyboard selects domain"
+        flowInput.Send(InputEvent.Down(1,Point.create 50. 50.,flowTarget))
+        graph.Run(fun () -> flowState.Value<-{Nodes=[];Links=[]})
+        Expect.isEmpty (graph.Run(fun () -> flowInput.Gesture.Pointers)) "exiting flow node cancels drag"
+        graph.Run(fun () -> flowState.Value<-movedFlow)
+        flowInput.Send(InputEvent.Down(1,Point.create 50. 50.,flowTarget))
+        flowOwner.Dispose()
+        flowInput.Send(InputEvent.Move(1,Point.create 50. 80.))
+        Expect.equal (graph.Run(fun () -> flowState.Value)) movedFlow "disposed flow input does not publish"
         host.Cycle()
 
 [<EntryPoint>]

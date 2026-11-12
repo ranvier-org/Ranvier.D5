@@ -95,6 +95,17 @@ Run `--sankey` for a signal-driven DAG layout; capture with
 `--capture-sankey artifacts/sankey.bmp`.
 [Source](SankeyGallery.fs) and [flow contracts](../../docs/sankey.md).
 
+## Interactive flow recipes
+
+![Native Sankey recipe](../../docs/images/flow-sankey.png)
+![Native staged alluvial recipe](../../docs/images/flow-alluvial.png)
+![Native chord recipe](../../docs/images/flow-chord.png)
+
+Run `--flow-sankey`, `--flow-alluvial`, or `--flow-chord`. Capture with the matching
+`--capture-flow-* artifacts/flow-*.bmp` option. Flow nodes drag within their column
+slots; arrows focus and Enter selects. Capture checks native drag and keyboard input.
+[Source](FlowGallery.fs) and [recipe and interaction contracts](../../docs/flow-charts.md).
+
 ## Foundation scene
 
 ![Native foundation gallery](../../docs/images/gallery.png)

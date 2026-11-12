@@ -45,7 +45,7 @@ type SankeyLayout = { Nodes:SankeyNode list; Links:SankeyLink list }
 
 [<RequireQualifiedAccess>]
 module Sankey =
-    let layoutWithCancellation (token:System.Threading.CancellationToken) (config:SankeyConfig) (graph:FlowGraph) : Result<SankeyLayout,LayoutError list> =
+    let private layoutCore (token:System.Threading.CancellationToken) (stages:Map<string,int> option) (config:SankeyConfig) (graph:FlowGraph) : Result<SankeyLayout,LayoutError list> =
         token.ThrowIfCancellationRequested()
         let width,height=Bounds.width config.Bounds,Bounds.height config.Bounds
         let n,m=graph.NodeIds.Length,graph.Edges.Length
@@ -55,6 +55,13 @@ module Sankey =
             Error [InvalidObservation "Require finite nonnegative sizes, 0..256 iterations and positive budgets."]
         elif n>config.MaxNodes || m>config.MaxLinks then Error [BudgetExceeded "Sankey graph exceeds configured budget."]
         elif config.NodeWidth>width then Error [InvalidObservation "Node width exceeds viewport."]
+        elif stages |> Option.exists(fun stages ->
+            stages.Count<>n || graph.NodeIds |> List.exists(fun id -> not(stages.ContainsKey id))
+            || stages |> Map.exists(fun _ stage -> stage<0 || stage>=config.MaxNodes)) then
+            Error [InvalidTopology "Stages must cover exactly the graph nodes and fit the node budget."]
+        elif stages |> Option.exists(fun stages ->
+            graph.Edges |> List.exists(fun edge -> stages[edge.Source]>=stages[edge.Target])) then
+            Error [InvalidTopology "Every staged flow must advance to a later stage."]
         elif n=0 then Ok {Nodes=[];Links=[]}
         else
             let check index=if index%64=0 then token.ThrowIfCancellationRequested()
@@ -99,18 +106,21 @@ module Sankey =
                         for e in outgoing[i] do
                             check e
                             reverseDepth[i]<-max reverseDepth[i] (reverseDepth[targets[e]]+1)
-                    let count=1+Array.max depth
+                    let count=1+(match stages with Some stages -> stages |> Map.values |> Seq.max | None -> Array.max depth)
                     if config.NodeWidth*float count>width then Error [InvalidObservation "Node columns cannot fit the viewport width."]
                     else
                         let layer=Array.init n (fun i ->
-                            match config.Alignment with
-                            | SankeyAlignment.Left -> depth[i]
-                            | SankeyAlignment.Right -> count-1-reverseDepth[i]
-                            | SankeyAlignment.Justify -> if outgoing[i].Count=0 then count-1 else depth[i]
-                            | SankeyAlignment.Center ->
-                                if incoming[i].Count>0 then depth[i]
-                                elif outgoing[i].Count>0 then outgoing[i] |> Seq.map(fun e -> depth[targets[e]]-1) |> Seq.min
-                                else 0)
+                            match stages with
+                            | Some stages -> stages[nodes[i]]
+                            | None ->
+                             match config.Alignment with
+                             | SankeyAlignment.Left -> depth[i]
+                             | SankeyAlignment.Right -> count-1-reverseDepth[i]
+                             | SankeyAlignment.Justify -> if outgoing[i].Count=0 then count-1 else depth[i]
+                             | SankeyAlignment.Center ->
+                                 if incoming[i].Count>0 then depth[i]
+                                 elif outgoing[i].Count>0 then outgoing[i] |> Seq.map(fun e -> depth[targets[e]]-1) |> Seq.min
+                                 else 0)
                         let columns=Array.init count (fun _ -> ResizeArray<int>())
                         for i in 0..n-1 do check i;columns[layer[i]].Add i
                         let paddingFits=columns |> Array.forall(fun column ->
@@ -201,4 +211,39 @@ module Sankey =
                                            Finish=Point.create (left+x targets[e]) (top+finishY[e])}]
                             token.ThrowIfCancellationRequested()
                             Ok {Nodes=resultNodes;Links=resultLinks}
+    let layoutWithCancellation token config graph = layoutCore token None config graph
     let layout config graph = layoutWithCancellation System.Threading.CancellationToken.None config graph
+
+    let layoutStagedWithCancellation token config stages graph = layoutCore token (Some stages) config graph
+    let layoutStaged config stages graph = layoutStagedWithCancellation System.Threading.CancellationToken.None config stages graph
+
+    let moveNode (config:SankeyConfig) (id:string) (top:float) (layout:SankeyLayout) : Result<SankeyLayout,LayoutError list> =
+        if not(System.Double.IsFinite top && System.Double.IsFinite config.NodePadding) || config.NodePadding<0. then
+            Error [InvalidObservation "Node position and padding must be finite; padding must be nonnegative."]
+        else
+            match layout.Nodes |> List.tryFind(fun node -> node.Id=id) with
+            | None -> Error [MissingEndpoint id]
+            | Some node ->
+                let column=layout.Nodes |> List.filter(fun other -> other.Layer=node.Layer)
+                           |> List.sortWith(fun a b ->
+                               let c=compare (Bounds.y a.Bounds) (Bounds.y b.Bounds)
+                               if c=0 then System.StringComparer.Ordinal.Compare(a.Id,b.Id) else c)
+                           |> List.toArray
+                let index=column |> Array.findIndex(fun other -> other.Id=id)
+                let size=Bounds.height node.Bounds
+                let lower=if index=0 then Bounds.y config.Bounds else
+                              Bounds.y column[index-1].Bounds+Bounds.height column[index-1].Bounds+config.NodePadding
+                let upper=if index=column.Length-1 then Bounds.y config.Bounds+Bounds.height config.Bounds-size else
+                              Bounds.y column[index+1].Bounds-config.NodePadding-size
+                let tolerance=1e-10*max 1. (Bounds.height config.Bounds)
+                if lower>upper+tolerance then Error [InvalidObservation "Node has no feasible slot under the requested bounds and padding."]
+                else
+                    let next=if lower>upper then Bounds.y node.Bounds else max lower (min upper top)
+                    let delta=next-Bounds.y node.Bounds
+                    let moved={node with Bounds=Bounds.create (Bounds.x node.Bounds) next (Bounds.width node.Bounds) size}
+                    let nodes=layout.Nodes |> List.map(fun other -> if other.Id=id then moved else other)
+                    let links=layout.Links |> List.map(fun edge ->
+                        if edge.Source=id then {edge with Start=Point.create edge.Start.X (edge.Start.Y+delta)}
+                        elif edge.Target=id then {edge with Finish=Point.create edge.Finish.X (edge.Finish.Y+delta)}
+                        else edge)
+                    Ok {Nodes=nodes;Links=links}

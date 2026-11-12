@@ -164,6 +164,33 @@ let main args =
             host.Cycle()
             host.Paint pixels))
         networkMount.Dispose()
+        let flowTopology=FlowGraph.create ("source"::[for i in 0..199 -> string i])
+                            [for i in 0..399 -> {FlowLink.Id=string i;Source="source";Target=string(i%200);Value=1.}]
+                         |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        let flowFrame=Ranvier.D5.Charts.ChartFrame.create 800. 600. "Flow benchmark"
+        let flowBounds=Ranvier.D5.Charts.ChartLayout.plot flowFrame |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        let flowConfig={SankeyConfig.create flowBounds with NodePadding=1.;Iterations=0}
+        let initialFlow=Sankey.layout flowConfig flowTopology |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        let sourceNode=initialFlow.Nodes |> List.find(fun node -> node.Id="source")
+        let move ()=Sankey.moveNode flowConfig "source" (Bounds.y sourceNode.Bounds+1.) initialFlow |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        let movedFlow=move()
+        if (movedFlow.Nodes |> List.find(fun node -> node.Id="source") |> fun node -> Bounds.y node.Bounds)=Bounds.y sourceNode.Bounds then failwith "Flow benchmark must move a node."
+        results.Add(measure "flow-move-201-nodes-400-links" 2. 256000L (fun () -> move() |> ignore))
+        let flowSpec={Ranvier.D5.Charts.FlowSpec.create flowFrame with ShowLabels=false}
+        let buildFlow layout=Ranvier.D5.Charts.FlowChart.sankey flowSpec layout |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        results.Add(measure "flow-chart-201-nodes-400-links" 10. 8000000L (fun () -> buildFlow initialFlow |> ignore))
+        let layouts=[|initialFlow;movedFlow|]
+        let flowScene=graph.Run(fun () -> Api.createSignal((buildFlow initialFlow).Scene))
+        let flowMount=Mounting.mount graph None (fun errors -> raise(AggregateException errors)) container None
+                          (fun context -> Program.run (Component.render Renderer.passive (fun () -> flowScene.Value)) context.Backend)
+        host.Cycle()
+        let mutable flowIndex=0
+        results.Add(measure "native-flow-201-nodes-400-links-paint" 100. 32000000L (fun () ->
+            flowIndex<-1-flowIndex
+            graph.Run(fun () -> flowScene.Value<-(buildFlow layouts[flowIndex]).Scene)
+            host.Cycle()
+            host.Paint pixels))
+        flowMount.Dispose()
     let output = if args.Length > 0 then args[0] else "artifacts/benchmarks.json"
     let directory = Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore

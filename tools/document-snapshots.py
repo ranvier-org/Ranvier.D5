@@ -4,7 +4,7 @@ from PIL import Image
 root=Path(__file__).resolve().parents[1]
 out=root/"docs"/"images"
 out.mkdir(parents=True,exist_ok=True)
-for name in ["gallery","linked","hierarchy","tiling","hierarchy-charts","hierarchy-explorer","planar","quadtree","spatial","force","network","bubbles","chord","sankey"]:
+for name in ["gallery","linked","hierarchy","tiling","hierarchy-charts","hierarchy-explorer","planar","quadtree","spatial","force","network","bubbles","chord","sankey","flow-sankey","flow-alluvial","flow-chord"]:
     source=root/"artifacts"/(name+".bmp")
     if source.exists():
         with Image.open(source) as native:

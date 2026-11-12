@@ -13,7 +13,7 @@ module Renderer =
 
     type private RenderMark = { Mark:Mark; Namespace:string; Path:string list }
     type private RenderNode = { Node:SceneNode; Namespace:string; Path:string list }
-    type private Appearance = { Transform:string; Fill:string; Stroke:string; StrokeWidth:string; Opacity:string; FontSize:string; Family:string; Weight:string; Anchor:string; Baseline:string }
+    type private Appearance = { Transform:string; Fill:string; Stroke:string; StrokeWidth:string; Opacity:string; FillOpacity:string; StrokeOpacity:string; FontSize:string; Family:string; Weight:string; Anchor:string; Baseline:string }
     type private RenderRow = { Read:unit -> RenderMark; Appearance:unit -> Appearance }
     let private definitionId prefix (key:string) = prefix + (key |> Seq.map(fun code -> (int code).ToString("X4",CultureInfo.InvariantCulture)) |> String.concat "")
 
@@ -27,9 +27,17 @@ module Renderer =
                     | ValueSome struct(mark,scope,value) when scope=item.Namespace && Mark.style mark=Mark.style item.Mark && Mark.textStyle mark=Mark.textStyle item.Mark && Mark.transform mark=Mark.transform item.Mark && Mark.fillDefinition mark=Mark.fillDefinition item.Mark -> value
                     | _ ->
                         let style,text=Mark.style item.Mark,Mark.textStyle item.Mark
+                        let fill=(Mark.fillDefinition item.Mark).IsSome
+                        let hasFill=fill || not(String.Equals(Paint.toCss style.Fill,"none",StringComparison.OrdinalIgnoreCase))
+                        let hasStroke=style.StrokeWidth>0. && not(String.Equals(Paint.toCss style.Stroke,"none",StringComparison.OrdinalIgnoreCase))
+                        let alpha=number style.Opacity
                         {Transform=Transform.toSvg(Mark.transform item.Mark)
                          Fill=Mark.fillDefinition item.Mark |> Option.map(fun key -> "url(#"+definitionId item.Namespace key+")") |> Option.defaultWith(fun () -> Paint.toCss style.Fill)
-                         Stroke=Paint.toCss style.Stroke;StrokeWidth=number style.StrokeWidth;Opacity=number style.Opacity;FontSize=number style.FontSize
+                         Stroke=Paint.toCss style.Stroke;StrokeWidth=number style.StrokeWidth
+                         Opacity=(if hasFill && hasStroke then alpha else "1")
+                         FillOpacity=(if hasFill && not hasStroke then alpha else "1")
+                         StrokeOpacity=(if hasStroke && not hasFill then alpha else "1")
+                         FontSize=number style.FontSize
                          Family=text.Family;Weight=string text.Weight;Anchor=text.Anchor;Baseline=text.Baseline}
                 cached<-ValueSome struct(item.Mark,item.Namespace,value)
                 value
@@ -39,6 +47,9 @@ module Renderer =
             let path =
                 t.element (HtmlTag "path")
                     [|
+                        appearance "opacity" (fun style -> style.Opacity)
+                        appearance "fill-opacity" (fun style -> style.FillOpacity)
+                        appearance "stroke-opacity" (fun style -> style.StrokeOpacity)
                         attribute "d" (fun mark -> match Mark.geometry mark with PathGeometry path -> Path.toSvg path | _ -> "")
                         attribute "display" (fun mark -> match Mark.geometry mark with PathGeometry _ -> "inline" | _ -> "none")
                     |]
@@ -46,6 +57,9 @@ module Renderer =
             let text =
                 t.element (HtmlTag "text")
                     [|
+                        appearance "opacity" (fun style -> style.Opacity)
+                        appearance "fill-opacity" (fun style -> style.FillOpacity)
+                        appearance "stroke-opacity" (fun style -> style.StrokeOpacity)
                         attribute "x" (fun mark -> match Mark.geometry mark with TextGeometry(point, _) -> number point.X | _ -> "0")
                         attribute "y" (fun mark -> match Mark.geometry mark with TextGeometry(point, _) -> number point.Y | _ -> "0")
                         attribute "display" (fun mark -> match Mark.geometry mark with TextGeometry _ -> "inline" | _ -> "none")
@@ -57,7 +71,6 @@ module Renderer =
                 appearance "fill" (fun style -> style.Fill)
                 appearance "stroke" (fun style -> style.Stroke)
                 appearance "stroke-width" (fun style -> style.StrokeWidth)
-                appearance "opacity" (fun style -> style.Opacity)
                 appearance "font-size" (fun style -> style.FontSize)
                 appearance "font-family" (fun style -> style.Family)
                 appearance "font-weight" (fun style -> style.Weight)
