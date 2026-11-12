@@ -239,7 +239,7 @@ let main args =
                             (fun context -> Program.run (Component.render Renderer.passive (fun () -> scene.Value)) context.Backend)
         host.Cycle()
         let mutable index=0
-        results.Add(measure "native-network-1000-nodes-2000-edges-paint" 100. 32000000L (fun () ->
+        results.Add(measure "native-network-1000-nodes-2000-edges-paint" 100. 13000000L (fun () ->
             index<-1-index
             let gc0,gc1,gc2=GC.CollectionCount 0,GC.CollectionCount 1,GC.CollectionCount 2
             let started=Stopwatch.GetTimestamp()

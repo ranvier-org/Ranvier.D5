@@ -13,26 +13,34 @@ module Renderer =
 
     type private RenderMark = { Mark:Mark; Namespace:string; Path:string list }
     type private RenderNode = { Node:SceneNode; Namespace:string; Path:string list }
-    type private Appearance = { Transform:string; Fill:string; Stroke:string; StrokeWidth:string; Opacity:string; FillOpacity:string; StrokeOpacity:string; FontSize:string; Family:string; Weight:string; Anchor:string; Baseline:string }
-    type private RenderRow = { Read:unit -> RenderMark; Appearance:unit -> Appearance }
+    type private Appearance = { Fill:string; Stroke:string; StrokeWidth:string; Opacity:string; FillOpacity:string; StrokeOpacity:string; FontSize:string; Family:string; Weight:string; Anchor:string; Baseline:string }
+    type private RenderRow = { Read:unit -> RenderMark; Appearance:unit -> Appearance; Transform:unit -> string }
     let private definitionId prefix (key:string) = prefix + (key |> Seq.map(fun code -> (int code).ToString("X4",CultureInfo.InvariantCulture)) |> String.concat "")
 
     let private row (dispatch: string list -> string -> Ranvier.Dom.Event -> unit) =
         Component.define (fun _ (read: unit -> RenderMark) ->
             let mutable cached=ValueNone
+            let mutable cachedTransform=ValueNone
+            let transform () =
+                let current=Mark.transform(read().Mark)
+                match cachedTransform with
+                | ValueSome struct(previous,value) when previous=current -> value
+                | _ ->
+                    let value=Transform.toSvg current
+                    cachedTransform<-ValueSome struct(current,value)
+                    value
             let appearance () =
                 let item=read()
                 let value=
                     match cached with
-                    | ValueSome struct(mark,scope,value) when scope=item.Namespace && Mark.style mark=Mark.style item.Mark && Mark.textStyle mark=Mark.textStyle item.Mark && Mark.transform mark=Mark.transform item.Mark && Mark.fillDefinition mark=Mark.fillDefinition item.Mark -> value
+                    | ValueSome struct(mark,scope,value) when scope=item.Namespace && Mark.style mark=Mark.style item.Mark && Mark.textStyle mark=Mark.textStyle item.Mark && Mark.fillDefinition mark=Mark.fillDefinition item.Mark -> value
                     | _ ->
                         let style,text=Mark.style item.Mark,Mark.textStyle item.Mark
                         let fill=(Mark.fillDefinition item.Mark).IsSome
                         let hasFill=fill || not(String.Equals(Paint.toCss style.Fill,"none",StringComparison.OrdinalIgnoreCase))
                         let hasStroke=style.StrokeWidth>0. && not(String.Equals(Paint.toCss style.Stroke,"none",StringComparison.OrdinalIgnoreCase))
                         let alpha=number style.Opacity
-                        {Transform=Transform.toSvg(Mark.transform item.Mark)
-                         Fill=Mark.fillDefinition item.Mark |> Option.map(fun key -> "url(#"+definitionId item.Namespace key+")") |> Option.defaultWith(fun () -> Paint.toCss style.Fill)
+                        {Fill=Mark.fillDefinition item.Mark |> Option.map(fun key -> "url(#"+definitionId item.Namespace key+")") |> Option.defaultWith(fun () -> Paint.toCss style.Fill)
                          Stroke=Paint.toCss style.Stroke;StrokeWidth=number style.StrokeWidth
                          Opacity=(if hasFill && hasStroke then alpha else "1")
                          FillOpacity=(if hasFill && not hasStroke then alpha else "1")
@@ -41,7 +49,7 @@ module Renderer =
                          Family=text.Family;Weight=string text.Weight;Anchor=text.Anchor;Baseline=text.Baseline}
                 cached<-ValueSome struct(item.Mark,item.Namespace,value)
                 value
-            {Read=read;Appearance=appearance}) (fun t ->
+            {Read=read;Appearance=appearance;Transform=transform}) (fun t ->
             let attribute name read = t.Attrs.attribute(name, fun (row:RenderRow) -> Some(read (row.Read()).Mark))
             let appearance name read = t.Attrs.attribute(name,fun (row:RenderRow) -> Some(read(row.Appearance())))
             let path =
@@ -67,7 +75,7 @@ module Renderer =
                     [| t.text(fun row -> match Mark.geometry (row.Read()).Mark with TextGeometry(_, text) -> text | _ -> "") |]
             t.element (HtmlTag "g") ([|
                 attribute "data-d5-key" Mark.key
-                appearance "transform" (fun style -> style.Transform)
+                t.Attrs.attribute("transform",fun (row:RenderRow) -> Some(row.Transform()))
                 appearance "fill" (fun style -> style.Fill)
                 appearance "stroke" (fun style -> style.Stroke)
                 appearance "stroke-width" (fun style -> style.StrokeWidth)
@@ -126,12 +134,19 @@ module Renderer =
         let marks = row dispatch
         let mutable groupDefinition : Component<unit -> RenderNode> option = None
         let leaf =
-            Component.define (fun _ (read:unit -> RenderNode) -> read) (fun t ->
-                t.render marks (fun read -> fun () ->
+            Component.define (fun _ (read:unit -> RenderNode) ->
+                let mutable cached=ValueNone
+                fun () ->
                     let item=read()
-                    match item.Node with
-                    | Leaf mark -> {Mark=mark;Namespace=item.Namespace;Path=item.Path}
-                    | _ -> invalidOp "Expected a leaf."))
+                    match cached with
+                    | ValueSome struct(previous,value) when Object.ReferenceEquals(previous,item) -> value
+                    | _ ->
+                        let value=
+                            match item.Node with
+                            | Leaf mark -> {Mark=mark;Namespace=item.Namespace;Path=item.Path}
+                            | _ -> invalidOp "Expected a leaf."
+                        cached<-ValueSome struct(item,value)
+                        value) (fun t -> t.render marks id)
         let node =
             Component.define (fun _ (read:unit -> RenderNode) -> read) (fun t ->
                 t.matchWith (fun read -> read()) (fun item ->
