@@ -93,5 +93,49 @@ of re-solving the arc from rounded degrees; in a same-machine alternating
 comparison the 10,000-vertex Mercator polar workload measured 50 to 34 ms
 median. Timings are local evidence, not cross-platform guarantees.
 
-Not yet provided: conic, azimuthal, gnomonic, stereographic and transverse
-Mercator projections, composites, fit-to-bounds and map chart recipes.
+## Projection families, fitting and composites
+
+![Native projection families fitted to their panels](images/projection-families.png)
+
+```sh
+dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --projection-families
+dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --capture-projection-families artifacts/projection-families.bmp
+```
+
+Each panel is fitted by `ProjectionFit.extent` and rotated by one signal. The
+capture checks native pixels at both phases: land inside each polygon, an
+unfilled hole and every Albers USA inset.
+
+| Kind | Clip and singularities |
+|---|---|
+| `AzimuthalEqualArea`, `AzimuthalEquidistant` | Small-circle cap, default 179.999°; the antipode is singular |
+| `Gnomonic` | Cap below 90°, default 60°; the horizon is singular and point projection omits it |
+| `Stereographic` | Cap below 180°, default 142° |
+| `Orthographic` | Cap at most 90°, default 90° |
+| `ConicConformal(a,b)` | Antimeridian cut; the pole away from the apex is clamped one microradian short, as in D3 |
+| `ConicEqualArea(a,b)`, `ConicEquidistant(a,b)` | Antimeridian cut; parallels describing a cylinder are rejected |
+| `TransverseMercator` | The Mercator band in a frame rolled 90°, with D3's swapped center |
+
+`ProjectionConfig.ClipAngle` overrides the cap radius in degrees for orthographic
+and azimuthal kinds. One small-circle preclip finds every crossing along each
+great-circle arc, so a route can dip into a narrow cap or leave a wide one.
+Polygons rejoin around the projected circle. Conic pole edges are refined as
+screen arcs while rejoining, and Sphere draws the full projected world.
+
+`ProjectionFit.extent`, `size`, `width` and `height` follow d3-geo fitting.
+They project at scale 150 with no viewport, measure the clipped and resampled
+bounds, and solve scale and translation; `Projection.config` reports them.
+`CompositeProjection.albersUsa` reproduces the D3 lower 48, Alaska and Hawaii
+insets. `CompositeProjection.paths` clips each inset to its rectangle, and each
+inset receives the configured budgets.
+
+At the subdivision-depth limit a segment is accepted when its midpoint and
+quarter samples lie within `Precision` of the chord and the midpoint falls on
+it. The spacing and 30° rules only guard folds that the deviation test could
+miss. Stretched straight edges, such as meridians into a clamped conformal pole,
+therefore succeed, while genuinely curved edges still report `BudgetExceeded`.
+
+Pinned d3-geo 3.1.1 fixtures add 90 azimuthal and 160 conic and transverse
+Mercator point/inverse cases, 132 azimuthal and 160 conic stream cases, eight
+projected world areas, 96 fits and eleven Albers USA points with four inset
+shapes. Map chart recipes (J4) are not yet provided.

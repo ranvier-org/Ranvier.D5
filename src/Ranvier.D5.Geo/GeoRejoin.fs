@@ -2,12 +2,13 @@ namespace Ranvier.D5.Geo
 
 open Ranvier.D5
 
+/// Fragment endpoints carry boundary parameters, so boundaries that collapse on screen (a conic apex) still order them.
 type internal GeoClipBoundary = {
     Period: float
-    Parameter: Point -> float
     PointAt: float -> Point
     ContainsAt: float -> bool
-    Between: Point -> Point -> int -> bool -> (Point -> unit) -> unit
+    /// Emits boundary points after the first parameter up to the second, then the destination point.
+    Between: float -> float -> Point -> int -> bool -> (Point -> unit) -> unit
 }
 
 // Adapted from d3-geo boundary rejoining, Copyright 2010-2024 Mike Bostock.
@@ -15,7 +16,7 @@ type internal GeoClipBoundary = {
 module internal GeoRejoin =
     exception private Rejected of LayoutError
 
-    let run maxBuffer spend boundary (fragments:ResizeArray<Point array>) =
+    let run maxBuffer spend boundary (fragments:ResizeArray<struct(Point array*float*float)>) =
         try
             let checkBuffer count =
                 if count>maxBuffer then raise(Rejected(BudgetExceeded "Polygon rejoining exceeds its vertex buffer budget."))
@@ -38,20 +39,23 @@ module internal GeoRejoin =
                 publish(working.ToArray())
                 working.Clear()
             let openFragments=ResizeArray<Point array>()
+            let openParameters=ResizeArray<struct(float*float)>()
             let mutable inputVertices=0
-            for points in fragments do
+            for struct(points,startParameter,endParameter) in fragments do
                 spend 1L
                 if points.Length>maxBuffer-inputVertices then
                     raise(Rejected(BudgetExceeded "Polygon fragments exceed the rejoin buffer budget."))
                 inputVertices<-inputVertices+points.Length
                 if points.Length>1 then
                     if points[0]=points[points.Length-1] then publish points[0..points.Length-2]
-                    else openFragments.Add points
+                    else
+                        openFragments.Add points
+                        openParameters.Add(struct(startParameter,endParameter))
             if openFragments.Count=0 then
                 if boundary.ContainsAt 0. then
                     let first=boundary.PointAt 0.
                     add first
-                    boundary.Between first first 1 true add
+                    boundary.Between 0. 0. first 1 true add
                     finish()
             else
                 let count=openFragments.Count*2
@@ -61,8 +65,9 @@ module internal GeoRejoin =
                 for index=0 to count-1 do
                     spend 1L
                     let fragment=openFragments[index/2]
+                    let struct(startParameter,endParameter)=openParameters[index/2]
                     points[index]<-if index%2=0 then fragment[0] else fragment[fragment.Length-1]
-                    parameters[index]<-boundary.Parameter points[index]
+                    parameters[index]<-if index%2=0 then startParameter else endParameter
                 let order=Array.init count id
                 let scratch=Array.zeroCreate<int> count
                 let mutable width=1
@@ -114,7 +119,7 @@ module internal GeoRejoin =
                                     current<-current-1
                             else
                                 let target=if entry[current] then next[current] else previous[current]
-                                boundary.Between points[current] points[target] (if entry[current] then 1 else -1) false add
+                                boundary.Between parameters[current] parameters[target] points[target] (if entry[current] then 1 else -1) false add
                                 current<-target
                             subject<-not subject
                             running<-not visited[current]

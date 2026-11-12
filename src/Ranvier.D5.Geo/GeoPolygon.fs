@@ -59,51 +59,56 @@ module internal GeoPolygon =
         let southInside=angle< -1e-9 || (abs angle<1e-9 && area<0.)
         if point.Latitude= -90. then southInside else southInside <> (winding%2<>0)
 
-    let project projection precision maxDepth maxBuffer spend makeSampler (rings:GeoPosition array array) =
+    let private projectWith whole projection precision maxDepth maxBuffer spend makeSampler (rings:GeoPosition array array) =
         try
-            let mercator=Projection.kind projection=ProjectionKind.Mercator
+            let mercator=Projection.mercatorBand projection
             let halfHeight=if mercator then Math.PI else Math.PI/2.
             let latitude y=if mercator then atan(sinh y)*180./Math.PI else y*180./Math.PI
             let screen point =
                 match Projection.projectRotatedValue projection point with
                 | ValueSome value -> value
                 | ValueNone -> raise(Rejected(InvalidObservation "Polygon preclipping left an undefined projected vertex."))
-            let orthographic=Projection.kind projection=ProjectionKind.Orthographic
+            let cap=Projection.clipCircle projection
+            let circular=cap.IsSome
+            let struct(_,capSine,capCosine)=cap |> ValueOption.defaultValue struct(0.,0.,0.)
             let origin=screen(position 0. 0.)
             let scale=Projection.scale projection
-            let period=if orthographic then 2.*Math.PI else 4.
+            let period=if circular then 2.*Math.PI else 4.
             let normalize value =
                 let result=value%period
                 if result<0. then result+period else result
             let boundaryPosition amount =
                 let t=normalize amount
-                if orthographic then
+                if circular then
                     let sine,cosine=sin t,cos t
-                    GeoMath.position(struct(0.,sine,cosine))
+                    GeoMath.position(struct(capCosine,capSine*sine,capSine*cosine))
                 elif t<=1. then position (-180.+360.*t) (latitude halfHeight)
                 elif t<=2. then position 180. (latitude(halfHeight-2.*halfHeight*(t-1.)))
                 elif t<=3. then position (180.-360.*(t-2.)) (latitude -halfHeight)
                 else position -180. (latitude(-halfHeight+2.*halfHeight*(t-3.)))
             let boundaryPoint amount = boundaryPosition amount |> screen
-            let parameter (point:Point) =
-                let x,y=(point.X-origin.X)/scale,(origin.Y-point.Y)/scale
-                if orthographic then normalize(atan2 x y)
-                elif abs(abs x-Math.PI)<=abs(abs y-halfHeight) then
-                    if x>=0. then 1.+Math.Clamp((halfHeight-y)/(2.*halfHeight),0.,1.)
-                    else normalize(3.+Math.Clamp((y+halfHeight)/(2.*halfHeight),0.,1.))
-                elif y>=0. then Math.Clamp((x+Math.PI)/(2.*Math.PI),0.,1.)
-                else 2.+Math.Clamp((Math.PI-x)/(2.*Math.PI),0.,1.)
-            let maxAngle=4.*asin(sqrt(min 0.5 (precision/scale/2.)))
+            let northLimit=latitude halfHeight
+            // Preclipping leaves open fragments on the cap circle, an exact seam longitude or an exact pole or band latitude.
+            let parameter (point:GeoPosition) =
+                if circular then
+                    let struct(_,y,z)=GeoMath.vector point
+                    normalize(atan2 y z)
+                elif point.Latitude>=northLimit then Math.Clamp((point.Longitude+180.)/360.,0.,1.)
+                elif point.Longitude>=180. then 1.+Math.Clamp((northLimit-point.Latitude)/(2.*northLimit),0.,1.)
+                elif point.Latitude<= -northLimit then 2.+Math.Clamp((180.-point.Longitude)/360.,0.,1.)
+                else normalize(3.+Math.Clamp((point.Latitude+northLimit)/(2.*northLimit),0.,1.))
+            // Boundary chords of a screen circle with this radius stay within precision.
+            let boundaryRadius=if circular then scale*Projection.clipPlaneRadius projection else scale
+            let maxAngle=4.*asin(sqrt(min 0.5 (precision/boundaryRadius/2.)))
             let checkBuffer count =
                 if count>maxBuffer then raise(Rejected(BudgetExceeded "Polygon clipping exceeds its vertex buffer budget."))
-            let boundaryBetween fromPoint toPoint direction whole emit =
-                let first=parameter fromPoint
-                let mutable last=parameter toPoint
+            let boundaryBetween first last toPoint direction whole emit =
+                let mutable last=last
                 if whole then last<-first+float direction*period
                 elif direction>0 then
                     if last<first then last<-last+period
                 elif last>first then last<-last-period
-                if orthographic then
+                if circular then
                     let required=ceil(abs(last-first)/maxAngle)
                     if not(Double.IsFinite required) || required>float maxBuffer || required>4.*pown 2. maxDepth then
                         raise(Rejected(BudgetExceeded "Polygon boundary precision exceeds its buffer or subdivision budget."))
@@ -112,14 +117,44 @@ module internal GeoPolygon =
                         spend 1L
                         emit(boundaryPoint(first+(last-first)*float index/float count))
                 else
+                    let curved=Projection.conic projection
+                    let mutable previousParameter=first
+                    let mutable previousPoint=boundaryPoint first
+                    // Conic pole edges are circular arcs about the apex; refine them until their chords meet precision.
+                    let rec refine depth t0 (p0:Point) t1 (p1:Point) =
+                        spend 1L
+                        let middle=(t0+t1)/2.
+                        let point=boundaryPoint middle
+                        let dx,dy=p1.X-p0.X,p1.Y-p0.Y
+                        let length=Double.Hypot(dx,dy)
+                        let deviation=
+                            if length=0. then Double.Hypot(point.X-p0.X,point.Y-p0.Y)
+                            else abs(dx*(point.Y-p0.Y)-dy*(point.X-p0.X))/length
+                        let imprecise=deviation>precision
+                        if imprecise && depth>=maxDepth then
+                            raise(Rejected(BudgetExceeded "Polygon boundary precision exceeds its subdivision budget."))
+                        if (imprecise || abs(t1-t0)>0.125) && depth<maxDepth then
+                            refine (depth+1) t0 p0 middle point
+                            emit point
+                            refine (depth+1) middle point t1 p1
+                    let advance parameter (point:Point) =
+                        if curved && int(floor(normalize((previousParameter+parameter)/2.)))%2=0 then
+                            refine 0 previousParameter previousPoint parameter point
+                        previousParameter<-parameter
+                        previousPoint<-point
                     let mutable corner=if direction>0 then floor first+1. else ceil first-1.
                     while (if direction>0 then corner<last else corner>last) do
                         spend 1L
-                        emit(boundaryPoint corner)
+                        let point=boundaryPoint corner
+                        advance corner point
+                        emit point
                         corner<-corner+float direction
+                    advance last toPoint
                 emit toPoint
-            let fragments=ResizeArray<Point array>()
+            let fragments=ResizeArray<struct(Point array*GeoPosition*GeoPosition)>()
             let working=ResizeArray<Point>()
+            let mutable startPosition=Unchecked.defaultof<GeoPosition>
+            let mutable endPosition=Unchecked.defaultof<GeoPosition>
             let mutable buffered=0
             let add (point:Point) =
                 spend 1L
@@ -129,13 +164,13 @@ module internal GeoPolygon =
             let finish () =
                 if working.Count>1 then
                     buffered<-buffered+working.Count
-                    fragments.Add(working.ToArray())
+                    fragments.Add(struct(working.ToArray(),startPosition,endPosition))
                 working.Clear()
             let sample=makeSampler add
             let sink = {
-                Start=fun point -> working.Clear();add(screen point)
-                Arc=sample
-                Boundary=fun point -> add(screen point)
+                Start=fun point -> working.Clear();startPosition<-point;endPosition<-point;add(screen point)
+                Arc=fun first last -> sample first last;endPosition<-last
+                Boundary=fun point -> add(screen point);endPosition<-point
                 Finish=finish
             }
             let rotated=ResizeArray<GeoPosition array>()
@@ -158,7 +193,8 @@ module internal GeoPolygon =
                     | Error error -> raise(Rejected error)
                     | Ok () -> ()
                     if fragments.Count-start>1 then
-                        let first,last=fragments[start],fragments[fragments.Count-1]
+                        let struct(first,_,firstEnd)=fragments[start]
+                        let struct(last,lastStart,_)=fragments[fragments.Count-1]
                         if first[0]=last[last.Length-1] then
                             checkBuffer(first.Length+last.Length-1)
                             let merged=Array.zeroCreate<Point>(first.Length+last.Length-1)
@@ -168,14 +204,14 @@ module internal GeoPolygon =
                             for index=0 to first.Length-1 do
                                 spend 1L
                                 merged[last.Length-1+index]<-first[index]
-                            fragments[start]<-merged
+                            fragments[start]<-struct(merged,lastStart,firstEnd)
                             fragments.RemoveAt(fragments.Count-1)
                             buffered<-buffered-1
             let rotated=rotated.ToArray()
             // Rings lying wholly on the cut, such as the GeoJSON world box, enclose zero spherical area. Their planar
             // longitude/latitude winding decides instead: clockwise covers the world and the reverse covers nothing.
             let onCut (point:GeoPosition)=abs point.Longitude=180. || abs point.Latitude=90.
-            let wholeCut=not orthographic && rotated |> Array.exists(fun ring -> ring.Length>0) && rotated |> Array.forall(Array.forall onCut)
+            let wholeCut=not circular && rotated |> Array.exists(fun ring -> ring.Length>0) && rotated |> Array.forall(Array.forall onCut)
             let coversWorld=
                 wholeCut &&
                 (rotated |> Array.sumBy(fun ring ->
@@ -186,13 +222,24 @@ module internal GeoPolygon =
                     twice))<0.
             let boundary = {
                 Period=period
-                Parameter=parameter
                 PointAt=boundaryPoint
-                ContainsAt=fun amount -> if wholeCut then coversWorld else contains spend rotated (boundaryPosition amount)
+                ContainsAt=fun amount -> whole || (if wholeCut then coversWorld else contains spend rotated (boundaryPosition amount))
                 Between=boundaryBetween
             }
             // Fragments of a whole-cut ring lie on the boundary itself, so emit the complete world or nothing.
             if wholeCut then
                 if coversWorld then GeoRejoin.run maxBuffer spend boundary (ResizeArray()) else Ok []
-            else GeoRejoin.run maxBuffer spend boundary fragments
+            else
+                let ended=ResizeArray<struct(Point array*float*float)>(fragments.Count)
+                for struct(points,first,last) in fragments do
+                    spend 1L
+                    ended.Add(struct(points,parameter first,parameter last))
+                GeoRejoin.run maxBuffer spend boundary ended
         with Rejected error -> Error error
+
+    let project projection precision maxDepth maxBuffer spend makeSampler rings =
+        projectWith false projection precision maxDepth maxBuffer spend makeSampler rings
+
+    /// The complete projected world boundary, used for Sphere where no rectangle or circle describes it.
+    let outline projection precision maxDepth maxBuffer spend makeSampler =
+        projectWith true projection precision maxDepth maxBuffer spend makeSampler [||]

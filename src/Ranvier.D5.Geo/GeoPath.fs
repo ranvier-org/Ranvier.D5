@@ -46,24 +46,35 @@ module GeoPath =
                     else
                         let ux,uy=dx/length,dy/length
                         abs(ux*my-uy*mx),(ux*mx+uy*my)/length
+                // Returns (screen deviation exceeds precision, sample spacing is uneven) for a quarter sample.
+                let quarter amount =
+                    spend 1L
+                    let sample=interpolate amount |> screen
+                    let qx,qy=sample.X-a.X,sample.Y-a.Y
+                    if not(Double.IsFinite qx && Double.IsFinite qy) then
+                        raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
+                    if length=0. then struct(Double.Hypot(qx,qy)>options.Precision,false)
+                    else
+                        let ux,uy=dx/length,dy/length
+                        struct(abs(ux*qy-uy*qx)>options.Precision,abs((ux*qx+uy*qy)/length-amount)>0.3)
                 let mutable subdivide=error>options.Precision || abs(parameter-0.5)>0.3 || arc.Angle>Math.PI/6.
                 if not subdivide then
-                    let quarterExceeds amount =
-                        spend 1L
-                        let sample=interpolate amount |> screen
-                        let qx,qy=sample.X-a.X,sample.Y-a.Y
-                        if not(Double.IsFinite qx && Double.IsFinite qy) then
-                            raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
-                        if length=0. then Double.Hypot(qx,qy)>options.Precision
-                        else
-                            let ux,uy=dx/length,dy/length
-                            abs(ux*qy-uy*qx)>options.Precision || abs((ux*qx+uy*qy)/length-amount)>0.3
-                    subdivide<-quarterExceeds 0.25 || quarterExceeds 0.75
+                    let struct(firstDeviates,firstUneven)=quarter 0.25
+                    let struct(secondDeviates,secondUneven)=quarter 0.75
+                    subdivide<-firstDeviates || firstUneven || secondDeviates || secondUneven
                 if subdivide then
                     if depth>=options.MaxSubdivisionDepth then
-                        raise(Rejected(BudgetExceeded "Projected line cannot meet precision within its subdivision depth."))
-                    subdivideArc (depth+1) first midpoint firstHalf a middle
-                    subdivideArc (depth+1) midpoint last secondHalf middle b
+                        // Spacing and arc-length rules only guard folds the deviation test could miss. At the depth limit a
+                        // chord whose midpoint lies on it and whose samples stay within precision is accurate, as near a
+                        // stretched conformal pole; otherwise the requested screen precision is genuinely unmet.
+                        let struct(firstDeviates,_)=quarter 0.25
+                        let struct(secondDeviates,_)=quarter 0.75
+                        if error>options.Precision || parameter<0. || parameter>1. || firstDeviates || secondDeviates then
+                            raise(Rejected(BudgetExceeded "Projected line cannot meet precision within its subdivision depth."))
+                        emit b
+                    else
+                        subdivideArc (depth+1) first midpoint firstHalf a middle
+                        subdivideArc (depth+1) midpoint last secondHalf middle b
                 else emit b
         // The precision test is monotone in arc length, so a cheap upper bound that passes lets short
         // cylindrical arcs skip solving their great circle.
@@ -82,7 +93,7 @@ module GeoPath =
             | Error errors -> raise(Rejected errors.Head)
 
     /// <summary>Projects geometry with cooperative cancellation and atomic result publication.</summary>
-    /// <remarks>Sphere emits the complete equirectangular rectangle, orthographic disk, or canonical Mercator square (raw coordinates bounded by pi), intersected with ClipExtent. PointRadius affects point symbols only.</remarks>
+    /// <remarks>Sphere emits the complete equirectangular rectangle, the projected clip circle of orthographic and azimuthal kinds, or the canonical Mercator square (raw coordinates bounded by pi), intersected with ClipExtent. PointRadius affects point symbols only.</remarks>
     let projectWithCancellation (options:GeoPathOptions) (token:CancellationToken) projection geometry : Result<Path list,LayoutError list> =
         token.ThrowIfCancellationRequested()
         if not(ProjectedPath.validOptions options) then
@@ -102,6 +113,37 @@ module GeoPath =
                     if count > options.MaxOutputPoints-emitted then raise(Rejected(BudgetExceeded "Geographic projection exceeds its output-point budget."))
                     emitted <- emitted+count
                 let circle=ProjectedPath.circle options (fun () -> options.MaxWork-work) spend reserve paths.Add
+                let polygonScreen point =
+                    match Projection.projectRotatedValue projection point with
+                    | ValueSome value -> value
+                    | ValueNone -> raise(Rejected(InvalidObservation "Polygon contains an undefined projected vertex."))
+                let makeSampler emit =
+                    let segment=resampler options projection spend polygonScreen emit
+                    fun first last -> segment 0 first last (polygonScreen first) (polygonScreen last)
+                // Intersects rejoined rings with the viewport and publishes them as one compound path.
+                let addRings rings =
+                    let rings =
+                        match options.ClipExtent with
+                        | None -> rings
+                        | Some clip ->
+                            match GeoRectangle.polygons options.MaxBufferedPoints spend clip rings with
+                            | Ok clipped -> clipped
+                            | Error error -> raise(Rejected error)
+                    let commands=ResizeArray<PathCommand>()
+                    for (ring:Point array) in rings do
+                        reserve ring.Length
+                        commands.Add(MoveTo ring[0])
+                        for index=1 to ring.Length-1 do
+                            spend 1L
+                            commands.Add(LineTo ring[index])
+                        spend 1L
+                        commands.Add Close
+                    if commands.Count>0 then
+                        let mutable owned=[]
+                        for index=commands.Count-1 downto 0 do
+                            spend 1L
+                            owned<-commands[index]::owned
+                        paths.Add(Path.ofCommands owned)
                 let sphere () =
                     let origin =
                         match GeoPosition.create 0. 0. |> Result.bind(fun value ->
@@ -112,10 +154,14 @@ module GeoPath =
                         | Error errors -> raise(Rejected errors.Head)
                     let scale=Projection.scale projection
                     match Projection.kind projection with
-                    | ProjectionKind.Orthographic -> circle scale origin
-                    | kind ->
+                    | _ when (Projection.clipCircle projection).IsSome -> circle (scale*Projection.clipPlaneRadius projection) origin
+                    | _ when Projection.conic projection ->
+                        match GeoPolygon.outline projection options.Precision options.MaxSubdivisionDepth options.MaxBufferedPoints spend makeSampler with
+                        | Ok rings -> addRings rings
+                        | Error error -> raise(Rejected error)
+                    | _ ->
                         let halfWidth=scale*Math.PI
-                        let halfHeight=if kind=ProjectionKind.Mercator then halfWidth else halfWidth/2.
+                        let halfHeight=if Projection.mercatorBand projection then halfWidth else halfWidth/2.
                         let mutable left=origin.X-halfWidth
                         let mutable right=origin.X+halfWidth
                         let mutable top=origin.Y-halfHeight
@@ -210,38 +256,9 @@ module GeoPath =
                         | Ok () -> ()
                         | Error error -> raise(Rejected error)
                 let finishPolygon () =
-                    let screen point =
-                        match Projection.projectRotatedValue projection point with
-                        | ValueSome value -> value
-                        | ValueNone -> raise(Rejected(InvalidObservation "Polygon contains an undefined projected vertex."))
-                    let makeSampler emit =
-                        let segment=resampler options projection spend screen emit
-                        fun first last -> segment 0 first last (screen first) (screen last)
                     match GeoPolygon.project projection options.Precision options.MaxSubdivisionDepth options.MaxBufferedPoints spend makeSampler (polygonInput.ToArray()) with
                     | Error error -> raise(Rejected error)
-                    | Ok rings ->
-                        let rings =
-                            match options.ClipExtent with
-                            | None -> rings
-                            | Some clip ->
-                                match GeoRectangle.polygons options.MaxBufferedPoints spend clip rings with
-                                | Ok clipped -> clipped
-                                | Error error -> raise(Rejected error)
-                        let commands=ResizeArray<PathCommand>()
-                        for ring in rings do
-                            reserve ring.Length
-                            commands.Add(MoveTo ring[0])
-                            for index=1 to ring.Length-1 do
-                                spend 1L
-                                commands.Add(LineTo ring[index])
-                            spend 1L
-                            commands.Add Close
-                        if commands.Count>0 then
-                            let mutable owned=[]
-                            for index=commands.Count-1 downto 0 do
-                                spend 1L
-                                owned<-commands[index]::owned
-                            paths.Add(Path.ofCommands owned)
+                    | Ok rings -> addRings rings
                     polygonInput.Clear()
                     polygonInputCount<-0
                 let folder () event =
@@ -255,7 +272,11 @@ module GeoPath =
                             lineInput.Add position
                         else
                             let rotated=Projection.rotate projection position
-                            if Projection.kind projection<>ProjectionKind.Mercator || abs rotated.Latitude<=GeoPreclip.mercatorLatitude then
+                            let insideCap =
+                                match Projection.clipCircle projection with
+                                | ValueSome struct(_,_,cosine) -> let struct(x,_,_)=GeoMath.vector rotated in x>=cosine
+                                | ValueNone -> true
+                            if insideCap && (not(Projection.mercatorBand projection) || abs rotated.Latitude<=GeoPreclip.mercatorLatitude) then
                                 match Projection.projectRotatedValue projection rotated with
                                 | ValueSome point -> circle options.PointRadius point
                                 | ValueNone -> ()

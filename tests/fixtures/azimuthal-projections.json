@@ -1,0 +1,2615 @@
+{
+  "schema": 1,
+  "seed": 42,
+  "source": {
+    "d3-geo": "3.1.1"
+  },
+  "coordinates": "Input and rotation degrees; scale in screen units per raw projected unit; screen Y down. Positions behind the orthographic limb, gnomonic horizon or exact antipode are recorded as undefined.",
+  "tolerance": 1e-9,
+  "cases": [
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -0.17234396641741687,
+        1.7190419745462064
+      ],
+      "inverse": [
+        -170,
+        -59.999999999999986
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -1.2247448713915892,
+        0.7071067811865475
+      ],
+      "inverse": [
+        -90.00000000000003,
+        -29.999999999999996
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.30691494006352765,
+        -1.1925240854045047
+      ],
+      "inverse": [
+        -44.999999999999986,
+        70
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.33151586412916767,
+        -0.9469074411189212
+      ],
+      "inverse": [
+        29.999999999999993,
+        55
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1.4142135623730951,
+        0
+      ],
+      "inverse": [
+        90.00000000000001,
+        0
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        0.3796039878502079,
+        -1.8343156287507325
+      ],
+      "inverse": [
+        169.99999999999997,
+        40.00000000000007
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -1.4080294489119367
+      ],
+      "inverse": [
+        0,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        1.7872075896219148,
+        0.445665246836528
+      ],
+      "inverse": [
+        135.00000000000003,
+        -9.999999999999993
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        298.0947189448995,
+        493.4579621715852
+      ],
+      "inverse": [
+        -170.00000000000003,
+        -59.999999999999986
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        211.51806351348733,
+        374.7412813534499
+      ],
+      "inverse": [
+        -90,
+        -30.00000000000001
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        292.5675984890878,
+        130.42112991052704
+      ],
+      "inverse": [
+        -45.00000000000003,
+        69.99999999999997
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        388.9317302479748,
+        276.7203937838871
+      ],
+      "inverse": [
+        -9.54166404439055e-15,
+        -7.951386703658792e-15
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        384.0850286557115,
+        135.71690730078
+      ],
+      "inverse": [
+        29.99999999999998,
+        55
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        548.8563189431453,
+        193.41286167320158
+      ],
+      "inverse": [
+        90.00000000000009,
+        -2.3059021440610497e-14
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        257.83095529855586,
+        26.538462117807228
+      ],
+      "inverse": [
+        170,
+        39.99999999999998
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        308.6450138224815,
+        90.73265626105214
+      ],
+      "inverse": [
+        3.053332494204976e-13,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "AzimuthalEqualArea",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        586.3515272746405,
+        167.53354748979518
+      ],
+      "inverse": [
+        135.00000000000003,
+        -10.00000000000001
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -0.20805514763618857,
+        2.0752425468773
+      ],
+      "inverse": [
+        -170,
+        -59.99999999999999
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -1.3603495231756635,
+        0.7853981633974482
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999996
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.33062900352620556,
+        -1.2846655492126882
+      ],
+      "inverse": [
+        -44.999999999999964,
+        70
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.34727918815822534,
+        -0.9919321607023787
+      ],
+      "inverse": [
+        29.999999999999993,
+        54.999999999999986
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1.5707963267948966,
+        0
+      ],
+      "inverse": [
+        90,
+        0
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        0.4915414396946108,
+        -2.3752177897726643
+      ],
+      "inverse": [
+        169.99999999999997,
+        40.00000000000012
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -1.562069680534925
+      ],
+      "inverse": [
+        0,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        2.2715550286789465,
+        0.5664440652767838
+      ],
+      "inverse": [
+        134.99999999999994,
+        -10.00000000000001
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        288.3854132277806,
+        554.2751272880081
+      ],
+      "inverse": [
+        -169.99999999999994,
+        -60.000000000000036
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        200.43390962997634,
+        385.6215833743289
+      ],
+      "inverse": [
+        -89.99999999999999,
+        -30.000000000000004
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        290.65425239143906,
+        125.25955113724432
+      ],
+      "inverse": [
+        -45,
+        69.99999999999997
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        389.30628092241903,
+        276.93478948118974
+      ],
+      "inverse": [
+        -9.54166404439055e-15,
+        7.951386703658792e-15
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        385.95047429036765,
+        131.08984729005454
+      ],
+      "inverse": [
+        29.99999999999998,
+        55
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        584.7852059694371,
+        183.53737078753232
+      ],
+      "inverse": [
+        90.00000000000001,
+        7.156248033292914e-15
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        239.96937821977593,
+        -24.463374030688755
+      ],
+      "inverse": [
+        170,
+        39.99999999999999
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        306.53989758757746,
+        78.8074436050602
+      ],
+      "inverse": [
+        -5.184304130785532e-13,
+        89.4999999999994
+      ]
+    },
+    {
+      "kind": "AzimuthalEquidistant",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        682.7732720622193,
+        135.0068074274933
+      ],
+      "inverse": [
+        135.00000000000003,
+        -10.00000000000001
+      ]
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.9999999999999999,
+        -3.8855198289065584
+      ],
+      "inverse": [
+        -44.99999999999999,
+        70.00000000000003
+      ]
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.5773502691896256,
+        -1.6490832722703748
+      ],
+      "inverse": [
+        29.999999999999993,
+        55.000000000000014
+      ]
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -114.58865012931011
+      ],
+      "inverse": [
+        0,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -270.55020985278236,
+        848.5564169836213
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999993
+      ]
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        265.0334985572823,
+        55.50404574601308
+      ],
+      "inverse": [
+        -44.999999999999986,
+        70
+      ]
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        392.5737498515517,
+        278.78339928574866
+      ],
+      "inverse": [
+        -6.3611093629270335e-15,
+        4.770832022195275e-15
+      ]
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        410.3049527626258,
+        71.03610375244293
+      ],
+      "inverse": [
+        29.99999999999998,
+        54.99999999999998
+      ]
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        252.97951703955312,
+        -228.6494636383725
+      ],
+      "inverse": [
+        -2.9897214005757057e-13,
+        89.4999999999994
+      ]
+    },
+    {
+      "kind": "Gnomonic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -0.17104955064636,
+        1.7061308463575233
+      ],
+      "inverse": [
+        -170,
+        -59.99999999999999
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -0.8660254037844387,
+        0.49999999999999994
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999996
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.1947463724308759,
+        -0.7566908916877899
+      ],
+      "inverse": [
+        -44.999999999999986,
+        70.00000000000001
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.1916096289946698,
+        -0.5472938194426676
+      ],
+      "inverse": [
+        29.999999999999993,
+        55.000000000000014
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1,
+        0
+      ],
+      "inverse": [
+        90,
+        0
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        0.5416357729649632,
+        -2.6172827347434606
+      ],
+      "inverse": [
+        170,
+        40.00000000000002
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -0.9913112105949783
+      ],
+      "inverse": [
+        0,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        2.293419724521106,
+        0.5718963334554137
+      ],
+      "inverse": [
+        135,
+        -10.000000000000004
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        302.75712162977027,
+        531.6646241944081
+      ],
+      "inverse": [
+        -170.00000000000003,
+        -59.99999999999999
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        266.0167144177943,
+        326.75480742926186
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999993
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        323.18008925305253,
+        176.82346515787765
+      ],
+      "inverse": [
+        -45.000000000000014,
+        69.99999999999997
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        375.0363889220995,
+        258.6860798094379
+      ],
+      "inverse": [
+        -3.1805546814635168e-15,
+        1.90833280887811e-14
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        375.06149552955003,
+        180.37838124079204
+      ],
+      "inverse": [
+        29.999999999999964,
+        55
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        531.6792428953007,
+        195.4675384134789
+      ],
+      "inverse": [
+        90.00000000000004,
+        -1.1131941385122309e-14
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        264.0890541059093,
+        5.14626714024817
+      ],
+      "inverse": [
+        170,
+        39.99999999999998
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        330.6892013742529,
+        144.73235119246266
+      ],
+      "inverse": [
+        3.053332494204976e-13,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "Stereographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        927.6768415215852,
+        50.42632198421822
+      ],
+      "inverse": [
+        135,
+        -10
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -0.8660254037844387,
+        0.49999999999999994
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999996
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.2418447626479753,
+        -0.9396926207859083
+      ],
+      "inverse": [
+        -44.999999999999964,
+        70
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.28678821817552297,
+        -0.8191520442889918
+      ],
+      "inverse": [
+        29.999999999999986,
+        55
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1,
+        0
+      ],
+      "inverse": [
+        90,
+        0
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -0.9999619230641713
+      ],
+      "inverse": [
+        0,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        241.57207855608263,
+        345.24504183837865
+      ],
+      "inverse": [
+        -89.99999999999997,
+        -29.999999999999986
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        298.03231880258096,
+        145.14636688408154
+      ],
+      "inverse": [
+        -44.99999999999997,
+        69.99999999999997
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        387.8194133367313,
+        276.0828004423774
+      ],
+      "inverse": [
+        -3.1805546814635168e-15,
+        -1.5902773407317584e-15
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        378.75083885021166,
+        148.95757488708978
+      ],
+      "inverse": [
+        29.999999999999993,
+        54.999999999999986
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        314.45040447515504,
+        123.56419852539696
+      ],
+      "inverse": [
+        -1.1895274508673552e-12,
+        89.4999999999994
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    }
+  ]
+}

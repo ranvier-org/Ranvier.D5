@@ -101,8 +101,11 @@ module internal GeoPreclip =
 
     let line projection spend sink (input:IReadOnlyList<GeoPosition>) =
         try
-            let sink=if Projection.kind projection=ProjectionKind.Mercator then mercatorBand spend sink else sink
-            let cylindrical=Projection.kind projection<>ProjectionKind.Orthographic
+            let sink=if Projection.mercatorBand projection then mercatorBand spend sink else sink
+            let cap=Projection.clipCircle projection
+            let cylindrical=cap.IsNone
+            let struct(_,capSine,capCosine)=cap |> ValueOption.defaultValue struct(0.,0.,0.)
+            let roots=ResizeArray<float>(8)
             let mutable tail=ValueNone
             let same (a:GeoPosition) (b:GeoPosition) =
                 a=b || (not cylindrical && abs a.Latitude=90. && a.Latitude=b.Latitude)
@@ -117,35 +120,59 @@ module internal GeoPreclip =
                 match tail with
                 | ValueSome current when same current point -> ()
                 | _ -> finish(); start point
+            // Snaps an interpolated route vector onto the cap boundary so its projected angle and radius are exact.
+            let capBoundary (route:GeoArc) angle =
+                let sine,cosine=sin angle,cos angle
+                let y=route.Y*cosine+route.TangentY*sine
+                let z=route.Z*cosine+route.TangentZ*sine
+                let length=Double.Hypot(y,z)
+                if length=0. then raise(Rejected(InvalidObservation "Cap intersection has no representable direction."))
+                GeoMath.position(struct(capCosine,capSine*y/length,capSine*z/length))
+            // A route's first Cartesian component is X cos t + TangentX sin t; the cap keeps values at least cos(radius).
+            let capEdge first last =
+                let route=arcBetween first last
+                if route.Angle=0. then
+                    if route.X>=capCosine then
+                        ensureStart first
+                        arc first last
+                    else finish()
+                else
+                    roots.Clear()
+                    roots.Add 0.
+                    let amplitude=Double.Hypot(route.X,route.TangentX)
+                    if amplitude>abs capCosine then
+                        let phase=atan2 route.TangentX route.X
+                        let offset=acos(capCosine/amplitude)
+                        for direction in -1..2..1 do
+                            for turn in -1..1 do
+                                spend 1L
+                                let angle=phase+float direction*offset+float turn*2.*Math.PI
+                                // Endpoints already on the boundary keep their exact input coordinates.
+                                if angle>1e-12 && angle<route.Angle-1e-12 then roots.Add angle
+                    roots.Add route.Angle
+                    roots.Sort()
+                    for index=1 to roots.Count-1 do
+                        spend 1L
+                        let a,b=roots[index-1],roots[index]
+                        if b>a then
+                            let middle=(a+b)/2.
+                            if route.X*cos middle+route.TangentX*sin middle>=capCosine then
+                                let before=if a=0. then first else capBoundary route a
+                                let after=if b=route.Angle then last else capBoundary route b
+                                if a=0. then ensureStart before
+                                else
+                                    finish()
+                                    start before
+                                arc before after
+                                if b<route.Angle then finish()
+                            else finish()
             let clippedEdge (source:GeoPosition) (destination:GeoPosition) =
                 let first=if abs source.Latitude=90. then position destination.Longitude source.Latitude else source
                 let last=if abs destination.Latitude=90. then position first.Longitude destination.Latitude else destination
                 if cylindrical && abs source.Latitude=90. then finish()
                 let delta=abs(first.Longitude-last.Longitude)
                 let side longitude=if longitude>0. then 180. else -180.
-                if not cylindrical then
-                    let struct(x0,_,_)=GeoMath.vector first
-                    let struct(x1,_,_)=GeoMath.vector last
-                    if x0>=0. && x1>=0. then
-                        ensureStart first
-                        arc first last
-                    elif x0<=0. && x1<=0. then finish()
-                    else
-                        let route=arcBetween first last
-                        let root=atan2 (-route.X) route.TangentX
-                        let root=if root<0. then root+Math.PI else root
-                        if root>route.Angle+1e-12 then
-                            raise(Rejected(InvalidObservation "Hemisphere intersection lies outside its great-circle arc."))
-                        let sine,cosine=sin root,cos root
-                        let intersection=GeoMath.position(struct(0.,route.Y*cosine+route.TangentY*sine,route.Z*cosine+route.TangentZ*sine))
-                        if x0>0. then
-                            ensureStart first
-                            arc first intersection
-                            finish()
-                        else
-                            finish()
-                            start intersection
-                            arc intersection last
+                if not cylindrical then capEdge first last
                 elif abs first.Longitude=180. && abs last.Longitude=180. then
                     let longitude =
                         match tail with

@@ -30,7 +30,7 @@ let tests = testList "geographic projections" [
             let cx,cy=pair "center"
             let angles=item.GetProperty("rotate")
             let rotation=GeoRotation.create (angles[0].GetDouble()) (angles[1].GetDouble()) (angles[2].GetDouble()) |> ok
-            let projection=Projection.create {Kind=kind;Scale=item.GetProperty("scale").GetDouble();Translate=Point.create tx ty;Center=position cx cy;Rotation=rotation} |> ok
+            let projection=Projection.create {Kind=kind;Scale=item.GetProperty("scale").GetDouble();Translate=Point.create tx ty;Center=position cx cy;Rotation=rotation;ClipAngle=None} |> ok
             let longitude,latitude=pair "point"
             match Projection.project projection (position longitude latitude) with
             | None -> Expect.isFalse (item.GetProperty("visible").GetBoolean()) "only hidden points are omitted"

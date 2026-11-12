@@ -11,6 +11,15 @@ One signal rotates all four panels. The capture paints two phases and fails unle
 native pixels show filled polygons, open holes and the clipped Mercator polar cap.
 [Source](ProjectionGallery.fs) · [Pipeline contracts](../../docs/geographic-projections.md).
 
+## Projection families and fitting
+
+![Native azimuthal, conic, transverse Mercator and Albers USA panels](../../docs/images/projection-families.png)
+
+Run `--projection-families`; capture with `--capture-projection-families artifacts/projection-families.bmp`.
+Every panel is fitted by `ProjectionFit` and rotated by one signal; the capture checks land,
+holes and Albers USA insets in native pixels at two phases.
+[Source](ProjectionFamiliesGallery.fs) · [Contracts](../../docs/geographic-projections.md).
+
 ## Planar geometry
 
 ![Native hull, centroid and containment](../../docs/images/planar.png)

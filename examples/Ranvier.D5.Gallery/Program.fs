@@ -213,9 +213,12 @@ let capture kind path =
             let after=graph.Run(fun () -> scene.Value)
             if Object.ReferenceEquals(before,after) then failwith "Geographic signal did not update the scene."
             {new IDisposable with member _.Dispose()=mounted.Dispose()}
-        elif kind="projections" then
+        elif kind="projections" || kind="projection-families" then
+            let build,probes=
+                if kind="projections" then ProjectionGallery.scene,ProjectionGallery.probes
+                else ProjectionFamiliesGallery.scene,ProjectionFamiliesGallery.probes
             let phase=graph.Run(fun () -> Api.createSignal 0.)
-            let scene=graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) ProjectionGallery.scene)
+            let scene=graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) build)
             let mounted=mount host graph (fun () -> scene.Value)
             // Samples painted pixels: fills, holes and clip behavior must survive the native renderer, before and after a signal update.
             let verify value =
@@ -224,13 +227,18 @@ let capture kind path =
                 let struct(w,h)=host.PaintSize
                 let pixels=Array.zeroCreate<byte>(w*h*4)
                 host.Paint pixels
-                for name,(point:Point),(r,g,b) in ProjectionGallery.probes value do
+                for name,(point:Point),probe in probes value do
                     let x,y=int(Math.Round point.X)+8,int(Math.Round point.Y)+8
                     let i=(y*w+x)*4
                     let actual=int pixels[i],int pixels[i+1],int pixels[i+2]
                     let (ar,ag,ab)=actual
-                    if abs(ar-r)>12 || abs(ag-g)>12 || abs(ab-b)>12 then
-                        failwithf "Projection gallery %s at phase %.2f painted %A at (%d,%d), expected %A." name value actual x y (r,g,b)
+                    let near (r,g,b)=abs(ar-r)<=12 && abs(ag-g)<=12 && abs(ab-b)<=12
+                    match probe with
+                    | ProjectionGallery.Matches color when not(near color) ->
+                        failwithf "Projection gallery %s at phase %.2f painted %A at (%d,%d), expected %A." name value actual x y color
+                    | ProjectionGallery.Differs color when near color ->
+                        failwithf "Projection gallery %s at phase %.2f painted the excluded color %A at (%d,%d)." name value actual x y
+                    | _ -> ()
             verify 0.
             let before=graph.Run(fun () -> scene.Value)
             graph.Run(fun () -> phase.Value<-1.)
@@ -284,12 +292,13 @@ let main args =
         let timer=Stopwatch.StartNew()
         while window.Step() do window.Graph.Run(fun () -> phase.Value<-timer.Elapsed.TotalSeconds)
         mounted.Dispose()
-    elif args.Length=2 && args[0]="--capture-projections" then
-        capture "projections" args[1]
-    elif Array.contains "--projections" args then
-        use window=Window.Create("Ranvier.D5 bounded projections",820,590)
+    elif args.Length=2 && (args[0]="--capture-projections" || args[0]="--capture-projection-families") then
+        capture (args[0].Substring 10) args[1]
+    elif Array.contains "--projections" args || Array.contains "--projection-families" args then
+        let families=Array.contains "--projection-families" args
+        use window=Window.Create((if families then "Ranvier.D5 projection families" else "Ranvier.D5 bounded projections"),820,590)
         let phase=window.Graph.Run(fun () -> Api.createSignal 0.)
-        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) ProjectionGallery.scene)
+        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) (if families then ProjectionFamiliesGallery.scene else ProjectionGallery.scene))
         let mounted=mount window.Host window.Graph (fun () -> scene.Value)
         let timer=Stopwatch.StartNew()
         while window.Step() do window.Graph.Run(fun () -> phase.Value<-0.5-0.5*cos(timer.Elapsed.TotalSeconds*0.6))
