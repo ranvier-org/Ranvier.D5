@@ -10,6 +10,18 @@ let private config={ForceConfig.create(p 0. 0.) with AlphaDecay=0.;VelocityDecay
 let private node id x y={GraphNode.create id with Position=Some(p x y);Radius=2.}
 let private run config nodes=GraphData.create nodes [] |> ok |> Force.initialize config (Seed.create 1u) |> ok |> Force.step 1 |> Force.snapshot
 let tests=testList "Spatial forces" [
+    testCase "spatial force reuses traversal storage across node queries" <| fun _ ->
+        let graph=GraphData.create [for i in 0..999 -> GraphNode.create(string i)]
+                        [for i in 0..999 do for jump in [1;7] -> GraphLink.create (string i+"/"+string jump) (string i) (string((i+jump)%1000))] |> ok
+        let cfg={ForceConfig.create(p 0. 0.) with ManyBody=Some {ManyBodyConfig.create -5. with Theta=0.5};Collision=Some(CollisionConfig.create 0.7)}
+        let state=Force.initialize cfg (Seed.create 42u) graph |> ok
+        for _ in 1..3 do Force.step 1 state |> ignore
+        let before=GC.GetAllocatedBytesForCurrentThread()
+        let next=Force.step 1 state
+        let allocated=GC.GetAllocatedBytesForCurrentThread()-before
+        Expect.equal (Force.snapshot next).Nodes.Length 1000 "Every node remains present"
+        Expect.isLessThan allocated 1000000L "Do not allocate a fresh traversal stack for each node"
+
     testCase "exact pair forces follow source mass and conserve pair momentum" <| fun _ ->
         let body={ManyBodyConfig.create -10. with Theta=0.}
         let result=run {config with ManyBody=Some body} [{node "a" 0. 0. with Mass=3.};node "b" 10. 0.]

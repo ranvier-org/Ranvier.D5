@@ -72,7 +72,7 @@ let main args =
                             ManyBody=Some {ManyBodyConfig.create -5. with Theta=0.5}
                             Collision=Some(CollisionConfig.create 0.7)}
         let spatialForce=Force.initialize spatialConfig (Seed.create 42u) forceGraph |> Result.defaultWith(fun errors -> failwithf "%A" errors)
-        results.Add(measure "force-spatial-1000-nodes-2000-edges-step" 25. 8000000L (fun () -> Force.step 1 spatialForce |> ignore))
+        results.Add(measure "force-spatial-1000-nodes-2000-edges-step" 25. 1000000L (fun () -> Force.step 1 spatialForce |> ignore))
         let smallGraph=GraphData.create [for i in 0..399 -> GraphNode.create(string i)] [] |> Result.defaultWith(fun errors -> failwithf "%A" errors)
         for theta,label in [0.,"exact";0.5,"barnes-hut"] do
             let state=Force.initialize {spatialConfig with Collision=None;ManyBody=Some {ManyBodyConfig.create -5. with Theta=theta}} (Seed.create 42u) smallGraph |> Result.defaultWith(fun errors -> failwithf "%A" errors)

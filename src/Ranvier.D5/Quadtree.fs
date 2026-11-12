@@ -76,6 +76,19 @@ module Quadtree =
 
     let count (Quadtree root) = match root with None -> 0 | Some(QuadNode(cell,_)) -> cell.Count
 
+    // Force passes query the same immutable tree once per node; keep the traversal buffer local to that pass.
+    let internal visitIndexed count visitor (Quadtree root) =
+        match root with
+        | None -> ()
+        | Some node ->
+            let stack=System.Collections.Generic.Stack<QuadNode<'T>>()
+            for index in 0..count-1 do
+                stack.Push node
+                while stack.Count>0 do
+                    let (QuadNode(cell,children))=stack.Pop()
+                    if visitor index cell then
+                        for i in children.Length-1 .. -1 .. 0 do stack.Push children[i]
+
     /// <summary>Visits cells in quadrant order; false prunes the current cell's descendants. Summaries and leaf items are immutable snapshots.</summary>
     let visit visitor (Quadtree root) =
         let stack=System.Collections.Generic.Stack<QuadNode<'T>>()

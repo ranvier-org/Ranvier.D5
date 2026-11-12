@@ -27,6 +27,7 @@ module internal ForceKernels =
                 let softened=max distance config.MinDistance
                 let magnitude=(config.Strength*alpha/softened)*mass*(distance/softened)
                 vx[i]<-vx[i]+ux*magnitude;vy[i]<-vy[i]+uy*magnitude
+        let bounded=System.Double.IsFinite config.MaxDistance
         if config.Strength<>0. then
             if config.Theta=0. then
                 for i in 0..positions.Length-1 do
@@ -36,17 +37,15 @@ module internal ForceKernels =
                         if i<>j then add i positions[j] masses[j] j
             else
                 let tree=Quadtree.buildWithCancellation token (fun i -> positions[i]) (fun i -> masses[i]) (seq{0..positions.Length-1})
-                for i in 0..positions.Length-1 do
-                    check token i
-                    let point=positions[i]
-                    Quadtree.visit (fun cell ->
+                Quadtree.visitIndexed positions.Length (fun i cell ->
+                        let point=positions[i]
                         token.ThrowIfCancellationRequested()
-                        if near point cell.Extent>config.MaxDistance then false else
+                        if bounded && near point cell.Extent>config.MaxDistance then false else
                         let e=cell.Extent
                         let contains=point.X>=e.Min.X && point.X<=e.Max.X && point.Y>=e.Min.Y && point.Y<=e.Max.Y
                         let distance=System.Double.Hypot(cell.Center.X-point.X,cell.Center.Y-point.Y)
                         let size=max (e.Max.X-e.Min.X) (e.Max.Y-e.Min.Y)
-                        if not contains && System.Double.IsFinite distance && size<config.Theta*distance && far point e<=config.MaxDistance then
+                        if not contains && System.Double.IsFinite distance && size<config.Theta*distance && (not bounded || far point e<=config.MaxDistance) then
                             add i cell.Center cell.Mass i
                             false
                         elif not cell.Items.IsEmpty then
@@ -65,9 +64,7 @@ module internal ForceKernels =
                     check token i
                     predicted[i]<-if pinned[i] then positions[i] else Point.create (positions[i].X+vx[i]) (positions[i].Y+vy[i])
                 let tree=Quadtree.buildWithCancellation token (fun i -> predicted[i]) (fun _ -> 1.) (seq{0..positions.Length-1})
-                for i in 0..positions.Length-1 do
-                    check token i
-                    Quadtree.visit(fun cell ->
+                Quadtree.visitIndexed positions.Length (fun i cell ->
                         token.ThrowIfCancellationRequested()
                         if near predicted[i] cell.Extent>radii[i]+maxRadius then false else
                         cell.Items |> List.iteri(fun index item ->

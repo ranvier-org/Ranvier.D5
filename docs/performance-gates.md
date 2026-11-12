@@ -85,3 +85,22 @@ tolerance. These measurements support compatibility within the performance
 budget, not a universal speedup or a proven explanation for runner variability.
 The native release also targets hover repainting; these scene-update workloads
 do not independently establish its pointer-motion improvement.
+
+The unbounded many-body force path skips nearest/farthest cell-distance cutoff
+calculations when MaxDistance is positive infinity. Finite cutoffs retain their
+existing exact traversal checks. Three alternating Windows Traced focused pairs
+measured median-time ratios of 0.7346 under default tiering and 0.8405 with fully
+optimized code, with unchanged allocations and bit-identical output positions
+and velocities for the 1,000-node/2,000-link fixture. The default-runtime samples
+remain noisy; this is measured kernel headroom, not proof that hosted-runner tail
+variation is eliminated. The 25 ms spatial-force p95 gate is unchanged.
+
+Force passes also reuse one local traversal stack across all node queries instead
+of allocating a stack per query. Against the original force kernel, three further
+alternating Windows Traced pairs measured median-time ratios of 0.6774 under
+default tiering and 0.7924 with fully optimized code. Default timings remained
+noisy, with one pair slower. All twelve processes produced bit-identical positions
+and velocities. Allocation fell from 1,690,016 to 913,912 bytes per step (45.9
+percent), independently enforced by a regression test that failed before reuse.
+The fixture's allocation gate is tightened from 8 MB to 1 MB; its 25 ms p95 gate,
+workload and sampling policy remain unchanged.
