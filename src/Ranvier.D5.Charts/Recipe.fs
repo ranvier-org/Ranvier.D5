@@ -24,6 +24,9 @@ module internal Recipe =
         let clip (hit:HitTarget)=
             match hit.Clip with
             | None -> bounds
+            | Some own when Bounds.x own>=Bounds.x bounds && Bounds.y own>=Bounds.y bounds &&
+                            Bounds.x own+Bounds.width own<=Bounds.x bounds+Bounds.width bounds &&
+                            Bounds.y own+Bounds.height own<=Bounds.y bounds+Bounds.height bounds -> own
             | Some own ->
                 let left,top=max (Bounds.x own) (Bounds.x bounds),max (Bounds.y own) (Bounds.y bounds)
                 let right=min (Bounds.x own+Bounds.width own) (Bounds.x bounds+Bounds.width bounds)

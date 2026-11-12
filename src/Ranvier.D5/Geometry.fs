@@ -25,7 +25,9 @@ type Bounds = private { Left:float; Top:float; Width:float; Height:float }
 module Bounds =
     /// <summary>Creates a rectangle; coordinates and its far edges must be finite.</summary>
     let create x y width height =
-        [x;y;width;height;x+width;y+height] |> List.iter (Check.finite "bounds")
+        // Validate each coordinate directly; rectangles are created in hot recipe loops.
+        Check.finite "bounds" x; Check.finite "bounds" y; Check.finite "bounds" width; Check.finite "bounds" height
+        Check.finite "bounds" (x+width); Check.finite "bounds" (y+height)
         if width<0. || height<0. then invalidArg "bounds" "Dimensions must be nonnegative."
         { Left=x; Top=y; Width=width; Height=height }
     let x bounds = bounds.Left
