@@ -174,6 +174,12 @@ jobs:
           let usa = Ranvier.D5.Geo.CompositeProjection.albersUsa 1070. (Point.create 480. 250.) |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           let denver = Ranvier.D5.Geo.GeoPosition.create -104.99 39.74 |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           if (Ranvier.D5.Geo.CompositeProjection.project usa denver).IsNone then failwith "Packed Albers USA failed"
+          let region : Ranvier.D5.Geo.MapFeature = { Id = "co"; Name = "Colorado"; Geometry = Ranvier.D5.Geo.GeoGeometry.Polygon [[for longitude, latitude in [(-109., 37.); (-109., 41.); (-102., 41.); (-102., 37.); (-109., 37.)] -> Ranvier.D5.Geo.GeoPosition.create longitude latitude |> Result.defaultWith (fun errors -> failwithf "%A" errors)]] }
+          let mapFrame = Ranvier.D5.Geo.MapFrame.create (Ranvier.D5.Charts.ChartFrame.create 400. 300. "Packed map") (Ranvier.D5.Geo.MapProjection.Composite usa)
+          let choropleth : Ranvier.D5.Geo.ChoroplethSpec<string * float> = { Map = mapFrame; Key = fst; Value = Ranvier.D5.Charts.Encoding.create "Value" (snd >> Some); Domain = Ranvier.D5.Charts.Auto; Color = (fun _ -> Paint.rgb 0 0 0); Missing = Paint.rgb 1 1 1; Stroke = Paint.rgb 2 2 2; Selected = Set.empty }
+          match Ranvier.D5.Geo.MapChart.choropleth choropleth [region] [("co", 1.)] with
+          | Ok map when map.HitTargets.Length = 1 -> ()
+          | other -> failwithf "Packed map chart failed: %A" other
           graph.Dispose()
           EOF
           cat > artifacts/consumer/NuGet.Config <<'EOF'
