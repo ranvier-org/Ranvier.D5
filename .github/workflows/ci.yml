@@ -100,4 +100,9 @@ jobs:
         if: always()
         with:
           name: evidence-${{ matrix.os }}-${{ matrix.traced }}
-          path: artifacts/
+          path: |
+            artifacts/*.json
+            artifacts/*.bmp
+            artifacts/packages/
+            artifacts/comparison-*/*.json
+            artifacts/comparison-*/*.log

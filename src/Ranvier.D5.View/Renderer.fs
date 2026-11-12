@@ -13,7 +13,7 @@ module Renderer =
 
     type private RenderMark = { Mark:Mark; Namespace:string; Path:string list }
     type private RenderNode = { Node:SceneNode; Namespace:string; Path:string list }
-    let private definitionId prefix (key:string) = prefix + Convert.ToHexString(Encoding.UTF8.GetBytes key)
+    let private definitionId prefix (key:string) = prefix + (key |> Seq.map(fun code -> (int code).ToString("X4",CultureInfo.InvariantCulture)) |> String.concat "")
 
     let private row (dispatch: string list -> string -> Ranvier.Dom.Event -> unit) =
         Component.define (fun _ (read: unit -> RenderMark) -> read) (fun t ->

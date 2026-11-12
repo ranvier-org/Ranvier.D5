@@ -95,12 +95,15 @@ let acceptance () =
             let stops = [{Offset=0.;Color=Paint.rgb 255 0 0;Opacity=1.};{Offset=1.;Color=Paint.rgb 0 0 255;Opacity=1.}]
             let rect = Shape.rectangle(Bounds.create 0. 0. 80. 80.) |> Mark.path "same" |> Mark.withFillDefinition "paint"
             Scene.compose {Width=300.;Height=180.} "Composed"
-                [clip;LinearGradient("paint",Point.create 0. 0.,Point.create 30. 0.,stops)]
+                [clip;RectClip(string(char 0xD800),Bounds.create 0. 0. 1. 1.);RectClip(string(char 0xD801),Bounds.create 0. 0. 1. 1.);LinearGradient("paint",Point.create 0. 0.,Point.create 30. 0.,stops)]
                 [Group({GroupSpec.create "plot" with Clip=Some "plot";Transform=Transform.translate 10. 10.},[Leaf rect])]
         graph.Run(fun () -> source.Value <- composed())
         host.Cycle()
         host.Frame()
         let group = container.querySelector "[data-d5-group='plot']"
+        let clipPaths=container.querySelectorAll "clipPath"
+        let clipIds=[for i in 0u..clipPaths.length-1u -> (clipPaths.item i :?> Ranvier.Dom.Element).getAttribute "id"]
+        Expect.equal (Set.ofList clipIds).Count 3 "all UTF-16 definition keys have unique DOM IDs"
         let clipId = (container.querySelector "clipPath").getAttribute "id"
         Expect.equal (group.getAttribute "clip-path") ("url(#"+clipId+")") "clip reference scoped to mount"
         let clipped = Array.zeroCreate<byte> before.Length
