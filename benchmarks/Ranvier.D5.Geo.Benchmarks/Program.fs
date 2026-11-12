@@ -59,7 +59,31 @@ let main args =
     let spheres=GeoGeometry.Collection(List.replicate 10000 GeoGeometry.Sphere)
     let clippedSpheres=GeoGeometry.Collection(List.replicate 1000 GeoGeometry.Sphere)
     let sphereOptions={GeoPathOptions.defaultValue with ClipExtent=Some(Ranvier.D5.Bounds.create -0.25 -0.25 0.5 0.5);Precision=0.01}
+    let polygonProjection=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Scale=100.} |> ok
+    let globeProjection=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Orthographic with Scale=100.} |> ok
+    let polygonOptions={GeoPathOptions.defaultValue with Precision=0.1}
+    let outer=[p -10. -10.;p -10. 10.;p 10. 10.;p 10. -10.;p -10. -10.]
+    let hole=[p -3. -3.;p 3. -3.;p 3. 3.;p -3. 3.;p -3. -3.]
+    let seamOuter=[p 170. -20.;p 170. 20.;p -170. 20.;p -170. -20.;p 170. -20.]
+    let seamHole=[p 175. -5.;p -175. -5.;p -175. 5.;p 175. 5.;p 175. -5.]
+    let polygonCases=[
+        "geo-polygons-holes-1000",50.,5000000L,polygonProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [outer;hole])
+        "geo-polygons-seam-holes-1000",75.,9000000L,polygonProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [seamOuter;seamHole])
+        "geo-polygons-globe-complements-1000",100.,20000000L,globeProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [List.rev outer])
+    ]
+    let polygonResults=polygonCases |> List.map(fun (name,limit,bytes,projection,geometry) ->
+        measure name limit bytes (fun () ->
+            let paths=GeoPath.project polygonOptions projection geometry |> ok
+            if paths.Length<>1000 then failwith "Polygon path ownership"))
+    let denseRing=[for index in 0..99999 do
+                       let angle= -float index*2.*Math.PI/100000.
+                       yield p (10.*cos angle) (10.*sin angle)
+                   yield p 10. 0.]
+    let densePolygon=GeoGeometry.Polygon[denseRing]
     let results=[|
+        measure "geo-polygon-100000" 150. 32000000L (fun () ->
+            let paths=GeoPath.project polygonOptions polygonProjection densePolygon |> ok
+            if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100001 then failwith "Dense polygon closure")
         measure "geo-sphere-boundaries-10000" 50. 6000000L (fun () ->
             let paths=GeoPath.project GeoPathOptions.defaultValue pointProjection spheres |> ok
             if paths.Length<>10000 then failwith "World boundary count")
@@ -106,7 +130,7 @@ let main args =
         measure "geojson-read-10000" 100. 8000000L (fun () -> GeoJson.parse json |> ok |> ignore)
         measure "geojson-write-10000" 100. 8000000L (fun () -> GeoJson.serialize document |> ok |> ignore)
     |]
-    let results=Array.append results (List.toArray projectionResults)
+    let results=Array.append results (List.toArray (projectionResults@polygonResults))
     let output=if args.Length=0 then "artifacts/geography-benchmarks.json" else args[0]
     let directory=Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore

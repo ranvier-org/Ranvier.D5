@@ -230,6 +230,9 @@ module GeoPath =
                 let lineInput=ResizeArray<GeoPosition>()
                 let lineCommands=ResizeArray<PathCommand>()
                 let mutable inLine=false
+                let mutable inPolygon=false
+                let polygonInput=ResizeArray<GeoPosition array>()
+                let mutable polygonInputCount=0
                 let finishLine () =
                     if lineInput.Count>0 then
                         lineCommands.Clear()
@@ -332,6 +335,36 @@ module GeoPath =
                         match GeoPreclip.line projection spend sink lineInput with
                         | Ok () -> ()
                         | Error error -> raise(Rejected error)
+                let finishPolygon () =
+                    if options.ClipExtent.IsSome then
+                        raise(Rejected(InvalidObservation "Rectangular polygon rejoining is not yet implemented."))
+                    let screen point =
+                        match Projection.projectRotatedValue projection point with
+                        | ValueSome value -> value
+                        | ValueNone -> raise(Rejected(InvalidObservation "Polygon contains an undefined projected vertex."))
+                    let makeSampler emit =
+                        let segment=resampler options spend screen emit
+                        fun first last -> segment 0 first last (screen first) (screen last)
+                    match GeoPolygon.project projection options.Precision options.MaxSubdivisionDepth options.MaxBufferedPoints spend makeSampler (polygonInput.ToArray()) with
+                    | Error error -> raise(Rejected error)
+                    | Ok rings ->
+                        let commands=ResizeArray<PathCommand>()
+                        for ring in rings do
+                            reserve ring.Length
+                            commands.Add(MoveTo ring[0])
+                            for index=1 to ring.Length-1 do
+                                spend 1L
+                                commands.Add(LineTo ring[index])
+                            spend 1L
+                            commands.Add Close
+                        if commands.Count>0 then
+                            let mutable owned=[]
+                            for index=commands.Count-1 downto 0 do
+                                spend 1L
+                                owned<-commands[index]::owned
+                            paths.Add(Path.ofCommands owned)
+                    polygonInput.Clear()
+                    polygonInputCount<-0
                 let folder () event =
                     spend 1L
                     match event with
@@ -346,8 +379,19 @@ module GeoPath =
                             | ValueNone -> ()
                     | GeoStreamEvent.Sphere -> sphere()
                     | GeoStreamEvent.LineStart -> lineInput.Clear(); inLine<-true
-                    | GeoStreamEvent.LineEnd -> finishLine(); inLine<-false
-                    | _ -> raise(Rejected(InvalidObservation "Geographic polygon path projection is not yet implemented."))
+                    | GeoStreamEvent.LineEnd ->
+                        if inPolygon then
+                            if lineInput.Count>options.MaxBufferedPoints-polygonInputCount then
+                                raise(Rejected(BudgetExceeded "Polygon input exceeds its vertex buffer budget."))
+                            spend(int64 lineInput.Count)
+                            polygonInputCount<-polygonInputCount+lineInput.Count
+                            polygonInput.Add(lineInput.ToArray())
+                        else finishLine()
+                        inLine<-false
+                    | GeoStreamEvent.PolygonStart -> inPolygon<-true;polygonInput.Clear();polygonInputCount<-0
+                    | GeoStreamEvent.PolygonEnd ->
+                        if polygonInput.Count>0 then finishPolygon()
+                        inPolygon<-false
                 match GeoStream.foldWithCancellation options.InputLimits token folder () geometry with
                 | Error errors -> Error errors
                 | Ok () ->

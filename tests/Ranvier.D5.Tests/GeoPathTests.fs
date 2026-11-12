@@ -13,6 +13,83 @@ let private projection kind = Projection.create (ProjectionConfig.defaultValue k
 
 [<Tests>]
 let tests = testList "geographic paths" [
+    testCase "polygon topology and filled area match pinned spherical stream fixtures" <| fun _ ->
+        use json=JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory,"fixtures","polygon-streams.json")))
+        for item in json.RootElement.GetProperty("cases").EnumerateArray() do
+            let name=item.GetProperty("name").GetString()
+            let kind=if item.GetProperty("kind").GetString()="Orthographic" then ProjectionKind.Orthographic else ProjectionKind.Equirectangular
+            let rotation =
+                match item.TryGetProperty("rotate") with
+                | true,angles -> GeoRotation.create (angles[0].GetDouble()) (angles[1].GetDouble()) (angles[2].GetDouble()) |> ok
+                | _ -> (ProjectionConfig.defaultValue kind).Rotation
+            let projected=Projection.create {ProjectionConfig.defaultValue kind with Scale=item.GetProperty("scale").GetDouble();Rotation=rotation} |> ok
+            let rings=item.GetProperty("rings").EnumerateArray() |> Seq.map(fun ring -> ring.EnumerateArray() |> Seq.map(fun point -> p (point[0].GetDouble()) (point[1].GetDouble())) |> Seq.toList) |> Seq.toList
+            let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=item.GetProperty("precision").GetDouble()} projected (GeoGeometry.Polygon rings) |> ok
+            let actual=ResizeArray<Point list>()
+            for path in paths do
+                let mutable vertices=[]
+                for command in Path.commands path do
+                    match command with
+                    | MoveTo point -> Expect.isEmpty vertices "previous ring closed"; vertices<-[point]
+                    | LineTo point -> vertices<-point::vertices
+                    | Close -> actual.Add(List.rev vertices); vertices<-[]
+                    | _ -> failtest "polygon uses explicit sampled boundary vertices"
+                Expect.isEmpty vertices "all rings close"
+            let expected=item.GetProperty("output").EnumerateArray() |> Seq.map(fun ring -> ring.EnumerateArray() |> Seq.map(fun point -> {X=point[0].GetDouble();Y=point[1].GetDouble()}) |> Seq.toList) |> Seq.toList
+            Expect.equal actual.Count expected.Length (name+" ring topology")
+            let expectedArea=expected |> List.sumBy Polygon.area
+            let actualArea=actual |> Seq.sumBy Polygon.area
+            let perimeter=expected |> List.sumBy(fun ring ->
+                match ring with
+                | [] -> 0.
+                | first::_ -> (ring@[first]) |> List.pairwise |> List.sumBy(fun (a,b) -> sqrt(Point.distanceSquared a b)))
+            let combinedError=2.*item.GetProperty("precision").GetDouble()
+            let areaTolerance=max 1e-8 (perimeter*combinedError+Math.PI*combinedError*combinedError)
+            Expect.isLessThan (abs(actualArea-expectedArea)) areaTolerance (name+" oriented filled area within combined screen precision")
+    testCase "polygon holes share a compound path while multipolygon members remain independent" <| fun _ ->
+        let outer=[p -10. -10.;p -10. 10.;p 10. 10.;p 10. -10.;p -10. -10.]
+        let hole=[p -3. -3.;p 3. -3.;p 3. 3.;p -3. 3.;p -3. -3.]
+        let paths=GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Equirectangular) (GeoGeometry.MultiPolygon[[outer;hole];[outer;hole]]) |> ok
+        Expect.equal paths.Length 2 "independent polygon identities"
+        for path in paths do
+            Expect.equal (Path.commands path |> List.filter((=) Close) |> List.length) 2 "exterior and hole in the same fill"
+    testCase "polygon rotation matches rotating source vertices before projection" <| fun _ ->
+        let rotation=GeoRotation.create 140. 20. 0. |> ok
+        let ring=[p -20. -15.;p -20. 15.;p 20. 15.;p 20. -15.;p -20. -15.]
+        for kind in [ProjectionKind.Equirectangular;ProjectionKind.Orthographic] do
+            let projected=Projection.create {ProjectionConfig.defaultValue kind with Rotation=rotation} |> ok
+            let actual=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.Polygon[ring]) |> ok |> List.map Path.commands
+            let expected=GeoPath.project GeoPathOptions.defaultValue (projection kind) (GeoGeometry.Polygon[List.map (GeoRotation.apply rotation) ring]) |> ok |> List.map Path.commands
+            Expect.equal actual expected "rotation precedes polygon clipping"
+    testCase "empty and repeated-point polygon rings do not emit spurious world boundaries" <| fun _ ->
+        for rings in [[];[[p 0. 0.;p 0. 0.;p 0. 0.;p 0. 0.]]] do
+            Expect.equal (GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon rings) |> ok) [] "no filled extent"
+    testCase "empty polygons remain empty for every projection and viewport" <| fun _ ->
+        for kind in [ProjectionKind.Equirectangular;ProjectionKind.Mercator;ProjectionKind.Orthographic] do
+            for extent in [None;Some(Bounds.create 0. 0. 1. 1.)] do
+                let options={GeoPathOptions.defaultValue with ClipExtent=extent;MaxOutputPoints=1}
+                Expect.equal (GeoPath.project options (projection kind) (GeoGeometry.Polygon[]) |> ok) [] "no clipping work is required"
+    testCase "polygon rings preserve the stream's malformed-input contract" <| fun _ ->
+        Expect.isError (GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[[]])) "an empty polygon is valid but an empty ring is not"
+    testCase "polygon buffers output and work are independently bounded" <| fun _ ->
+        let geometry=GeoGeometry.Polygon[[p 0. 0.;p 0. 10.;p 10. 0.;p 0. 0.]]
+        let projected=projection ProjectionKind.Equirectangular
+        for options in [
+            {GeoPathOptions.defaultValue with MaxBufferedPoints=2}
+            {GeoPathOptions.defaultValue with MaxOutputPoints=2}
+            {GeoPathOptions.defaultValue with MaxWork=20L}
+        ] do
+            match GeoPath.project options projected geometry with
+            | Error [BudgetExceeded _] -> ()
+            | other -> failtestf "Expected polygon budget error, got %A" other
+        let exact={GeoPathOptions.defaultValue with MaxBufferedPoints=4;MaxOutputPoints=3}
+        Expect.equal (GeoPath.project exact projected geometry |> ok |> List.length) 1 "exact small triangle budgets"
+    testCase "polygon projection observes cancellation after processing starts" <| fun _ ->
+        let ring=[yield p 0. 0.;for index in 1..100000 do yield p (float(index%2)) (float(index%3));yield p 0. 0.]
+        use cancelled=new CancellationTokenSource()
+        cancelled.CancelAfter(1)
+        Expect.throwsT<OperationCanceledException> (fun () ->
+            GeoPath.projectWithCancellation GeoPathOptions.defaultValue cancelled.Token (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[ring]) |> ignore) "cooperative polygon cancellation"
     testCase "sphere emits the complete equirectangular boundary" <| fun _ ->
         let paths=GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Equirectangular) GeoGeometry.Sphere |> ok
         Expect.equal paths.Length 1 "one world boundary"
