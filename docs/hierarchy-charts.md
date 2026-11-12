@@ -14,8 +14,9 @@ let focused = HierarchyChart.treemap { spec with Focus = Some "branch" } hierarc
 ```
 
 Labels are separate from domain identity. Repeated display labels are fine;
-domain IDs must remain unique. A collapsed branch keeps its aggregate weight and
-domain key. Focus chooses a subtree; a missing focus ID returns a typed error.
+domain IDs must remain unique. A collapsed branch keeps its aggregate weight under the recipe's sum policy
+and its domain key. Packed bubbles retain leaf-only totals, including when a
+branch has its own weight. Focus chooses a subtree; a missing focus ID returns a typed error.
 Selection is explicit in `Selected` and is not discarded when a selected node
 is temporarily hidden by collapse or focus. The caller can prune IDs when the
 underlying data changes. Selection adds an outline to visible nodes.

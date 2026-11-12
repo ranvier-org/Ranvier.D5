@@ -43,13 +43,13 @@ let main args =
     results.Add(measure "line-10000" 60. 16000000L (fun () -> Shape.line Curve.Linear (points |> Array.map Some |> Array.toList) |> Path.toSvg |> ignore))
     let hierarchyRows=[for i in 0..9999 -> string i,(if i=0 then None else Some(string((i-1)/4)))]
     let hierarchy=Hierarchy.stratify fst snd hierarchyRows |> Result.defaultWith(fun e -> failwithf "%A" e)
-    results.Add(measure "hierarchy-build-10000" 200. 32000000L (fun () -> Hierarchy.stratify fst snd hierarchyRows |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
-    results.Add(measure "tidy-tree-10000" 200. 32000000L (fun () -> Tree.layout (TreeConfig.create(Bounds.create 0. 0. 800. 600.)) hierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+    results.Add(measure "hierarchy-build-10000" 20. 4000000L (fun () -> Hierarchy.stratify fst snd hierarchyRows |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+    results.Add(measure "tidy-tree-10000" 60. 12000000L (fun () -> Tree.layout (TreeConfig.create(Bounds.create 0. 0. 800. 600.)) hierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
     let wideHierarchy=Hierarchy.node "root" 0. [for i in 0..9999 -> Hierarchy.node (string i) (float(i%17+1)) []]
-    results.Add(measure "treemap-squarified-10000" 200. 32000000L (fun () -> Treemap.layout (TreemapConfig.create(Bounds.create 0. 0. 800. 600.)) wideHierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
-    results.Add(measure "pack-wide-10000" 300. 32000000L (fun () -> Pack.layout (PackConfig.create(Bounds.create 0. 0. 800. 600.)) wideHierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+    results.Add(measure "treemap-squarified-10000" 75. 20000000L (fun () -> Treemap.layout (TreemapConfig.create(Bounds.create 0. 0. 800. 600.)) wideHierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+    results.Add(measure "pack-wide-10000" 150. 15000000L (fun () -> Pack.layout (PackConfig.create(Bounds.create 0. 0. 800. 600.)) wideHierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
     let hierarchySpec=Ranvier.D5.Charts.HierarchySpec.create (Ranvier.D5.Charts.ChartFrame.create 800. 600. "Hierarchy")
-    results.Add(measure "hierarchy-chart-10000" 300. 64000000L (fun () -> Ranvier.D5.Charts.HierarchyChart.treemap hierarchySpec hierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+    results.Add(measure "hierarchy-chart-10000" 180. 48000000L (fun () -> Ranvier.D5.Charts.HierarchyChart.treemap hierarchySpec hierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
     let curvePoints=points |> Array.map Some |> Array.toList
     results.Add(measure "natural-10000" 100. 16000000L (fun () -> Curves.line CurveSpec.Natural curvePoints |> ignore))
     let chartData=[0..999]

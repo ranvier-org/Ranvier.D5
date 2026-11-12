@@ -19,9 +19,9 @@ module HierarchySpec =
 [<RequireQualifiedAccess>]
 module HierarchyChart =
     let private unwrap = function Ok value -> value | Error errors -> invalidArg "hierarchy" (sprintf "%A" errors)
-    let private prepare spec root =
+    let private prepare policy spec root =
         let items=Hierarchy.descendants root
-        let totals=items |> Seq.map(fun item -> item.Id,item.Value) |> dict
+        let totals=Dictionary<string,float>(StringComparer.Ordinal)
         let nodes=Dictionary<string,HierarchyNode<string>>(StringComparer.Ordinal)
         let pending=Stack<HierarchyNode<string>>()
         pending.Push root
@@ -29,6 +29,11 @@ module HierarchyChart =
             let node=pending.Pop()
             nodes.Add(Hierarchy.id node,node)
             for child in Hierarchy.children node do pending.Push child
+        for item in List.rev items do
+            let children=Hierarchy.children nodes[item.Id]
+            totals[item.Id]<-
+                if policy=HierarchySumPolicy.IncludeOwnWeight || children.IsEmpty then item.Value
+                else children |> Seq.map(fun child -> totals[Hierarchy.id child]) |> Data.sum
         let focused=
             match spec.Focus with
             | None -> root
@@ -52,13 +57,13 @@ module HierarchyChart =
                 else Hierarchy.node key (Hierarchy.weight node) (Hierarchy.children node |> List.map(fun child -> built[Hierarchy.id child]))
         built[Hierarchy.id focused]
 
-    let private run spec root build =
+    let private run policy spec root build =
         match ChartLayout.plot spec.Frame with
         | Error errors -> Error errors
         | Ok bounds ->
             try
                 if not(Double.IsFinite spec.Padding) || spec.Padding<0. then invalidArg "padding" "Padding must be finite and nonnegative."
-                let visible=if spec.Focus.IsNone && spec.Collapsed.IsEmpty then root else prepare spec root
+                let visible=if spec.Focus.IsNone && spec.Collapsed.IsEmpty then root else prepare policy spec root
                 Ok(build bounds visible)
             with :? ArgumentException as error -> Error [InvalidObservation error.Message]
 
@@ -74,7 +79,7 @@ module HierarchyChart =
         Recipe.output spec.Frame bounds (extras@marks) semantics hits []
 
     let private points radial spec root =
-        run spec root (fun bounds visible ->
+        run HierarchySumPolicy.IncludeOwnWeight spec root (fun bounds visible ->
             let cx=Bounds.x bounds+Bounds.width bounds/2.
             let cy=Bounds.y bounds+Bounds.height bounds/2.
             let radius=max 0. (min (Bounds.width bounds) (Bounds.height bounds)/2.-5.)
@@ -95,22 +100,22 @@ module HierarchyChart =
     let dendrogram spec root = points false spec root
     let radialTree spec root = points true spec root
     let icicle spec root =
-        run spec root (fun bounds visible ->
+        run HierarchySumPolicy.IncludeOwnWeight spec root (fun bounds visible ->
             Partition.layout {Bounds=bounds;Padding=spec.Padding} visible |> unwrap
             |> List.map(fun cell -> entry spec cell.Id (HitBounds cell.Bounds) (fun key -> Shape.rectangle cell.Bounds |> Mark.path key))
             |> fun entries -> output spec bounds entries [])
     let treemap spec root =
-        run spec root (fun bounds visible ->
+        run HierarchySumPolicy.IncludeOwnWeight spec root (fun bounds visible ->
             Treemap.layout {TreemapConfig.create bounds with Padding=spec.Padding} visible |> unwrap
             |> List.map(fun cell -> entry spec cell.Id (HitBounds cell.Bounds) (fun key -> Shape.rectangle cell.Bounds |> Mark.path key))
             |> fun entries -> output spec bounds entries [])
     let packedBubbles spec root =
-        run spec root (fun bounds visible ->
+        run HierarchySumPolicy.LeavesOnly spec root (fun bounds visible ->
             Pack.layout {PackConfig.create bounds with Padding=spec.Padding} visible |> unwrap
             |> List.map(fun circle -> entry spec circle.Id (HitPoint(circle.Center,circle.Radius)) (fun key -> Shape.symbol Symbol.Circle (Math.PI*circle.Radius*circle.Radius) |> Mark.path key |> Mark.withTransform(Transform.translate circle.Center.X circle.Center.Y)))
             |> fun entries -> output spec bounds entries [])
     let sunburst spec root =
-        run spec root (fun bounds visible ->
+        run HierarchySumPolicy.IncludeOwnWeight spec root (fun bounds visible ->
             let center=Point.create (Bounds.x bounds+Bounds.width bounds/2.) (Bounds.y bounds+Bounds.height bounds/2.)
             let radius=min (Bounds.width bounds) (Bounds.height bounds)/2.
             Partition.layout {Bounds=Bounds.create 0. 0. (2.*Math.PI) radius;Padding=0.} visible |> unwrap

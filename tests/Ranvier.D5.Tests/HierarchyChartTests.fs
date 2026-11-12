@@ -8,6 +8,14 @@ let private ok = function Ok value -> value | Error errors -> failtestf "%A" err
 let private root=Hierarchy.node "root" 0. [Hierarchy.node "a" 0. [Hierarchy.node "leaf" 2. []];Hierarchy.node "b" 1. []]
 let private spec=HierarchySpec.create (ChartFrame.create 400. 300. "Hierarchy")
 let tests=testList "Hierarchy charts" [
+    testCase "packed collapse preserves leaf-only weight policy" <| fun _ ->
+        let weighted=Hierarchy.node "root" 0. [Hierarchy.node "a" 100. [Hierarchy.node "leaf" 1. []];Hierarchy.node "b" 1. []]
+        let ratio output =
+            let radius id=output.HitTargets |> List.pick(fun hit -> match hit.DataIds,hit.Geometry with [key],HitPoint(_,r) when key=id -> Some r | _ -> None)
+            (radius "a"/radius "b")**2.
+        let before=HierarchyChart.packedBubbles {spec with Padding=0.} weighted |> ok |> ratio
+        let after=HierarchyChart.packedBubbles {spec with Padding=0.;Collapsed=set ["a"]} weighted |> ok |> ratio
+        Expect.floatClose Accuracy.high after before "collapse must not introduce branch own weight"
     testCase "all hierarchy recipes produce semantic hit targets" <| fun _ ->
         for chart in [HierarchyChart.dendrogram;HierarchyChart.radialTree;HierarchyChart.icicle;HierarchyChart.sunburst;HierarchyChart.packedBubbles;HierarchyChart.treemap] do
             let output=chart spec root |> ok

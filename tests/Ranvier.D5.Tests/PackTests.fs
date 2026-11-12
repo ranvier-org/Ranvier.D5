@@ -5,6 +5,13 @@ open Ranvier.D5
 let private ok = function Ok value -> value | Error errors -> failtestf "%A" errors
 let private distance (a:Point) (b:Point) = sqrt ((a.X-b.X)**2.+(a.Y-b.Y)**2.)
 let tests = testList "Circle packing" [
+    testCase "extreme weight ratios preserve representable positive radii" <| fun _ ->
+        let root=Hierarchy.node "root" 0. [Hierarchy.node "tiny" 1e-300 [];Hierarchy.node "large" 1e300 []]
+        let circles=Pack.layout (PackConfig.create(Bounds.create 0. 0. 1000. 1000.)) root |> ok
+        let tiny=circles |> List.find(fun circle -> circle.Id="tiny")
+        let large=circles |> List.find(fun circle -> circle.Id="large")
+        Expect.isGreaterThan tiny.Radius 0. "positive radius survives normalization"
+        Expect.floatClose Accuracy.high (tiny.Radius/large.Radius/1e-300) 1. "square-root weight ratio"
     testCase "circles preserve leaf areas and siblings do not overlap" <| fun _ ->
         let root=Hierarchy.node "root" 0. [for i in 1..80 -> Hierarchy.node (string i) (float i) []]
         let config=PackConfig.create (Bounds.create 0. 0. 400. 300.)

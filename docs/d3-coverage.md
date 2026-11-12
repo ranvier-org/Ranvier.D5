@@ -65,8 +65,10 @@ transitions and bounded background layouts.
 
 The table above records baseline and planned ownership, not exhaustive parity.
 See [release validation](release-alpha.2.md) for tested scope and deliberate
-policies. Task 5–11 algorithms remain planned. Full locale/time parsers, all D3
-palette tables, geographic pipelines, spatial triangulation, forces, contours,
-flow layouts and hierarchy expansion are not claimed by this release.
+policies for alpha.2. The current hierarchy milestone adds task 5 construction,
+layouts and recipes, with [native snapshots and explicit limitations](hierarchy-charts.md).
+Tasks 6–11 remain planned. Full locale/time parsers, all D3 palette tables,
+geographic pipelines, spatial triangulation, forces, contours and flow layouts
+are not claimed by this milestone.
 
 Reference fixtures: `tests/fixtures/manifest.json`, exact npm lockfile and copied licenses in `tools/reference-fixtures/`. Generation is development-only. Numeric tolerance and coordinate conventions travel with the fixtures. Native ownership, topology errors and missing-data behavior are tested as D5 contracts rather than copied blindly from JavaScript.
