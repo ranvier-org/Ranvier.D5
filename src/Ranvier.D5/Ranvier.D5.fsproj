@@ -30,6 +30,9 @@
     <Compile Include="Stack.fs" />
     <Compile Include="Spatial.fs" />
     <Compile Include="Quadtree.fs" />
+    <Compile Include="DelaunayKernel.fs" />
+    <Compile Include="Delaunay.fs" />
+    <Compile Include="Voronoi.fs" />
     <Compile Include="Reactive.fs" />
     <Compile Include="KeyedTransition.fs" />
     <Compile Include="Interaction.fs" />
@@ -41,6 +44,7 @@
     <None Include="../../tools/reference-fixtures/licenses/d3-shape.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-scale-chromatic.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-hierarchy.txt" Pack="true" PackagePath="licenses/" />
+    <None Include="../../tools/reference-fixtures/licenses/delaunator.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/robust-predicates.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>

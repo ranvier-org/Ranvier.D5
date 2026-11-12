@@ -60,6 +60,9 @@ let main args =
         let quad=Quadtree.build id (fun _ -> 1.) quadPoints
         results.Add(measure "quadtree-nearest-1000-in-100000" 25. 4000000L (fun () ->
             for i in 0..999 do Quadtree.nearest (Point.create (float(i%1000)+0.2) (float(i%100)+0.3)) infinity quad |> ignore))
+        results.Add(measure "delaunay-build-100000" 1000. 300000000L (fun () -> Delaunay.build (Array.toList quadPoints) |> ignore))
+        let mesh=Delaunay.build (Array.toList points)
+        results.Add(measure "voronoi-clip-10000" 500. 150000000L (fun () -> Voronoi.clip (Bounds.create 0. 0. 100. 100.) mesh |> ignore))
         let curvePoints=points |> Array.map Some |> Array.toList
         results.Add(measure "natural-10000" 100. 16000000L (fun () -> Curves.line CurveSpec.Natural curvePoints |> ignore))
         let chartData=[0..999]

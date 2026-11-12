@@ -43,6 +43,15 @@ Brush the upper scatter plot and the lower line updates through a shared Ranvier
 signal. Arrow keys and Enter select, Escape clears.
 [Source](../Shared/LinkedCharts.fs).
 
+## Delaunay and Voronoi picking
+
+![Native mesh and Voronoi picking](../../docs/images/spatial.png)
+
+Run `--spatial`; move or click in either plot to select the nearest original site.
+Focus the chart for arrow-key selection and Escape to clear.
+Capture with `--capture-spatial artifacts/spatial.bmp`; capture checks a real native click.
+[Source](SpatialGallery.fs) and [contracts](../../docs/spatial.md).
+
 ## Quadtree search
 
 ![Native quadtree search](../../docs/images/quadtree.png)

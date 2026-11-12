@@ -39,7 +39,12 @@ module Polygon =
         boundary || winding<>0
     let hull points =
         for point in points do Check.finite "x" point.X;Check.finite "y" point.Y
-        let sorted=points |> List.distinct |> List.sortBy(fun p -> p.X,p.Y) |> List.toArray
+        let ordered=List.toArray points
+        Array.sortInPlaceWith(fun a b -> let x=compare a.X b.X in if x=0 then compare a.Y b.Y else x) ordered
+        let unique=ResizeArray<Point>()
+        for point in ordered do
+            if unique.Count=0 || unique[unique.Count-1]<>point then unique.Add point
+        let sorted=unique.ToArray()
         if sorted.Length<2 then Array.toList sorted else
         let chain sequence =
             let result=ResizeArray<Point>()

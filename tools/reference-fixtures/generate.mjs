@@ -1,5 +1,6 @@
 import './hierarchy.mjs';
 import './planar.mjs';
+import './triangulation.mjs';
 import * as array from 'd3-array';
 import * as shape from 'd3-shape';
 import * as scale from 'd3-scale';
@@ -19,6 +20,6 @@ const values=[[1,2,3],[2,3,1],[0,1,4]];
 write('stacks.json',['stackOffsetNone','stackOffsetExpand','stackOffsetSilhouette','stackOffsetWiggle','stackOffsetDiverging'].map(name=>({name,values,layers:shape.stack().keys([0,1,2]).offset(shape[name])(values).map(layer=>Array.from(layer))})));
 write('scales.json',[{name:'log',domain:[1,1000],ticks:scale.scaleLog().domain([1,1000]).ticks(10)},{name:'piecewise',domain:[0,5,10],range:[0,20,100],inputs:[0,2.5,5,7.5,10],outputs:[0,2.5,5,7.5,10].map(scale.scaleLinear().domain([0,5,10]).range([0,20,100]))}]);
 const source=JSON.parse(readFileSync(resolve(here,'package.json'))).dependencies;
-write('manifest.json',{schema:1,seed:42,source,coordinates:'SVG x-right y-down; arc angles radians clockwise from -Y; UTC milliseconds for time',tolerance:1e-9,files:['statistics.json','curves.json','stacks.json','scales.json','hierarchy.json','planar.json']});
+write('manifest.json',{schema:1,seed:42,source,coordinates:'SVG x-right y-down; arc angles radians clockwise from -Y; UTC milliseconds for time',tolerance:1e-9,files:['statistics.json','curves.json','stacks.json','scales.json','hierarchy.json','planar.json','triangulation.json']});
 mkdirSync(resolve(here,'licenses'),{recursive:true});
 for(const name of Object.keys(source)) copyFileSync(resolve(here,'node_modules',name,'LICENSE'),resolve(here,'licenses',name+'.txt'));
