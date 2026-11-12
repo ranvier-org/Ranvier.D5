@@ -230,6 +230,82 @@ let tests = testList "geographic paths" [
                 Expect.isLessThan (abs(Double.Hypot(boundary.X,boundary.Y)-1.)) 1e-12 "intersection on limb"
     testCase "orthographic clipping rejects an ambiguous antipodal route" <| fun _ ->
         Expect.isError (GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Orthographic) (GeoGeometry.LineString[p 0. 0.;p 180. 0.])) "route needs a waypoint"
+    testCase "hemisphere and rectangle fragments match pinned stream references" <| fun _ ->
+        use json=JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory,"fixtures","clipped-streams.json")))
+        for item in json.RootElement.GetProperty("cases").EnumerateArray() do
+            let kind=if item.GetProperty("kind").GetString()="Orthographic" then ProjectionKind.Orthographic else ProjectionKind.Equirectangular
+            let projected=Projection.create {ProjectionConfig.defaultValue kind with Scale=item.GetProperty("scale").GetDouble()} |> ok
+            let positions=item.GetProperty("points").EnumerateArray() |> Seq.map(fun value -> p (value[0].GetDouble()) (value[1].GetDouble())) |> Seq.toList
+            let extent =
+                match item.TryGetProperty("clip") with
+                | true,value ->
+                    let lower,upper=value[0],value[1]
+                    Some(Bounds.create (lower[0].GetDouble()) (lower[1].GetDouble()) (upper[0].GetDouble()-lower[0].GetDouble()) (upper[1].GetDouble()-lower[1].GetDouble()))
+                | _ -> None
+            let options={GeoPathOptions.defaultValue with Precision=item.GetProperty("precision").GetDouble();ClipExtent=extent}
+            let paths=GeoPath.project options projected (GeoGeometry.LineString positions) |> ok
+            let expected=item.GetProperty("fragments").EnumerateArray() |> Seq.toArray
+            Expect.equal paths.Length expected.Length (item.GetProperty("name").GetString())
+            for index=0 to paths.Length-1 do
+                let vertices=Path.commands paths[index] |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+                let reference=expected[index]
+                for actual,target in [vertices.Head,reference[0];List.last vertices,reference[reference.GetArrayLength()-1]] do
+                    Expect.isLessThan (Double.Hypot(actual.X-target[0].GetDouble(),actual.Y-target[1].GetDouble())) (item.GetProperty("tolerance").GetDouble()) "fragment endpoint within combined precision"
+    testCase "rectangle clips line crossings with exact boundary endpoints" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.5 -0.25 1. 0.5)}
+        let projected=projection ProjectionKind.Equirectangular
+        for positions in [[p -60. 0.;p 60. 0.];[p 60. 0.;p -60. 0.]] do
+            let paths=GeoPath.project options projected (GeoGeometry.LineString positions) |> ok
+            Expect.equal paths.Length 1 "one crossing"
+            let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+            Expect.equal (abs vertices.Head.X) 0.5 "entry boundary"
+            Expect.equal (abs (List.last vertices).X) 0.5 "exit boundary"
+            Expect.isTrue (vertices |> List.forall(fun point -> abs point.X<=0.5 && abs point.Y<=0.25)) "inside extent"
+    testCase "rectangle separates exits and reentries without an outside connector" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.5 -0.5 1. 1.)}
+        let paths=GeoPath.project options (projection ProjectionKind.Equirectangular) (GeoGeometry.LineString[p 0. 0.;p 60. 0.;p 60. 10.;p 0. 10.]) |> ok
+        Expect.equal paths.Length 2 "outside run breaks the path"
+    testCase "rectangle omits invisible lines and zero-area extents" <| fun _ ->
+        for extent,positions in [
+            Bounds.create -0.5 -0.5 1. 1.,[p 50. 0.;p 60. 0.]
+            Bounds.create 0. -1. 0. 2.,[p -60. 0.;p 60. 0.]
+            Bounds.create -1. 0. 2. 0.,[p -60. 0.;p 60. 0.]
+        ] do
+            let options={GeoPathOptions.defaultValue with ClipExtent=Some extent;MaxOutputPoints=1}
+            Expect.equal (GeoPath.project options (projection ProjectionKind.Equirectangular) (GeoGeometry.LineString positions) |> ok) [] "no output or phantom budget charges"
+    testCase "rectangle retains a line along its boundary" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create 0. -1. 1. 2.)}
+        let paths=GeoPath.project options (projection ProjectionKind.Equirectangular) (GeoGeometry.LineString[p 0. -30.;p 0. 30.]) |> ok
+        Expect.equal paths.Length 1 "boundary stroke retained"
+        Expect.isTrue (Path.commands paths.Head |> List.forall(function MoveTo point | LineTo point -> point.X=0. | _ -> false)) "boundary coordinates"
+    testCase "rectangle clipping follows hemisphere clipping and resampling" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.5 -0.5 1. 1.);Precision=0.001}
+        let paths=GeoPath.project options (projection ProjectionKind.Orthographic) (GeoGeometry.LineString[p 0. 0.;p 120. 0.]) |> ok
+        Expect.equal paths.Length 1 "visible part intersects viewport"
+        match Path.commands paths.Head |> List.last with
+        | LineTo point -> Expect.equal point {X=0.5;Y=0.} "screen clip after hemisphere clip"
+        | _ -> failtest "expected line endpoint"
+    testCase "rectangle duplicate vertices do not break a visible stroke" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -1. -1. 2. 2.)}
+        let paths=GeoPath.project options (projection ProjectionKind.Equirectangular) (GeoGeometry.LineString[p -10. 0.;p 0. 0.;p 0. 0.;p 10. 0.]) |> ok
+        Expect.equal paths.Length 1 "duplicate vertex keeps the same stroke"
+    testCase "rectangle corner-only touches do not consume output budget" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create 0. 0. 1. 1.);MaxOutputPoints=1}
+        for positions in [[p -10. 10.;p 0. 0.];[p 0. 0.;p -10. 10.]] do
+            Expect.equal (GeoPath.project options (projection ProjectionKind.Equirectangular) (GeoGeometry.LineString positions) |> ok) [] "zero-length corner touch"
+    testCase "rectangle clipping remains finite at large representable screen scales" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -1e149 -1e149 2e149 2e149);Precision=1e140}
+        let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Scale=1e150} |> ok
+        let paths=GeoPath.project options projected (GeoGeometry.LineString[p -60. 0.;p 60. 0.]) |> ok
+        Expect.equal paths.Length 1 "crossing remains connected"
+        let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+        Expect.equal vertices.Head.X -1e149 "left boundary"
+        Expect.equal (List.last vertices).X 1e149 "right boundary"
+    testCase "rectangle line clipping still enforces output and work budgets" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.5 -0.5 1. 1.)}
+        let geometry=GeoGeometry.LineString[p -60. 0.;p 60. 0.]
+        Expect.isError (GeoPath.project {options with MaxOutputPoints=1} (projection ProjectionKind.Equirectangular) geometry) "visible line requires two endpoints"
+        Expect.isError (GeoPath.project {options with MaxWork=10L} (projection ProjectionKind.Equirectangular) geometry) "clipping consumes bounded work"
     testCase "rejects point-radius overflow instead of emitting nonfinite path commands" <| fun _ ->
         let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Translate={X=Double.MaxValue;Y=0.}} |> ok
         Expect.isError (GeoPath.project {GeoPathOptions.defaultValue with PointRadius=Double.MaxValue} projected (GeoGeometry.Point(Some(p 0. 0.)))) "overflow is explicit"

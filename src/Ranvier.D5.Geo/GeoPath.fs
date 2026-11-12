@@ -154,26 +154,11 @@ module GeoPath =
                 let mutable inLine=false
                 let finishLine () =
                     if lineInput.Count>0 then
-                        if options.ClipExtent.IsSome then
-                            raise(Rejected(InvalidObservation "Rectangular line clipping is not yet implemented."))
                         lineCommands.Clear()
                         let mutable pending=ValueNone
                         let mutable tail=ValueNone
-                        let startFragment point =
-                            lineCommands.Clear()
-                            pending<-ValueSome point
-                            tail<-ValueSome point
-                        let addLine point =
-                            let count=if pending.IsSome then 2 else 1
-                            reserve count
-                            if count>options.MaxBufferedPoints-lineCommands.Count then
-                                raise(Rejected(BudgetExceeded "Projected line exceeds its buffer budget."))
-                            match pending with
-                            | ValueSome first -> lineCommands.Add(MoveTo first); pending<-ValueNone
-                            | ValueNone -> ()
-                            lineCommands.Add(LineTo point)
-                            tail<-ValueSome point
-                        let flush () =
+                        let mutable outputTail=ValueNone
+                        let flushOutput () =
                             if lineCommands.Count>1 then
                                 let mutable commands=[]
                                 for index=lineCommands.Count-1 downto 0 do
@@ -182,6 +167,75 @@ module GeoPath =
                                 paths.Add(Path.ofCommands commands)
                             lineCommands.Clear()
                             pending<-ValueNone
+                            outputTail<-ValueNone
+                        let startFragment point =
+                            lineCommands.Clear()
+                            pending<-if options.ClipExtent.IsNone then ValueSome point else ValueNone
+                            outputTail<-ValueNone
+                            tail<-ValueSome point
+                        let emitLine point =
+                            let count=if pending.IsSome then 2 else 1
+                            reserve count
+                            if count>options.MaxBufferedPoints-lineCommands.Count then
+                                raise(Rejected(BudgetExceeded "Projected line exceeds its buffer budget."))
+                            match pending with
+                            | ValueSome first -> lineCommands.Add(MoveTo first); pending<-ValueNone
+                            | ValueNone -> ()
+                            lineCommands.Add(LineTo point)
+                            outputTail<-ValueSome point
+                        let clipLine clip (first:Point) (last:Point) =
+                            let mutable a=first
+                            let mutable b=last
+                            let mutable visible=Bounds.width clip>0. && Bounds.height clip>0.
+                            let mutable edge=0
+                            while visible && edge<4 do
+                                spend 1L
+                                let horizontal=edge<2
+                                let boundary =
+                                    match edge with
+                                    | 0 -> Bounds.x clip
+                                    | 1 -> Bounds.x clip+Bounds.width clip
+                                    | 2 -> Bounds.y clip
+                                    | _ -> Bounds.y clip+Bounds.height clip
+                                let ca,cb=if horizontal then a.X,b.X else a.Y,b.Y
+                                let insideA,insideB =
+                                    if edge%2=0 then ca>=boundary,cb>=boundary
+                                    else ca<=boundary,cb<=boundary
+                                if not insideA && not insideB then visible<-false
+                                elif insideA<>insideB then
+                                    let da,db=ca-boundary,cb-boundary
+                                    let t =
+                                        if Double.IsFinite da && Double.IsFinite db && Double.IsFinite(da-db) then da/(da-db)
+                                        else
+                                            let scale=max (abs boundary) (max (abs ca) (abs cb))
+                                            let sa,sb=ca/scale-boundary/scale,cb/scale-boundary/scale
+                                            sa/(sa-sb)
+                                    let mix x y=(1.-t)*x+t*y
+                                    let intersection =
+                                        if horizontal then {X=boundary;Y=mix a.Y b.Y}
+                                        else {X=mix a.X b.X;Y=boundary}
+                                    if insideA then b<-intersection else a<-intersection
+                                edge<-edge+1
+                            if visible && a<>b then ValueSome(struct(a,b)) else ValueNone
+                        let addLine point =
+                            match options.ClipExtent with
+                            | None -> emitLine point
+                            | Some clip ->
+                                match tail with
+                                | ValueNone -> raise(Rejected(InvalidObservation "Projected line fragment has no starting point."))
+                                | ValueSome previous when previous=point -> ()
+                                | ValueSome previous ->
+                                    match clipLine clip previous point with
+                                    | ValueNone -> flushOutput()
+                                    | ValueSome(struct(first,last)) ->
+                                        match outputTail with
+                                        | ValueSome current when current=first -> ()
+                                        | _ -> flushOutput(); pending<-ValueSome first
+                                        emitLine last
+                                        if last<>point then flushOutput()
+                            tail<-ValueSome point
+                        let flush () =
+                            flushOutput()
                             tail<-ValueNone
                         let screen position =
                             match Projection.projectRotatedValue projection position with
