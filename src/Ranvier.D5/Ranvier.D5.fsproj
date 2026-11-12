@@ -8,6 +8,9 @@
     <Compile Include="Data.fs" />
     <Compile Include="Scale.fs" />
     <Compile Include="Geometry.fs" />
+    <Compile Include="Mark.fs" />
+    <Compile Include="SceneDefinitions.fs" />
+    <Compile Include="SceneNode.fs" />
     <Compile Include="Scene.fs" />
     <Compile Include="Layout.fs" />
     <Compile Include="Spatial.fs" />

@@ -1,6 +1,8 @@
 namespace Ranvier.D5.View
 
+open System
 open System.Globalization
+open System.Text
 open Ranvier.D5
 open Ranvier.View
 open Ranvier.View.Sugar
@@ -9,9 +11,13 @@ open Ranvier.View.Sugar
 module Renderer =
     let private number (value: float) = value.ToString("G17", CultureInfo.InvariantCulture)
 
+    type private RenderMark = { Mark:Mark; Namespace:string; Path:string list }
+    type private RenderNode = { Node:SceneNode; Namespace:string; Path:string list }
+    let private definitionId prefix (key:string) = prefix + Convert.ToHexString(Encoding.UTF8.GetBytes key)
+
     let private row (dispatch: string -> string -> Ranvier.Dom.Event -> unit) =
-        Component.define (fun _ (read: unit -> Mark) -> read) (fun t ->
-            let attribute name read = t.Attrs.attribute(name, fun (mark: unit -> Mark) -> Some(read (mark ())))
+        Component.define (fun _ (read: unit -> RenderMark) -> read) (fun t ->
+            let attribute name read = t.Attrs.attribute(name, fun (mark: unit -> RenderMark) -> Some(read (mark ()).Mark))
             let path =
                 t.element (HtmlTag "path")
                     [|
@@ -26,31 +32,117 @@ module Renderer =
                         attribute "y" (fun mark -> match Mark.geometry mark with TextGeometry(point, _) -> number point.Y | _ -> "0")
                         attribute "display" (fun mark -> match Mark.geometry mark with TextGeometry _ -> "inline" | _ -> "none")
                     |]
-                    [| t.text(fun read -> match Mark.geometry (read ()) with TextGeometry(_, text) -> text | _ -> "") |]
+                    [| t.text(fun read -> match Mark.geometry (read ()).Mark with TextGeometry(_, text) -> text | _ -> "") |]
             t.element (HtmlTag "g") ([|
                 attribute "data-d5-key" Mark.key
                 attribute "transform" (Mark.transform >> Transform.toSvg)
-                attribute "fill" (Mark.style >> fun style -> Paint.toCss style.Fill)
+                t.Attrs.attribute("fill", fun read -> let item = read () in Some(Mark.fillDefinition item.Mark |> Option.map (fun key -> "url(#"+definitionId item.Namespace key+")") |> Option.defaultWith (fun () -> Paint.toCss (Mark.style item.Mark).Fill)))
                 attribute "stroke" (Mark.style >> fun style -> Paint.toCss style.Stroke)
                 attribute "stroke-width" (Mark.style >> fun style -> number style.StrokeWidth)
                 attribute "opacity" (Mark.style >> fun style -> number style.Opacity)
                 attribute "font-size" (Mark.style >> fun style -> number style.FontSize)
-                t.Attrs.attribute("aria-label", fun read -> Mark.label (read ()))
+                attribute "font-family" (Mark.textStyle >> fun style -> style.Family)
+                attribute "font-weight" (Mark.textStyle >> fun style -> string style.Weight)
+                attribute "text-anchor" (Mark.textStyle >> fun style -> style.Anchor)
+                attribute "dominant-baseline" (Mark.textStyle >> fun style -> style.Baseline)
+                t.Attrs.attribute("aria-label", fun read -> Mark.label (read ()).Mark)
                 for event in ["click"; "pointerdown"; "pointermove"; "pointerup"; "pointercancel"; "wheel"; "keydown"] do
-                    t.Events.on(event, fun read payload -> dispatch (Mark.key (read ())) event payload)
+                    t.Events.on(event, fun read payload -> dispatch (Mark.key (read ()).Mark) event payload)
             |]) [| path; text |])
 
-    /// <summary>Creates a reusable keyed scene component; construct once per event policy, then render with a signal-backed reader.</summary>
+    let private definitionRow =
+        let stopRow =
+            Component.define (fun _ (read:unit -> int * GradientStop) -> read) (fun t ->
+                t.element (HtmlTag "stop")
+                    [|t.Attrs.attribute("offset", fun read -> Some(number (snd(read())).Offset))
+                      t.Attrs.attribute("stop-color", fun read -> Some(Paint.toCss (snd(read())).Color))
+                      t.Attrs.attribute("stop-opacity", fun read -> Some(number (snd(read())).Opacity))|] [||])
+        let make tag attributes children =
+            Component.define (fun _ (read:unit -> string * SceneDefinition) -> read) (fun t ->
+                let attr name f = t.Attrs.attribute(name, fun read -> Some(f(snd(read()))))
+                t.element (HtmlTag tag)
+                    (Array.append [|t.Attrs.attribute("id", fun read -> let ns,d=read() in Some(definitionId ns (SceneDefinition.key d)))|] (attributes attr))
+                    (children t))
+        let clip =
+            make "clipPath" (fun attr -> [|attr "clipPathUnits" (fun _ -> "userSpaceOnUse")|]) (fun t ->
+                let rect f read = match snd(read()) with RectClip(_,b) -> Some(number(f b)) | _ -> None
+                [|t.element (HtmlTag "rect")
+                    [|t.Attrs.attribute("x", rect Bounds.x);t.Attrs.attribute("y", rect Bounds.y)
+                      t.Attrs.attribute("width",rect Bounds.width);t.Attrs.attribute("height",rect Bounds.height)|] [||]|])
+        let stops (t:TemplateBuilder<unit -> string * SceneDefinition>) =
+            [|t.each fst (fun read ->
+                match snd(read()) with
+                | LinearGradient(_,_,_,s) | RadialGradient(_,_,_,s) -> s |> List.indexed |> List.toArray
+                | _ -> [||]) stopRow|]
+        let linear = make "linearGradient" (fun attr ->
+            [|attr "gradientUnits" (fun _ -> "userSpaceOnUse")
+              for name, f in ["x1",(fun (a:Point) _ -> a.X);"y1",(fun a _ -> a.Y);"x2",(fun _ b -> b.X);"y2",(fun _ b -> b.Y)] do
+                  attr name (function LinearGradient(_,a,b,_) -> number(f a b) | _ -> "0")|]) stops
+        let radial = make "radialGradient" (fun attr ->
+            [|attr "gradientUnits" (fun _ -> "userSpaceOnUse")
+              attr "cx" (function RadialGradient(_,p,_,_) -> number p.X | _ -> "0")
+              attr "cy" (function RadialGradient(_,p,_,_) -> number p.Y | _ -> "0")
+              attr "r" (function RadialGradient(_,_,r,_) -> number r | _ -> "0")|]) stops
+        Component.define (fun _ (read:unit -> string * SceneDefinition) -> read) (fun t ->
+            t.matchWith (fun read -> read()) (fun ((_,d) as value) ->
+                match d with
+                | RectClip _ -> t.arm clip value
+                | LinearGradient _ -> t.arm linear value
+                | RadialGradient _ -> t.arm radial value))
+
+    /// <summary>Creates retained keyed scenes with mount-local definitions and scoped group identities.</summary>
     let create dispatch =
         let marks = row dispatch
-        Component.define (fun _ (read: unit -> Scene) -> read) (fun t ->
-            svg<unit -> Scene>(
-                t.Attrs.attribute("role", "img"),
-                t.Attrs.attribute("aria-label", fun read -> Some(Scene.title (read ()))),
-                t.Attrs.attribute("width", fun read -> Some(number (Scene.width (read ())))),
-                t.Attrs.attribute("height", fun read -> Some(number (Scene.height (read ())))),
-                t.Attrs.attribute("viewBox", fun read -> let scene = read () in Some("0 0 " + number (Scene.width scene) + " " + number (Scene.height scene)))
-            ).Run [| t.each Mark.key (fun read -> Scene.marks (read ()) |> List.toArray) marks |])
+        let mutable groupDefinition : Component<unit -> RenderNode> option = None
+        let leaf =
+            Component.define (fun _ (read:unit -> RenderNode) -> read) (fun t ->
+                t.render marks (fun read -> fun () ->
+                    let item=read()
+                    match item.Node with
+                    | Leaf mark -> {Mark=mark;Namespace=item.Namespace;Path=item.Path}
+                    | _ -> invalidOp "Expected a leaf."))
+        let node =
+            Component.define (fun _ (read:unit -> RenderNode) -> read) (fun t ->
+                t.matchWith (fun read -> read()) (fun item ->
+                    match item.Node with
+                    | Leaf _ -> t.arm leaf item
+                    | Group _ -> t.arm groupDefinition.Value item))
+        let group =
+            Component.define (fun _ (read:unit -> RenderNode) -> read) (fun t ->
+                let spec read = match (read()).Node with Group(g,_) -> g | _ -> invalidOp "Expected a group."
+                t.element (HtmlTag "g")
+                    [|t.Attrs.attribute("data-d5-group", fun read -> Some((spec read).Key))
+                      t.Attrs.attribute("transform",fun read -> Some(Transform.toSvg (spec read).Transform))
+                      t.Attrs.attribute("clip-path",fun read -> (spec read).Clip |> Option.map (fun key -> "url(#"+definitionId (read()).Namespace key+")"))|]
+                    [|t.each (fun item -> SceneNode.key item.Node) (fun read ->
+                        let item=read()
+                        match item.Node with
+                        | Group(_,children) -> children |> List.map (fun child -> {item with Node=child;Path=item.Path@[SceneNode.key child]}) |> List.toArray
+                        | _ -> [||]) node|])
+        groupDefinition <- Some group
+        let flat =
+            Component.define (fun _ (read:unit -> string * Scene) -> read) (fun t ->
+                t.each (fun item -> Mark.key item.Mark) (fun read ->
+                    let ns,scene=read()
+                    Scene.marks scene |> List.map (fun mark -> {Mark=mark;Namespace=ns;Path=[]}) |> List.toArray) marks)
+        let composed =
+            Component.define (fun _ (read:unit -> string * Scene) -> read) (fun t ->
+                t.each (fun item -> SceneNode.key item.Node) (fun read ->
+                    let ns,scene=read()
+                    Scene.nodes scene |> List.map (fun n -> {Node=n;Namespace=ns;Path=[SceneNode.key n]}) |> List.toArray) node)
+        Component.define (fun _ (read:unit -> Scene) -> "d5-"+Guid.NewGuid().ToString("N")+"-",read) (fun t ->
+            svg<string * (unit -> Scene)>(
+                t.Attrs.attribute("role","img"),
+                t.Attrs.attribute("aria-label", fun (_,read) -> Some(Scene.title(read()))),
+                t.Attrs.attribute("width",fun (_,read) -> Some(number(Scene.width(read())))),
+                t.Attrs.attribute("height",fun (_,read) -> Some(number(Scene.height(read())))),
+                t.Attrs.attribute("viewBox",fun (_,read) -> let s=read() in Some("0 0 "+number(Scene.width s)+" "+number(Scene.height s)))
+            ).Run
+                [|t.element (HtmlTag "defs") [||]
+                    [|t.each (snd >> SceneDefinition.key) (fun (ns,read) -> Scene.definitions(read()) |> List.map (fun d -> ns,d) |> List.toArray) definitionRow|]
+                  t.matchWith (fun (ns,read) -> ns,read()) (fun ((_,scene) as value) ->
+                    if Scene.isComposed scene
+                    then t.arm composed value else t.arm flat value)|])
 
     /// <summary>A reusable scene component without event handlers.</summary>
     let passive = create (fun _ _ _ -> ())

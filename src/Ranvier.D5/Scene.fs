@@ -2,67 +2,10 @@ namespace Ranvier.D5
 
 open System
 
-/// <summary>A serialized CSS paint value.</summary>
-type Paint = private Paint of string
 
-[<RequireQualifiedAccess>]
-module Paint =
-    /// <summary>Uses a typed Ranvier.Css value as SVG paint. The caller chooses a color-compatible CSS value.</summary>
-    let ofCss value = Paint (Ranvier.Css.Value.render value)
-    let private tokens text = Ranvier.Css.Value.unsafeFromTokens<unit> text |> ofCss
-    let none = tokens "none"
-    let currentColor = tokens "currentColor"
-    /// <summary>Creates an opaque sRGB paint from integer channels in [0,255].</summary>
-    let rgb red green blue =
-        if List.exists (fun value -> value<0 || value>255) [red;green;blue] then invalidArg "channels" "Expected channels in [0,255]."
-        tokens (sprintf "#%02x%02x%02x" red green blue)
-    let toCss (Paint value) = value
-
-/// <summary>Presentation shared by path and text marks.</summary>
-type MarkStyle = { Fill:Paint; Stroke:Paint; StrokeWidth:float; Opacity:float; FontSize:float }
-
-/// <summary>Renderable geometry; labels remain text and are escaped by the renderer.</summary>
-type Geometry = PathGeometry of Path | TextGeometry of Point * string
-
-/// <summary>An immutable visual item with a stable identity within its scene.</summary>
-type Mark = private { Identity:string; Geometry:Geometry; Style:MarkStyle; Matrix:Transform; Label:string option }
-
-[<RequireQualifiedAccess>]
-module Mark =
-    let private defaults = { Fill=Paint.currentColor; Stroke=Paint.none; StrokeWidth=1.; Opacity=1.; FontSize=12. }
-    let private create key geometry =
-        if String.IsNullOrEmpty key then invalidArg "key" "A mark requires a nonempty key."
-        { Identity=key;Geometry=geometry;Style=defaults;Matrix=Transform.identity;Label=None }
-    let path key geometry = create key (PathGeometry geometry)
-    /// <summary>Creates a text mark at a finite scene coordinate.</summary>
-    let text key point value =
-        Point.create point.X point.Y |> ignore
-        if isNull value then nullArg "value"
-        create key (TextGeometry(point,value))
-    let key mark = mark.Identity
-    let geometry mark = mark.Geometry
-    let style mark = mark.Style
-    let transform mark = mark.Matrix
-    let label mark = mark.Label
-    let withFill fill mark = { mark with Style={mark.Style with Fill=fill} }
-    /// <summary>Sets stroke paint and a nonnegative width in scene units.</summary>
-    let withStroke stroke width mark =
-        Check.finite "width" width
-        if width<0. then invalidArg "width" "Stroke width must be nonnegative."
-        { mark with Style={mark.Style with Stroke=stroke;StrokeWidth=width} }
-    /// <summary>Sets opacity in [0,1].</summary>
-    let withOpacity opacity mark =
-        Check.finite "opacity" opacity
-        if opacity<0. || opacity>1. then invalidArg "opacity" "Opacity must be in [0,1]."
-        { mark with Style={mark.Style with Opacity=opacity} }
-    let withFontSize size mark =
-        Check.positive "size" size
-        { mark with Style={mark.Style with FontSize=size} }
-    let withTransform matrix mark = { mark with Matrix=matrix }
-    let withLabel label mark = { mark with Label=label }
 
 /// <summary>A finite viewport and ordered, uniquely keyed marks.</summary>
-type Scene = private { Width:float; Height:float; Title:string; Marks:Mark list }
+type Scene = private { Width:float; Height:float; Title:string; Marks:Mark list; Nodes:SceneNode list; Definitions:SceneDefinition list; Composed:bool }
 
 [<RequireQualifiedAccess>]
 module Scene =
@@ -72,11 +15,35 @@ module Scene =
         Check.positive "height" height
         if isNull title then nullArg "title"
         Check.unique "marks" Mark.key marks
-        {Width=width;Height=height;Title=title;Marks=marks}
+        {Width=width;Height=height;Title=title;Marks=marks;Nodes=List.map Leaf marks;Definitions=[];Composed=false}
     let width scene = scene.Width
     let height scene = scene.Height
     let title scene = scene.Title
     let marks scene = scene.Marks
+    let nodes scene = scene.Nodes
+    let isComposed scene = scene.Composed
+    let definitions scene = scene.Definitions
+    /// <summary>Creates a composed scene. Keys are unique among siblings; moving between parents changes identity.</summary>
+    let compose (viewport:Viewport) title definitions nodes =
+        Check.positive "width" viewport.Width
+        Check.positive "height" viewport.Height
+        if isNull title then nullArg "title"
+        Check.unique "definitions" SceneDefinition.key definitions
+        definitions |> List.iter SceneDefinition.validate
+        let clips = definitions |> List.choose (function RectClip(key,_) -> Some key | _ -> None) |> Set.ofList
+        let gradients = definitions |> List.choose (function LinearGradient(key,_,_,_) | RadialGradient(key,_,_,_) -> Some key | _ -> None) |> Set.ofList
+        let rec validate nodes =
+            Check.unique "nodes" SceneNode.key nodes
+            for node in nodes do
+                if String.IsNullOrEmpty(SceneNode.key node) then invalidArg "nodes" "Empty node key."
+                match node with
+                | Leaf mark -> Mark.fillDefinition mark |> Option.iter (fun key -> if not(Set.contains key gradients) then invalidArg "fillDefinition" "Unknown gradient definition.")
+                | Group(group,children) ->
+                    group.Clip |> Option.iter (fun clip -> if not(Set.contains clip clips) then invalidArg "clip" "Unknown clip definition.")
+                    validate children
+        validate nodes
+        {Width=viewport.Width;Height=viewport.Height;Title=title;Definitions=definitions;Nodes=nodes;Composed=true
+         Marks=SceneNode.paths [] nodes |> List.map snd}
 
 /// <summary>The side on which an axis places ticks and labels.</summary>
 [<RequireQualifiedAccess>]
@@ -84,6 +51,22 @@ type AxisOrientation = Bottom | Top | Left | Right
 
 [<RequireQualifiedAccess>]
 module Axis =
+    /// <summary>Builds explicitly bounded axes with caller-supplied semantic tick keys.</summary>
+    let values prefix orientation origin (start,finish) (positions:(string * float * string) list) =
+        Check.finite "origin" origin
+        Check.finite "start" start
+        Check.finite "finish" finish
+        Check.unique "positions" (fun (key,_,_) -> key) positions
+        let horizontal = orientation=AxisOrientation.Bottom || orientation=AxisOrientation.Top
+        let direction = if orientation=AxisOrientation.Top || orientation=AxisOrientation.Left then -1. else 1.
+        let point along across = if horizontal then Point.create along across else Point.create across along
+        let stroke mark = mark |> Mark.withFill Paint.none |> Mark.withStroke Paint.currentColor 1.
+        let domain = Mark.path (prefix+"/domain") (Path.ofCommands [MoveTo(point start origin);LineTo(point finish origin)]) |> stroke
+        domain :: (positions |> List.collect (fun (id,position,label) ->
+            let key = prefix+"/value/"+string id.Length+":"+id
+            [Mark.path (key+"/tick") (Path.ofCommands [MoveTo(point position origin);LineTo(point position (origin+direction*6.))]) |> stroke
+             Mark.text (key+"/label") (point position (origin+direction*18.)) label]))
+
     let private build prefix orientation origin positions =
         Check.finite "origin" origin
         let horizontal = orientation=AxisOrientation.Bottom || orientation=AxisOrientation.Top

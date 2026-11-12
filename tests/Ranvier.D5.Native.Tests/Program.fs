@@ -46,6 +46,35 @@ let acceptance () =
         graph.Run(fun () -> source.Value <- make [Mark.text "a" (Point.create 10. 30.) "<script>&\"Hello\"" |> Mark.withLabel (Some "<unsafe>&\"label\"")])
         host.Cycle()
         Expect.equal ((container.querySelector "text").textContent) "<script>&\"Hello\"" "same key can change geometry kind"
+        let composed () =
+            let clip = RectClip("plot",Bounds.create 0. 0. 30. 30.)
+            let stops = [{Offset=0.;Color=Paint.rgb 255 0 0;Opacity=1.};{Offset=1.;Color=Paint.rgb 0 0 255;Opacity=1.}]
+            let rect = Shape.rectangle(Bounds.create 0. 0. 80. 80.) |> Mark.path "same" |> Mark.withFillDefinition "paint"
+            Scene.compose {Width=300.;Height=180.} "Composed"
+                [clip;LinearGradient("paint",Point.create 0. 0.,Point.create 30. 0.,stops)]
+                [Group({GroupSpec.create "plot" with Clip=Some "plot";Transform=Transform.translate 10. 10.},[Leaf rect])]
+        graph.Run(fun () -> source.Value <- composed())
+        host.Cycle()
+        host.Frame()
+        let group = container.querySelector "[data-d5-group='plot']"
+        let clipId = (container.querySelector "clipPath").getAttribute "id"
+        Expect.equal (group.getAttribute "clip-path") ("url(#"+clipId+")") "clip reference scoped to mount"
+        let clipped = Array.zeroCreate<byte> before.Length
+        host.Paint clipped
+        let pixel x y = let i=(y*width+x)*4 in clipped[i],clipped[i+1],clipped[i+2]
+        Expect.notEqual (pixel 25 25) (pixel 65 25) "clipped plot differs from background"
+        Expect.equal (pixel 65 25) (pixel 110 25) "outside clip is background"
+        let secondContainer = host.Document.createElement "div"
+        host.Document.body.appendChild secondContainer |> ignore
+        let second = Mounting.mount graph None (fun errors -> raise(AggregateException errors)) secondContainer None
+                        (fun context -> Program.run (Component.render Renderer.passive composed) context.Backend)
+        host.Cycle()
+        Expect.notEqual ((secondContainer.querySelector "clipPath").getAttribute "id") clipId "mount-local definition identity"
+        let retainedGroup = container.querySelector "[data-d5-group='plot']"
+        graph.Run(fun () -> source.Value <- composed())
+        host.Cycle()
+        Expect.isTrue (Object.ReferenceEquals(retainedGroup,container.querySelector "[data-d5-group='plot']")) "group retained"
+        second.Dispose()
         graph.Run(fun () -> source.Value <- make [])
         host.Cycle()
         Expect.isNull (container.querySelector "[data-d5-key='a']") "exit removed"
