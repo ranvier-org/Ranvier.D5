@@ -12,6 +12,8 @@
     <Compile Include="TimeTicks.fs" />
     <Compile Include="Format.fs" />
     <Compile Include="Geometry.fs" />
+    <Compile Include="Predicates.fs" />
+    <Compile Include="Polygon.fs" />
     <Compile Include="Mark.fs" />
     <Compile Include="Chromatic.fs" />
     <Compile Include="SceneDefinitions.fs" />
@@ -38,6 +40,7 @@
     <None Include="../../tools/reference-fixtures/licenses/d3-shape.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-scale-chromatic.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-hierarchy.txt" Pack="true" PackagePath="licenses/" />
+    <None Include="../../tools/reference-fixtures/licenses/robust-predicates.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>

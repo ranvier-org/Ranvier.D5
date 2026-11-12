@@ -52,6 +52,9 @@ let main args =
         results.Add(measure "pack-wide-10000" 150. 15000000L (fun () -> Pack.layout (PackConfig.create(Bounds.create 0. 0. 800. 600.)) wideHierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
         let hierarchySpec=Ranvier.D5.Charts.HierarchySpec.create (Ranvier.D5.Charts.ChartFrame.create 800. 600. "Hierarchy")
         results.Add(measure "hierarchy-chart-10000" 180. 48000000L (fun () -> Ranvier.D5.Charts.HierarchyChart.treemap hierarchySpec hierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+        results.Add(measure "orientation-100000" 10. 1000000L (fun () -> for i in 0..99999 do Predicates.orient2d points[i%9998] points[i%9998+1] (Point.create 200. 300.) |> ignore))
+        results.Add(measure "orientation-exact-10000" 30. 10000000L (fun () -> for _ in 0..9999 do Predicates.orient2d (Point.create 0. 0.) (Point.create 1e-300 0.) (Point.create 0. 1e-300) |> ignore))
+        results.Add(measure "polygon-hull-10000" 60. 20000000L (fun () -> Polygon.hull (Array.toList points) |> ignore))
         let curvePoints=points |> Array.map Some |> Array.toList
         results.Add(measure "natural-10000" 100. 16000000L (fun () -> Curves.line CurveSpec.Natural curvePoints |> ignore))
         let chartData=[0..999]

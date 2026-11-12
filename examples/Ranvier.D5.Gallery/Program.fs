@@ -49,7 +49,7 @@ let capture kind path =
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
         else
-            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene elif kind="tiling" then TilingGallery.scene elif kind="hierarchy-charts" then HierarchyChartsGallery.scene else fun () -> Scenes.scene 0.)
+            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene elif kind="tiling" then TilingGallery.scene elif kind="hierarchy-charts" then HierarchyChartsGallery.scene elif kind="planar" then PlanarGallery.scene else fun () -> Scenes.scene 0.)
             {new IDisposable with member _.Dispose()=mounted.Dispose()}
     host.Cycle()
     host.Frame()
@@ -92,6 +92,13 @@ let main args =
         capture "hierarchy-charts" args[1]
     elif args.Length=2 && args[0]="--capture-hierarchy-explorer" then
         capture "hierarchy-explorer" args[1]
+    elif args.Length=2 && args[0]="--capture-planar" then
+        capture "planar" args[1]
+    elif Array.contains "--planar" args then
+        use window = Window.Create("Ranvier.D5 planar geometry",820,590)
+        let mounted=mount window.Host window.Graph PlanarGallery.scene
+        while window.Step() do ()
+        mounted.Dispose()
     elif Array.contains "--hierarchy-charts" args then
         use window = Window.Create("Ranvier.D5 hierarchy chart family",820,590)
         let mounted=mount window.Host window.Graph HierarchyChartsGallery.scene
