@@ -7,6 +7,8 @@
     "d3-color": "3.1.0",
     "d3-delaunay": "6.0.4",
     "d3-format": "3.1.0",
+    "d3-geo": "3.1.1",
+    "mpmath": "1.3.0",
     "d3-hierarchy": "3.1.2",
     "d3-interpolate": "3.0.1",
     "d3-polygon": "3.0.1",
@@ -30,6 +32,8 @@
     "planar.json",
     "triangulation.json",
     "chords.json",
-    "sankey.json"
+    "sankey.json",
+    "spherical.json",
+    "spherical-precision.json"
   ]
 }

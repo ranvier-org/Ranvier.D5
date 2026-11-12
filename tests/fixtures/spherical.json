@@ -1,0 +1,1097 @@
+{
+  "schema": 1,
+  "seed": 42,
+  "source": {
+    "d3-geo": "3.1.1"
+  },
+  "coordinates": "Public longitude/latitude degrees; distance and length radians; area steradians; D3 clockwise small exterior spherical rings; NaN from empty or ambiguous reference results serialized as null.",
+  "tolerance": 1e-9,
+  "independentExpectations": [
+    {
+      "name": "north-cap",
+      "bounds": [
+        [
+          -180,
+          80
+        ],
+        [
+          180,
+          90
+        ]
+      ],
+      "reason": "The three shortest great-circle arcs joining latitude-80 vertices enclose the north pole and stay north of latitude 80. d3-geo 3.1.1 instead returns full-sphere bounds because bounds.polygonEnd tests the unnormalized areaRingSum sign. Preserve the raw reference result separately; do not copy that overly conservative latitude bound."
+    }
+  ],
+  "geometries": [
+    {
+      "name": "sphere",
+      "geometry": {
+        "type": "Sphere"
+      },
+      "area": 12.566370614359172,
+      "length": 0,
+      "centroid": [
+        null,
+        null
+      ],
+      "bounds": [
+        [
+          -180,
+          -90
+        ],
+        [
+          180,
+          90
+        ]
+      ]
+    },
+    {
+      "name": "empty-collection",
+      "geometry": {
+        "type": "GeometryCollection",
+        "geometries": []
+      },
+      "area": 0,
+      "length": 0,
+      "centroid": [
+        null,
+        null
+      ],
+      "bounds": [
+        [
+          null,
+          null
+        ],
+        [
+          null,
+          null
+        ]
+      ]
+    },
+    {
+      "name": "point",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          135,
+          -32
+        ]
+      },
+      "area": 0,
+      "length": 0,
+      "centroid": [
+        135,
+        -31.999999999999993
+      ],
+      "bounds": [
+        [
+          135,
+          -32
+        ],
+        [
+          135,
+          -32
+        ]
+      ]
+    },
+    {
+      "name": "coincident",
+      "geometry": {
+        "type": "MultiPoint",
+        "coordinates": [
+          [
+            5,
+            10
+          ],
+          [
+            5,
+            10
+          ],
+          [
+            5,
+            10
+          ]
+        ]
+      },
+      "area": 0,
+      "length": 0,
+      "centroid": [
+        5,
+        10.000000000000002
+      ],
+      "bounds": [
+        [
+          5,
+          10
+        ],
+        [
+          5,
+          10
+        ]
+      ]
+    },
+    {
+      "name": "equator-quarter",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            0,
+            0
+          ],
+          [
+            90,
+            0
+          ]
+        ]
+      },
+      "area": 0,
+      "length": 1.5707963267948966,
+      "centroid": [
+        45,
+        0
+      ],
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          90,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "north-arc-extremum",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            -45,
+            60
+          ],
+          [
+            45,
+            60
+          ]
+        ]
+      },
+      "area": 0,
+      "length": 0.7227342478134158,
+      "centroid": [
+        0,
+        67.79234570140349
+      ],
+      "bounds": [
+        [
+          -45,
+          60
+        ],
+        [
+          45,
+          67.7923457014035
+        ]
+      ]
+    },
+    {
+      "name": "dateline-line",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            170,
+            10
+          ],
+          [
+            -170,
+            10
+          ]
+        ]
+      },
+      "area": 0,
+      "length": 0.3437095026374784,
+      "centroid": [
+        180,
+        10.151081711048134
+      ],
+      "bounds": [
+        [
+          170,
+          10
+        ],
+        [
+          -170,
+          10.151081711048134
+        ]
+      ]
+    },
+    {
+      "name": "octant",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              90
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        ]
+      },
+      "area": 1.570796326794897,
+      "length": 3.141592653589793,
+      "centroid": [
+        45,
+        35.264389682754654
+      ],
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          90,
+          90
+        ]
+      ]
+    },
+    {
+      "name": "octant-complement",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              90,
+              0
+            ],
+            [
+              0,
+              90
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        ]
+      },
+      "area": 10.995574287564276,
+      "length": 3.141592653589793,
+      "centroid": [
+        -135,
+        -35.264389682754654
+      ],
+      "bounds": [
+        [
+          -180,
+          -90
+        ],
+        [
+          180,
+          90
+        ]
+      ]
+    },
+    {
+      "name": "small-square",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              20
+            ],
+            [
+              20,
+              20
+            ],
+            [
+              20,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ]
+        ]
+      },
+      "area": 0.12046885220335785,
+      "length": 1.0259494172806427,
+      "centroid": [
+        9.99999999999999,
+        10.038375166632994
+      ],
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          20,
+          20.283559454529712
+        ]
+      ]
+    },
+    {
+      "name": "square-with-hole",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              20
+            ],
+            [
+              20,
+              20
+            ],
+            [
+              20,
+              0
+            ],
+            [
+              0,
+              0
+            ]
+          ],
+          [
+            [
+              5,
+              5
+            ],
+            [
+              15,
+              5
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              5,
+              5
+            ]
+          ]
+        ]
+      },
+      "area": 0.09043910868061664,
+      "length": 1.5429209216507789,
+      "centroid": [
+        9.999999999999984,
+        10.047506122498122
+      ],
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          20,
+          20.283559454529712
+        ]
+      ]
+    },
+    {
+      "name": "dateline-polygon",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              170,
+              -10
+            ],
+            [
+              170,
+              10
+            ],
+            [
+              -170,
+              10
+            ],
+            [
+              -170,
+              -10
+            ],
+            [
+              170,
+              -10
+            ]
+          ]
+        ]
+      },
+      "area": 0.12243718284297211,
+      "length": 1.04184120343521,
+      "centroid": [
+        180,
+        0
+      ],
+      "bounds": [
+        [
+          170,
+          -10.151081711048134
+        ],
+        [
+          -170,
+          10.151081711048134
+        ]
+      ]
+    },
+    {
+      "name": "north-cap",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -120,
+              80
+            ],
+            [
+              120,
+              80
+            ],
+            [
+              0,
+              80
+            ],
+            [
+              -120,
+              80
+            ]
+          ]
+        ]
+      },
+      "area": 0.03992494515761891,
+      "length": 0.6038256345434811,
+      "centroid": [
+        0,
+        90
+      ],
+      "bounds": [
+        [
+          -180,
+          -90
+        ],
+        [
+          180,
+          90
+        ]
+      ]
+    },
+    {
+      "name": "north-cap-complement",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -120,
+              80
+            ],
+            [
+              0,
+              80
+            ],
+            [
+              120,
+              80
+            ],
+            [
+              -120,
+              80
+            ]
+          ]
+        ]
+      },
+      "area": 12.526445669201554,
+      "length": 0.603825634543481,
+      "centroid": [
+        0,
+        -90
+      ],
+      "bounds": [
+        [
+          -180,
+          -90
+        ],
+        [
+          180,
+          84.96163122670252
+        ]
+      ]
+    },
+    {
+      "name": "multipolygon",
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                0,
+                0
+              ],
+              [
+                0,
+                20
+              ],
+              [
+                20,
+                20
+              ],
+              [
+                20,
+                0
+              ],
+              [
+                0,
+                0
+              ]
+            ]
+          ],
+          [
+            [
+              [
+                30,
+                0
+              ],
+              [
+                30,
+                10
+              ],
+              [
+                40,
+                10
+              ],
+              [
+                40,
+                0
+              ],
+              [
+                30,
+                0
+              ]
+            ]
+          ]
+        ]
+      },
+      "area": 0.15085100887796035,
+      "length": 1.5468900478694363,
+      "centroid": [
+        15.035565676406314,
+        9.157661448226627
+      ],
+      "bounds": [
+        [
+          0,
+          0
+        ],
+        [
+          40,
+          20.283559454529712
+        ]
+      ]
+    },
+    {
+      "name": "line-and-point",
+      "geometry": {
+        "type": "GeometryCollection",
+        "geometries": [
+          {
+            "type": "LineString",
+            "coordinates": [
+              [
+                0,
+                0
+              ],
+              [
+                90,
+                0
+              ]
+            ]
+          },
+          {
+            "type": "Point",
+            "coordinates": [
+              -45,
+              70
+            ]
+          }
+        ]
+      },
+      "area": 0,
+      "length": 1.5707963267948966,
+      "centroid": [
+        45,
+        0
+      ],
+      "bounds": [
+        [
+          -45,
+          0
+        ],
+        [
+          90,
+          70
+        ]
+      ]
+    }
+  ],
+  "pairs": [
+    {
+      "name": "same",
+      "from": [
+        10,
+        20
+      ],
+      "to": [
+        10,
+        20
+      ],
+      "distance": 0,
+      "samples": [
+        {
+          "t": 0,
+          "point": [
+            10,
+            20
+          ]
+        },
+        {
+          "t": 0.25,
+          "point": [
+            10,
+            20
+          ]
+        },
+        {
+          "t": 0.5,
+          "point": [
+            10,
+            20
+          ]
+        },
+        {
+          "t": 0.75,
+          "point": [
+            10,
+            20
+          ]
+        },
+        {
+          "t": 1,
+          "point": [
+            10,
+            20
+          ]
+        }
+      ]
+    },
+    {
+      "name": "quarter",
+      "from": [
+        0,
+        0
+      ],
+      "to": [
+        90,
+        0
+      ],
+      "distance": 1.5707963267948966,
+      "samples": [
+        {
+          "t": 0,
+          "point": [
+            0,
+            0
+          ]
+        },
+        {
+          "t": 0.25,
+          "point": [
+            22.5,
+            0
+          ]
+        },
+        {
+          "t": 0.5,
+          "point": [
+            45,
+            0
+          ]
+        },
+        {
+          "t": 0.75,
+          "point": [
+            67.5,
+            0
+          ]
+        },
+        {
+          "t": 1,
+          "point": [
+            90,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "name": "dateline",
+      "from": [
+        170,
+        10
+      ],
+      "to": [
+        -170,
+        10
+      ],
+      "distance": 0.3437095026374784,
+      "samples": [
+        {
+          "t": 0,
+          "point": [
+            170,
+            10
+          ]
+        },
+        {
+          "t": 0.25,
+          "point": [
+            174.99882567334603,
+            10.113234824310323
+          ]
+        },
+        {
+          "t": 0.5,
+          "point": [
+            180,
+            10.151081711048134
+          ]
+        },
+        {
+          "t": 0.75,
+          "point": [
+            -174.99882567334603,
+            10.113234824310323
+          ]
+        },
+        {
+          "t": 1,
+          "point": [
+            -170,
+            10
+          ]
+        }
+      ]
+    },
+    {
+      "name": "near-antipodes",
+      "from": [
+        0,
+        0
+      ],
+      "to": [
+        179.999,
+        0.001
+      ],
+      "distance": 3.141567970906804,
+      "samples": [
+        {
+          "t": 0,
+          "point": [
+            0,
+            0
+          ]
+        },
+        {
+          "t": 0.25,
+          "point": [
+            35.26404550225112,
+            29.99978923580515
+          ]
+        },
+        {
+          "t": 0.5,
+          "point": [
+            89.99899999963347,
+            44.99999999950919
+          ]
+        },
+        {
+          "t": 0.75,
+          "point": [
+            144.73462115899704,
+            30.000605729205063
+          ]
+        },
+        {
+          "t": 1,
+          "point": [
+            179.999,
+            0.001
+          ]
+        }
+      ]
+    },
+    {
+      "name": "near-pole",
+      "from": [
+        0,
+        89.999
+      ],
+      "to": [
+        90,
+        89.999
+      ],
+      "distance": 0.000024682682989164392,
+      "samples": [
+        {
+          "t": 0,
+          "point": [
+            0,
+            89.999
+          ]
+        },
+        {
+          "t": 0.25,
+          "point": [
+            18.434948823794677,
+            89.99920943058493
+          ]
+        },
+        {
+          "t": 0.5,
+          "point": [
+            45,
+            89.99929289321878
+          ]
+        },
+        {
+          "t": 0.75,
+          "point": [
+            71.56505117620533,
+            89.99920943058493
+          ]
+        },
+        {
+          "t": 1,
+          "point": [
+            90,
+            89.999
+          ]
+        }
+      ]
+    },
+    {
+      "name": "tiny",
+      "from": [
+        0,
+        0
+      ],
+      "to": [
+        1e-9,
+        1e-9
+      ],
+      "distance": 2.4682682989768703e-11,
+      "samples": [
+        {
+          "t": 0,
+          "point": [
+            0,
+            0
+          ]
+        },
+        {
+          "t": 0.25,
+          "point": [
+            2.5e-10,
+            2.5e-10
+          ]
+        },
+        {
+          "t": 0.5,
+          "point": [
+            5e-10,
+            5e-10
+          ]
+        },
+        {
+          "t": 0.75,
+          "point": [
+            7.500000000000002e-10,
+            7.500000000000002e-10
+          ]
+        },
+        {
+          "t": 1,
+          "point": [
+            1e-9,
+            1e-9
+          ]
+        }
+      ]
+    },
+    {
+      "name": "oblique",
+      "from": [
+        -73.9857,
+        40.7484
+      ],
+      "to": [
+        139.6917,
+        35.6895
+      ],
+      "distance": 1.7024107882514223,
+      "samples": [
+        {
+          "t": 0,
+          "point": [
+            -73.9857,
+            40.7484
+          ]
+        },
+        {
+          "t": 0.25,
+          "point": [
+            -96.61653982666552,
+            60.826787145518
+          ]
+        },
+        {
+          "t": 0.5,
+          "point": [
+            -153.70371664906307,
+            69.68106250980088
+          ]
+        },
+        {
+          "t": 0.75,
+          "point": [
+            158.23547744104914,
+            56.6242528246235
+          ]
+        },
+        {
+          "t": 1,
+          "point": [
+            139.6917,
+            35.6895
+          ]
+        }
+      ]
+    }
+  ],
+  "rotations": [
+    {
+      "angles": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        120,
+        -45
+      ],
+      "rotated": [
+        119.99999999999999,
+        -45
+      ],
+      "inverse": [
+        119.99999999999999,
+        -45
+      ]
+    },
+    {
+      "angles": [
+        45,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        20
+      ],
+      "rotated": [
+        -145,
+        20
+      ],
+      "inverse": [
+        169.99999999999997,
+        20
+      ]
+    },
+    {
+      "angles": [
+        30,
+        40,
+        50
+      ],
+      "point": [
+        -125,
+        60
+      ],
+      "rotated": [
+        -126.17588788434935,
+        1.5393923625702077
+      ],
+      "inverse": [
+        -125.00000000000001,
+        59.999999999999986
+      ]
+    },
+    {
+      "angles": [
+        -180,
+        -90,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "rotated": [
+        -116.56505117707799,
+        90
+      ],
+      "inverse": [
+        0,
+        1.9393707522795533e-15
+      ]
+    }
+  ]
+}
