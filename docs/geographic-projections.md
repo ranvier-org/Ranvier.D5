@@ -43,7 +43,13 @@ whole geometry succeeds; a partial path is never returned.
 
 Rings follow the D3 convention: small exterior rings are clockwise and holes
 have opposite winding; reversing a ring selects its spherical complement.
-Antipodal edges are ambiguous and require an explicit waypoint.
+Antipodal edges are ambiguous and require an explicit waypoint, except a
+pole-to-pole edge whose endpoints carry the same longitude, which follows that
+meridian. An input longitude of exactly +180 or -180 keeps its side of the
+antimeridian through rotation, so a ring may start on either seam. A polygon
+whose vertices all lie on the antimeridian or the poles, such as the GeoJSON
+world box, encloses no spherical area; its longitude/latitude winding decides
+instead, so the clockwise box covers the world and its reverse covers nothing.
 
 Mercator explicit viewports intersect the finite canonical world; they do not
 extend its vertical coverage. This deliberately differs from D3's explicit
@@ -73,7 +79,7 @@ Published paths own their coordinates.
 
 ## Evidence
 
-Pinned d3-geo 3.1.1 fixtures cover 158 geographic polygon streams, twelve
+Pinned d3-geo 3.1.1 fixtures cover 160 geographic polygon streams, twelve
 clipped geographic line streams, twelve identity point mappings and forty
 clipped identity polygons. Independent tests cover winding, holes, complements,
 precision, budgets, cancellation and degenerate input. One D3 discrepancy is

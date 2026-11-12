@@ -53,6 +53,13 @@ for(const latitude of [-89,-85,85,89]){
   inputs.push({name:'mercator-polar-'+latitude,kind:'Mercator',rings:[ring]});
   inputs.push({name:'mercator-polar-complement-'+latitude,kind:'Mercator',rings:[[...ring].reverse()]});
 }
+// Rings that begin on the +180 seam and run to a pole. D3 3.1.1 is degenerate on the pole-to-pole GeoJSON world box
+// (equirectangular slivers, Mercator full square), so that shape has independent tests instead of fixtures.
+const southSeam=[[180,-60],[180,-90],[-180,-90],[-180,-60],[-90,-60],[0,-60],[90,-60],[180,-60]];
+const southHole=[[-10,-70],[-10,-80],[10,-80],[10,-70],[-10,-70]];
+for(const kind of ['Equirectangular','Mercator']){
+  inputs.push({name:'seam-pole-start-hole-'+kind,kind,rings:[southSeam,southHole]});
+}
 const cases=inputs.map(input=>{
   const output=[]; let current;
   const projection=(input.kind==='Orthographic'?geoOrthographic().clipAngle(90):input.kind==='Mercator'?geoMercator():geoEquirectangular())

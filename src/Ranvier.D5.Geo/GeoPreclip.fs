@@ -89,6 +89,12 @@ module internal GeoPreclip =
             Finish=finish
         }
 
+    /// Rotation normalizes longitude to [-180,180); keeps the seam side an input names explicitly, as D3 does.
+    let rotateKeepingSeam projection (source:GeoPosition) =
+        let rotated=Projection.rotate projection source
+        let turn=source.Longitude%360.
+        if abs rotated.Longitude=180. && abs turn=180. then position turn rotated.Latitude else rotated
+
     let line projection spend sink (input:IReadOnlyList<GeoPosition>) =
         try
             let sink=if Projection.kind projection=ProjectionKind.Mercator then mercatorBand spend sink else sink
@@ -107,7 +113,7 @@ module internal GeoPreclip =
                 match tail with
                 | ValueSome current when same current point -> ()
                 | _ -> finish(); start point
-            let edge (source:GeoPosition) (destination:GeoPosition) =
+            let clippedEdge (source:GeoPosition) (destination:GeoPosition) =
                 let first=if abs source.Latitude=90. then position destination.Longitude source.Latitude else source
                 let last=if abs destination.Latitude=90. then position first.Longitude destination.Latitude else destination
                 if cylindrical && abs source.Latitude=90. then finish()
@@ -137,11 +143,11 @@ module internal GeoPreclip =
                             start intersection
                             arc intersection last
                 elif abs first.Longitude=180. && abs last.Longitude=180. then
-                    let positive=position 180. first.Latitude
                     let longitude =
                         match tail with
-                        | ValueSome current when same current positive -> 180.
-                        | _ -> -180.
+                        | ValueSome current when same current (position 180. first.Latitude) -> 180.
+                        | ValueSome current when same current (position -180. first.Latitude) -> -180.
+                        | _ -> first.Longitude
                     let before,after=position longitude first.Latitude,position longitude last.Latitude
                     ensureStart before
                     arc before after
@@ -187,11 +193,19 @@ module internal GeoPreclip =
                 else
                     ensureStart first
                     arc first last
+            // A pole-to-pole edge is antipodal, but once both poles carry one longitude it names that meridian.
+            let edge (source:GeoPosition) (destination:GeoPosition) =
+                if abs source.Latitude=90. && source.Latitude= -destination.Latitude && source.Longitude=destination.Longitude then
+                    let middle=position source.Longitude 0.
+                    clippedEdge source middle
+                    clippedEdge middle destination
+                else clippedEdge source destination
+            let rotate=rotateKeepingSeam projection
             if input.Count>0 then
-                let mutable previous=Projection.rotate projection input[0]
+                let mutable previous=rotate input[0]
                 for index=1 to input.Count-1 do
                     spend 1L
-                    let current=Projection.rotate projection input[index]
+                    let current=rotate input[index]
                     edge previous current
                     previous<-current
                 finish()

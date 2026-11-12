@@ -61,7 +61,8 @@ let tests = testList "geographic paths" [
         let last=Path.commands seam[1] |> List.choose(function MoveTo point|LineTo point -> Some point | _ -> None)
         Expect.isTrue (first |> List.forall(fun point -> point.X>0.)) "east side remains positive"
         Expect.isTrue (last |> List.forall(fun point -> point.X<0.)) "west side remains negative"
-        Expect.isError (GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString[p 0. -90.;p 0. 90.])) "ambiguous polar antipodes need a waypoint"
+        Expect.equal (GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString[p 0. -90.;p 0. 90.]) |> ok).Length 1 "poles sharing a longitude name their meridian"
+        Expect.isError (GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString[p 0. -90.;p 30. 90.])) "poles with different longitudes remain ambiguous antipodes"
     testCase "Mercator clipping composes with rotation center viewport and budgets" <| fun _ ->
         let rotation=GeoRotation.create 30. 20. 10. |> ok
         let baseConfig={ProjectionConfig.defaultValue ProjectionKind.Mercator with Scale=100.;Center=p 10. 20.;Translate={X=230.;Y=170.}}
@@ -168,6 +169,29 @@ let tests = testList "geographic paths" [
             let combinedError=2.*item.GetProperty("precision").GetDouble()
             let areaTolerance=max 1e-8 (perimeter*combinedError+Math.PI*combinedError*combinedError)
             Expect.isLessThan (abs(actualArea-expectedArea)) areaTolerance (name+" oriented filled area within combined screen precision")
+    testCase "rings starting on the +180 seam keep their seam side and their holes" <| fun _ ->
+        let ring=[p 180. -60.;p 180. -90.;p -180. -90.;p -180. -60.;p -90. -60.;p 0. -60.;p 90. -60.;p 180. -60.]
+        let shifted=[p -90. -60.;p 0. -60.;p 90. -60.;p 180. -60.;p 180. -90.;p -180. -90.;p -180. -60.;p -90. -60.]
+        let hole=[p -10. -70.;p -10. -80.;p 10. -80.;p 10. -70.;p -10. -70.]
+        let area options kind rings=GeoPath.project options (projection kind) (GeoGeometry.Polygon rings) |> ok |> polygonRings |> List.sumBy Polygon.area
+        for kind in [ProjectionKind.Equirectangular;ProjectionKind.Mercator] do
+            let expected=area GeoPathOptions.defaultValue kind [shifted;hole]
+            Expect.isGreaterThan expected 0. "positive filled band"
+            Expect.isLessThan (abs(area GeoPathOptions.defaultValue kind [ring;hole]-expected)) 1e-9 (sprintf "%A start vertex does not change the filled region" kind)
+        let insideHole={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.05 1.28 0.1 0.06)}
+        Expect.isEmpty (GeoPath.project insideHole (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[ring;hole]) |> ok) "viewport inside the hole stays empty"
+    testCase "pole-to-pole meridians follow their own meridian, including the GeoJSON world box" <| fun _ ->
+        let box=[p -180. -90.;p -180. 90.;p 180. 90.;p 180. -90.;p -180. -90.]
+        for kind,height in [ProjectionKind.Equirectangular,Math.PI;ProjectionKind.Mercator,2.*Math.PI] do
+            let full=GeoPath.project GeoPathOptions.defaultValue (projection kind) (GeoGeometry.Polygon[box]) |> ok |> polygonRings
+            Expect.isLessThan (abs((full |> List.sumBy Polygon.area)-2.*Math.PI*height)) 1e-9 (sprintf "%A clockwise box fills the world" kind)
+            let empty=GeoPath.project GeoPathOptions.defaultValue (projection kind) (GeoGeometry.Polygon[List.rev box]) |> ok |> polygonRings
+            Expect.isLessThan (abs(empty |> List.sumBy Polygon.area)) 1e-9 (sprintf "%A reversed box covers nothing" kind)
+        for kind in [ProjectionKind.Equirectangular;ProjectionKind.Orthographic] do
+            let paths=GeoPath.project GeoPathOptions.defaultValue (projection kind) (GeoGeometry.LineString[p 30. -90.;p 30. 90.]) |> ok
+            for point in paths |> List.collect(fun path -> Path.commands path |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)) do
+                let expectedX=if kind=ProjectionKind.Equirectangular then Math.PI/6. else 0.5*sqrt(max 0. (1.-point.Y*point.Y))
+                Expect.isLessThan (abs(point.X-expectedX)) 1e-9 (sprintf "%A route stays on the 30 degree meridian" kind)
     testCase "polygon holes share a compound path while multipolygon members remain independent" <| fun _ ->
         let outer=[p -10. -10.;p -10. 10.;p 10. 10.;p 10. -10.;p -10. -10.]
         let hole=[p -3. -3.;p 3. -3.;p 3. 3.;p -3. 3.;p -3. -3.]

@@ -144,7 +144,7 @@ module internal GeoPolygon =
                 let transformed=Array.zeroCreate<GeoPosition> ring.Length
                 for index=0 to ring.Length-1 do
                     spend 1L
-                    transformed[index]<-Projection.rotate projection ring[index]
+                    transformed[index]<-GeoPreclip.rotateKeepingSeam projection ring[index]
                 rotated.Add transformed
                 if ring.Length>0 then
                     let start=fragments.Count
@@ -172,12 +172,27 @@ module internal GeoPolygon =
                             fragments.RemoveAt(fragments.Count-1)
                             buffered<-buffered-1
             let rotated=rotated.ToArray()
+            // Rings lying wholly on the cut, such as the GeoJSON world box, enclose zero spherical area. Their planar
+            // longitude/latitude winding decides instead: clockwise covers the world and the reverse covers nothing.
+            let onCut (point:GeoPosition)=abs point.Longitude=180. || abs point.Latitude=90.
+            let wholeCut=not orthographic && rotated |> Array.exists(fun ring -> ring.Length>0) && rotated |> Array.forall(Array.forall onCut)
+            let coversWorld=
+                wholeCut &&
+                (rotated |> Array.sumBy(fun ring ->
+                    let mutable twice=0.
+                    for index=0 to ring.Length-1 do
+                        let a,b=ring[index],ring[(index+1)%ring.Length]
+                        twice<-twice+a.Longitude*b.Latitude-b.Longitude*a.Latitude
+                    twice))<0.
             let boundary = {
                 Period=period
                 Parameter=parameter
                 PointAt=boundaryPoint
-                ContainsAt=fun amount -> contains spend rotated (boundaryPosition amount)
+                ContainsAt=fun amount -> if wholeCut then coversWorld else contains spend rotated (boundaryPosition amount)
                 Between=boundaryBetween
             }
-            GeoRejoin.run maxBuffer spend boundary fragments
+            // Fragments of a whole-cut ring lie on the boundary itself, so emit the complete world or nothing.
+            if wholeCut then
+                if coversWorld then GeoRejoin.run maxBuffer spend boundary (ResizeArray()) else Ok []
+            else GeoRejoin.run maxBuffer spend boundary fragments
         with Rejected error -> Error error

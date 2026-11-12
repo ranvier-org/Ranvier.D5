@@ -92,7 +92,7 @@ let probes phase =
     ["equirectangular seam land",at equirectangular -145. 24.,landColor
      "equirectangular seam hole",at equirectangular 165. 5.,oceanColor
      "mercator polar cap",at mercator 15. 78.,landColor
-     "mercator below cap",at mercator 15. 64.,oceanColor
+     "mercator below cap",at mercator 15. 66.5,oceanColor
      "orthographic visible land",at orthographic 145. 25.,landColor
      "orthographic visible hole",at orthographic 165. 5.,oceanColor
      "planar ring",IdentityProjection.project identity (Point.create -80. 0.) |> Option.get,planarColor
