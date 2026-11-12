@@ -24,17 +24,23 @@ module Quadtree =
         if e.Min.X>e.Max.X || e.Min.Y>e.Max.Y then invalidArg "extent" "Bounds must be ordered."
 
     /// <summary>Captures each position and nonnegative mass once. Subdivision stops at depth 64 or when no interior split is representable.</summary>
-    let build (position:'T -> Point) (mass:'T -> float) (items:seq<'T>) =
+    let buildWithCancellation (token:System.Threading.CancellationToken) (position:'T -> Point) (mass:'T -> float) (items:seq<'T>) =
+        token.ThrowIfCancellationRequested()
+        let check i=if i%64=0 then token.ThrowIfCancellationRequested()
         let captured=items |> Seq.mapi(fun i value ->
+            check i
             let p,m=position value,mass value
             Point.create p.X p.Y |> ignore
             Check.finite "mass" m
             if m<0. then invalidArg "mass" "Mass must be nonnegative."
             {Value=value;Position=p;Mass=m;Index=i}) |> Seq.toArray
         let rec buildNode depth (rows:QuadItem<'T>[]) =
+            token.ThrowIfCancellationRequested()
             let mutable x0,y0,x1,y1=rows[0].Position.X,rows[0].Position.Y,rows[0].Position.X,rows[0].Position.Y
             let mutable total,cx,cy=0.,0.,0.
-            for item in rows do
+            for index in 0..rows.Length-1 do
+                check index
+                let item=rows[index]
                 let p=item.Position
                 x0<-min x0 p.X; y0<-min y0 p.Y; x1<-max x1 p.X; y1<-max y1 p.Y
                 if item.Mass>0. then
@@ -48,15 +54,25 @@ module Quadtree =
                 if rows.Length<=8 || depth>=64 || not(splitX || splitY) then [||]
                 else
                     let buckets=Array.init 4 (fun _ -> ResizeArray<QuadItem<'T>>())
-                    for item in rows do
+                    for index in 0..rows.Length-1 do
+                        check index
+                        let item=rows[index]
                         let quadrant=(if splitX && item.Position.X>=mx then 1 else 0)+(if splitY && item.Position.Y>=my then 2 else 0)
                         buckets[quadrant].Add item
                     buckets |> Array.choose(fun bucket -> if bucket.Count=0 then None else Some(buildNode (depth+1) (bucket.ToArray())))
+            let mutable leafItems=[]
+            if children.Length=0 then
+                for index in rows.Length-1 .. -1 .. 0 do
+                    check index
+                    leafItems<-rows[index]::leafItems
             let cell={Extent={Min=Point.create x0 y0;Max=Point.create x1 y1};Count=rows.Length;Mass=total
                       Center=Point.create (if total=0. then mx else cx) (if total=0. then my else cy)
-                      Depth=depth;Items=if children.Length=0 then Array.toList rows else []}
+                      Depth=depth;Items=leafItems}
             QuadNode(cell,children)
         Quadtree(if captured.Length=0 then None else Some(buildNode 0 captured))
+
+    /// <summary>Captures an immutable quadtree without cancellation; use buildWithCancellation for cancellable worker construction.</summary>
+    let build position mass items = buildWithCancellation System.Threading.CancellationToken.None position mass items
 
     let count (Quadtree root) = match root with None -> 0 | Some(QuadNode(cell,_)) -> cell.Count
 

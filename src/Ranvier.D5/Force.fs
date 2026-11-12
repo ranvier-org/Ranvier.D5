@@ -9,10 +9,11 @@ type ForceConfig = {
     AlphaDecay:float; AlphaMin:float; VelocityDecay:float; InitialAlpha:float
     Center:Point; CenterStrength:float; X: (float*float) option; Y: (float*float) option
     Radial:(Point*float*float) option; InitialRadius:float; MaxSteps:int
+    ManyBody:ManyBodyConfig option; Collision:CollisionConfig option
 }
 [<RequireQualifiedAccess>]
 module ForceConfig =
-    let create center = {AlphaDecay=0.0228;AlphaMin=0.001;VelocityDecay=0.4;InitialAlpha=1.;Center=center;CenterStrength=0.05;X=None;Y=None;Radial=None;InitialRadius=100.;MaxSteps=1000}
+    let create center = {AlphaDecay=0.0228;AlphaMin=0.001;VelocityDecay=0.4;InitialAlpha=1.;Center=center;CenterStrength=0.05;X=None;Y=None;Radial=None;InitialRadius=100.;MaxSteps=1000;ManyBody=None;Collision=None}
 
 type ForceNodeState = { Id:string; Position:Point; Velocity:Point; Pinned:Point option; Radius:float; Mass:float }
 type ForceSnapshot = { Nodes:ForceNodeState list; Alpha:float; Iteration:int; Converged:bool; Finished:bool }
@@ -50,6 +51,14 @@ module Force =
         finite "Center X" config.Center.X;finite "Center Y" config.Center.Y
         for axis in [config.X;config.Y] do axis |> Option.iter(fun (target,k) -> finite "Axis target" target;strength "Axis strength" k)
         config.Radial |> Option.iter(fun (center,radius,k) -> finite "Radial X" center.X;finite "Radial Y" center.Y;strength "Radial radius" radius;strength "Radial strength" k)
+        config.ManyBody |> Option.iter(fun body ->
+            finite "Many-body strength" body.Strength
+            strength "Theta" body.Theta
+            range "Minimum distance" System.Double.Epsilon System.Double.MaxValue body.MinDistance
+            if System.Double.IsNaN body.MaxDistance || body.MaxDistance<body.MinDistance then errors.Add(InvalidObservation "Maximum distance must be at least the minimum distance."))
+        config.Collision |> Option.iter(fun collision ->
+            range "Collision strength" 0. 1. collision.Strength
+            if collision.Iterations<=0 then errors.Add(InvalidObservation "Collision iterations must be positive."))
         if config.MaxSteps<=0 then errors.Add(InvalidObservation "Step budget must be positive.")
         List.ofSeq errors
 
@@ -90,6 +99,13 @@ module Force =
         let xForce=config.X |> Option.filter(fun (_,k) -> k>0.)
         let yForce=config.Y |> Option.filter(fun (_,k) -> k>0.)
         let radialForce=config.Radial |> Option.filter(fun (_,_,k) -> k>0.)
+        let body=config.ManyBody |> Option.filter(fun settings -> settings.Strength<>0.)
+        let collision=config.Collision |> Option.filter(fun settings -> settings.Strength>0.)
+        let spatial=body.IsSome || collision.IsSome
+        let positions=if spatial then Array.zeroCreate nodes.Length else [||]
+        let masses=if spatial then nodes |> Array.map(fun node -> node.Mass) else [||]
+        let radii=if collision.IsSome then nodes |> Array.map(fun node -> node.Radius) else [||]
+        let pinned=if collision.IsSome then nodes |> Array.map(fun node -> node.Pinned.IsSome) else [||]
         let mutable alpha,iteration,remaining=state.Alpha,state.Iteration,count
         let check i=if i%64=0 then token.ThrowIfCancellationRequested()
         while remaining>0 && alpha>=config.AlphaMin && iteration<config.MaxSteps do
@@ -129,6 +145,16 @@ module Force =
                     let shareA,shareB=mb/(ma+mb),ma/(ma+mb)
                     vx[a]<-vx[a]+ux*force*shareA;vy[a]<-vy[a]+uy*force*shareA
                     vx[b]<-vx[b]-ux*force*shareB;vy[b]<-vy[b]-uy*force*shareB
+            if spatial then
+                for i in 0..nodes.Length-1 do
+                    check i
+                    positions[i]<-nodes[i].Position
+                let jitter i j =
+                    let a,b=min i j,max i j
+                    let x,y=direction state iteration (nodes[a].Id+"/"+nodes[b].Id)
+                    if i<=j then x,y else -x,-y
+                body |> Option.iter(fun settings -> ForceKernels.manyBody token settings alpha positions masses jitter vx vy)
+                collision |> Option.iter(fun settings -> ForceKernels.collision token settings positions masses radii pinned jitter vx vy)
             for i in 0..nodes.Length-1 do
                 check i
                 let node=nodes[i]

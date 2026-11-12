@@ -15,7 +15,8 @@ order does not change initialization. No global random state is consumed.
 
 `Force.step count state` advances unit-time ticks and returns new state, leaving
 previous snapshots intact. Each tick cools alpha, adds center/axis/radial/link
-velocity contributions, applies velocity decay, and advances positions. Center
+velocity contributions, adds optional many-body and collision forces, applies
+velocity decay, and advances positions. Center
 force moves the collective mean toward the configured center. Link corrections
 are divided inversely by endpoint mass. Pins restore their fixed position and
 zero velocity after forces. Coincident radial/link directions use deterministic
@@ -36,7 +37,8 @@ new IDs and removes exited IDs. Pins in the replacement graph are authoritative;
 initial-position fields do not teleport surviving nodes.
 
 `stepWithCancellation token count state` checks cancellation before stepping,
-before every tick and every 64 nodes/edges. Cancellation discards private work
+before every tick, every 64 nodes/edges/pairs, and each visited spatial cell.
+Quadtree construction also checks cancellation during input capture and partitioning. Cancellation discards private work
 without modifying input. Cancellation latency is cooperative, not real-time.
 Same seed/config/input reproduces results; cross-platform bitwise transcendental
 math identity is not promised.
@@ -59,8 +61,38 @@ python tools/document-snapshots.py
 
 The local 1,000-node/2,000-edge benchmark takes about 0.42 ms for ten steps,
 allocating 1.46 MB. Its p95 time/allocation gates are 8 ms / 3 MB across normal
-and Traced CI. This excludes rendering and the upcoming collision/many-body
+and Traced CI. This baseline case excludes rendering and collision/many-body
 kernels; it is not a complete interactive-frame claim.
 
-This is task 7 G1. Collision, Barnes–Hut many-body forces and the bounded worker/
-drag network recipes follow in G2/G3. They are not claimed by this batch.
+## Spatial forces
+
+Set `ManyBody=Some(ManyBodyConfig.create -20.)` for repulsion; positive strength
+attracts. Source mass weights acceleration. `Theta=0.` uses exact pairwise
+evaluation; positive theta enables Barnes–Hut aggregate traversal. The default
+is 0.8. A fixed 400-site distribution at theta 0.5 is tested against exact
+forces with a relative RMS velocity error below 3%; this is a fixture bound,
+not a universal error guarantee. Approximation need not conserve exact momentum.
+
+`MinDistance` softens the force near zero; coincident pairs use deterministic
+seeded directions. `MaxDistance` is an inclusive cutoff. Cells crossing the
+cutoff are descended instead of incorrectly including distant sources.
+Strength and theta must be finite, theta nonnegative, and minimum distance
+positive. Maximum distance may be positive infinity.
+
+Set `Collision=Some(CollisionConfig.create 0.7)` for soft circle separation.
+Each iteration builds an index of predicted positions, then accumulates overlap
+corrections using node radii and inverse-mass shares. A pinned node gives the
+free node the full correction. Strength lies in [0,1]; iterations must be
+positive. Collision does not scale with alpha, but final velocity decay still
+applies. Crowded configurations may retain overlap: this is an iterative force,
+not a hard packing constraint. Both kernels are disabled by default.
+
+On this machine the combined 1,000-node/2,000-edge step takes 4.46 ms median,
+11.95 ms p95 and 1.69 MB allocation. The gate is 25 ms p95 / 8 MB. At 400 nodes,
+exact evaluation takes 1.47 ms versus 0.93 ms for theta 0.5, at the cost of
+51.6 KB versus 339.6 KB allocation. Quadtree traversal has quadratic worst cases
+for coincident or highly clustered points; exact evaluation is always quadratic.
+These are solver measurements, excluding host rendering and publication.
+
+The native snapshot above includes link, charge and collision forces. Task 7 G3
+still owns bounded worker publication, interactive dragging and network recipes.
