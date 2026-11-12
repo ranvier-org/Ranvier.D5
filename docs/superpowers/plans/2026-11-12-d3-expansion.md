@@ -215,7 +215,7 @@ Create matching Traced package variants only where dependency identities require
 **Interfaces:** `Density.grid : DensityConfig -> WeightedPoint list -> DensityGrid`; `Contour.compute : ContourConfig -> DensityGrid -> ContourPolygon list`; `Hexbin.aggregate : HexbinConfig -> Point list -> HexBin list`; `Sampling.minMax` and `Sampling.lttb` return samples retaining original IDs.
 
 - [x] I1: uniform grid aggregation, explicit kernel bandwidth and separable Gaussian blur; 1D KDE supports violin/density curves. Define normalization and boundary handling; missing grid cells are distinct from measured zero.
-- [ ] I2: marching squares with a specified asymptotic-decider saddle rule, ring stitching, hole classification and optional interpolation/smoothing. Validate thresholds and dimensions; define equal-threshold classification and NaN masking. Cancellation checks occur per grid strip.
+- [x] I2: marching squares with a specified asymptotic-decider saddle rule, ring stitching, hole classification and optional interpolation/smoothing. Validate thresholds and dimensions; define equal-threshold classification and NaN masking. Cancellation checks occur per grid strip.
 - [ ] I3: density heatmaps, contour/isoband maps, violin, hexbin and large time-series recipes. Min/max envelopes preserve extrema; LTTB is opt-in visual reduction, never used for statistics. Picking/selection retain original semantic IDs or expose aggregate membership explicitly.
 - [ ] Test constant/empty/all-missing grids, diagonal saddles, nested holes, boundary rings, threshold monotonicity, weighted conservation and downsampling endpoints/gaps. Reuse definitions/gradients from task 1.
 

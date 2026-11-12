@@ -19,6 +19,7 @@
     <Compile Include="Predicates.fs" />
     <Compile Include="Polygon.fs" />
     <Compile Include="Contour.fs" />
+    <Compile Include="Hexbin.fs" />
     <Compile Include="Mark.fs" />
     <Compile Include="Chromatic.fs" />
     <Compile Include="SceneDefinitions.fs" />
@@ -44,6 +45,7 @@
     <Compile Include="Reactive.fs" />
     <Compile Include="KeyedTransition.fs" />
     <Compile Include="Interaction.fs" />
+    <Compile Include="Sampling.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Ranvier$(RanvierPackageSuffix)" Version="[0.1.1-preview.2]" />

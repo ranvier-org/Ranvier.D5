@@ -63,6 +63,20 @@ let capture kind path =
             input.Send(InputEvent.Key "Enter")
             if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Flow keyboard selection failed."
             owner :> IDisposable
+        elif kind="reduction" then
+            let owner,target,worker=ReductionGallery.mount host graph
+            graph.Run(fun () -> target.Value<-250)
+            let timer=Stopwatch.StartNew()
+            let ready ()=graph.Run(fun () -> worker.LastGood |> Option.exists(fun (count,bins,minmax,lttb) ->
+                count=250 && minmax.Length<=count && lttb.Length<=count &&
+                minmax.Head.Id="0" && (List.last minmax).Id="99999" && lttb.Head.Id="0" && (List.last lttb).Id="99999" &&
+                (bins |> List.sumBy(fun bin -> bin.Members.Length))=100000))
+            while not(ready()) && timer.Elapsed.TotalSeconds<10. do
+                host.Cycle()
+                host.Frame()
+                System.Threading.Thread.Yield() |> ignore
+            if not(ready()) then failwith "Reduction worker lost source membership, endpoints or output bounds."
+            owner :> IDisposable
         elif kind="contour" then
             let owner,multiplier,worker=ContourGallery.mount host graph
             graph.Run(fun () -> multiplier.Value<-1.25)
@@ -189,6 +203,13 @@ let main args =
         let kind=args |> Array.find(fun arg -> arg.StartsWith "--flow-") |> fun arg -> arg.Substring 7
         use window=Window.Create("Ranvier.D5 interactive flow recipes",820,590)
         let owner,_,_=FlowGallery.mount kind window.Host window.Graph
+        while window.Step() do ()
+        owner.Dispose()
+    elif args.Length=2 && args[0]="--capture-reduction" then
+        capture "reduction" args[1]
+    elif Array.contains "--reduction" args then
+        use window=Window.Create("Ranvier.D5 hexbin and sampling",820,590)
+        let owner,_,_=ReductionGallery.mount window.Host window.Graph
         while window.Step() do ()
         owner.Dispose()
     elif args.Length=2 && args[0]="--capture-contour" then
