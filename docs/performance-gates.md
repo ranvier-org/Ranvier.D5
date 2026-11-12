@@ -139,3 +139,12 @@ line at 28.1–28.6 ms before and 13.6 ms after, the equirectangular line at
 21.3–22.0 and 9.9–10.8 ms, and the seam-heavy line at 85.7–87.7 and
 53.2–65.1 ms. Outputs and gates are unchanged; this follows a merged-main
 Windows Traced p95 tail of 111.6 ms against the 100 ms Mercator line gate.
+
+Both benchmark harnesses now run a full collection between samples, outside the
+timed region, so a sample is not charged for garbage left by the previous one.
+The paired comparison applies the same change to the alpha.1 baseline harness, so
+both sides measure alike. Allocation-heavy workloads on macOS runners, whose
+small gen0 budget made p95 tails rotate between unrelated gates (for example
+treemap at a 22.6 ms median and 89.4 ms p95), motivated the change. A local
+paired run after it measured join 0.848 to 0.848 ms and line 2.081 to 2.047 ms.
+Gates and workloads are unchanged.

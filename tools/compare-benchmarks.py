@@ -1,4 +1,4 @@
-"""Three fresh-process paired runs against alpha.1; only harness sampling changes."""
+"""Three fresh-process paired runs against alpha.1; only harness sampling and between-sample collection change."""
 import argparse
 import io
 import json
@@ -27,7 +27,11 @@ with zipfile.ZipFile(io.BytesIO(archive)) as source:
 program = baseline / "benchmarks/Ranvier.D5.Benchmarks/Program.fs"
 text = program.read_text(encoding="utf-8")
 for old, new in [("Array.init 15", "Array.init 60"), ("MedianMs=times[7]", "MedianMs=(times[29]+times[30])/2."),
-                 ("P95Ms=times[14]", "P95Ms=times[56]"), ("MedianBytes=allocations[7]", "MedianBytes=allocations[30]")]:
+                 ("P95Ms=times[14]", "P95Ms=times[56]"), ("MedianBytes=allocations[7]", "MedianBytes=allocations[30]"),
+                 # Mirror the current harness: collect between samples, outside the timed region.
+                 ("            let allocated = GC.GetAllocatedBytesForCurrentThread()",
+                  "            GC.Collect()\n            GC.WaitForPendingFinalizers()\n            GC.Collect()\n"
+                  "            let allocated = GC.GetAllocatedBytesForCurrentThread()")]:
     if text.count(old) != 1:
         raise ValueError("Unexpected baseline harness: " + old)
     text = text.replace(old, new)

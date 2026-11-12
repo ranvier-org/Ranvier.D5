@@ -18,6 +18,10 @@ let measure name limit bytes action =
     for _ in 1..3 do action()
     let samples =
         Array.init 60 (fun _ ->
+            // Collect outside the timed region so one sample's garbage is not charged to the next.
+            GC.Collect()
+            GC.WaitForPendingFinalizers()
+            GC.Collect()
             let allocated = GC.GetAllocatedBytesForCurrentThread()
             let watch = Stopwatch.StartNew()
             action()
