@@ -56,7 +56,16 @@ let main args =
     let hemisphereLine=GeoGeometry.LineString[for index in 0..9999 -> p (if index%2=0 then 0. else 120.) 0.]
     let rectangleLine=GeoGeometry.LineString[for index in 0..9999 -> p (if index%2=0 then -60. else 60.) 0.]
     let rectangleOptions={GeoPathOptions.defaultValue with ClipExtent=Some(Ranvier.D5.Bounds.create -0.5 -0.5 1. 1.)}
+    let spheres=GeoGeometry.Collection(List.replicate 10000 GeoGeometry.Sphere)
+    let clippedSpheres=GeoGeometry.Collection(List.replicate 1000 GeoGeometry.Sphere)
+    let sphereOptions={GeoPathOptions.defaultValue with ClipExtent=Some(Ranvier.D5.Bounds.create -0.25 -0.25 0.5 0.5);Precision=0.01}
     let results=[|
+        measure "geo-sphere-boundaries-10000" 50. 6000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue pointProjection spheres |> ok
+            if paths.Length<>10000 then failwith "World boundary count")
+        measure "geo-clipped-sphere-boundaries-1000" 50. 2000000L (fun () ->
+            let paths=GeoPath.project sphereOptions hemisphereProjection clippedSpheres |> ok
+            if paths.Length<>1000 then failwith "Clipped globe count")
         measure "geo-rectangle-line-path-10000" 100. 5000000L (fun () ->
             let paths=GeoPath.project rectangleOptions pointProjection rectangleLine |> ok
             if paths.Length<>9999 then failwith "Rectangle fragment count")

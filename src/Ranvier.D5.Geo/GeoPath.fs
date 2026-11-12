@@ -36,7 +36,55 @@ module GeoPathOptions =
 module GeoPath =
     exception private Rejected of LayoutError
 
+    let private resampler (options:GeoPathOptions) spend (screen:GeoPosition -> Point) emit =
+        let rec segment depth (first:GeoPosition) (last:GeoPosition) (a:Point) (b:Point) =
+            spend 1L
+            let arc =
+                match GeoArc.create first last with
+                | Ok value -> value
+                | Error errors -> raise(Rejected errors.Head)
+            let interpolate amount =
+                let value=GeoArc.atFraction amount arc
+                if first.Longitude=last.Longitude && abs first.Longitude=180. then
+                    match GeoPosition.create first.Longitude value.Latitude with
+                    | Ok signed -> signed
+                    | Error errors -> raise(Rejected errors.Head)
+                else value
+            let midpoint=interpolate 0.5
+            let middle=screen midpoint
+            let dx,dy=b.X-a.X,b.Y-a.Y
+            let mx,my=middle.X-a.X,middle.Y-a.Y
+            let length=Double.Hypot(dx,dy)
+            if not(Double.IsFinite length && Double.IsFinite mx && Double.IsFinite my) then
+                raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
+            let error,parameter =
+                if length=0. then Double.Hypot(mx,my),0.5
+                else
+                    let ux,uy=dx/length,dy/length
+                    abs(ux*my-uy*mx),(ux*mx+uy*my)/length
+            let mutable subdivide=error>options.Precision || abs(parameter-0.5)>0.3 || arc.Angle>Math.PI/6.
+            if not subdivide then
+                let quarterExceeds amount =
+                    spend 1L
+                    let sample=interpolate amount |> screen
+                    let qx,qy=sample.X-a.X,sample.Y-a.Y
+                    if not(Double.IsFinite qx && Double.IsFinite qy) then
+                        raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
+                    if length=0. then Double.Hypot(qx,qy)>options.Precision
+                    else
+                        let ux,uy=dx/length,dy/length
+                        abs(ux*qy-uy*qx)>options.Precision || abs((ux*qx+uy*qy)/length-amount)>0.3
+                subdivide<-quarterExceeds 0.25 || quarterExceeds 0.75
+            if subdivide then
+                if depth>=options.MaxSubdivisionDepth then
+                    raise(Rejected(BudgetExceeded "Projected line cannot meet precision within its subdivision depth."))
+                segment (depth+1) first midpoint a middle
+                segment (depth+1) midpoint last middle b
+            else emit b
+        segment
+
     /// <summary>Projects geometry with cooperative cancellation and atomic result publication.</summary>
+    /// <remarks>Sphere emits the complete equirectangular rectangle, orthographic disk, or canonical Mercator square (raw coordinates bounded by pi), intersected with ClipExtent. PointRadius affects point symbols only.</remarks>
     let projectWithCancellation (options:GeoPathOptions) (token:CancellationToken) projection geometry : Result<Path list,LayoutError list> =
         token.ThrowIfCancellationRequested()
         let validExtent =
@@ -67,8 +115,7 @@ module GeoPath =
                     spend(int64 count)
                     if count > options.MaxOutputPoints-emitted then raise(Rejected(BudgetExceeded "Geographic projection exceeds its output-point budget."))
                     emitted <- emitted+count
-                let clippedCircle (point:Point) clip =
-                    let radius=options.PointRadius
+                let clippedCircle (point:Point) radius clip =
                     let angle=4.*asin(sqrt(min 0.5 (options.Precision/radius/2.)))
                     let required=max 4. (4.*ceil((2.*Math.PI/angle)/4.))
                     if not(Double.IsFinite required) || required > float options.MaxBufferedPoints ||
@@ -125,8 +172,7 @@ module GeoPath =
                             spend 1L
                             commands<-LineTo vertices[index]::commands
                         paths.Add(Path.ofCommands(MoveTo vertices[0]::commands))
-                let circle (point:Point) =
-                    let radius=options.PointRadius
+                let circle radius (point:Point) =
                     if radius > 0. then
                         let left,right=point.X-radius,point.X+radius
                         let top,bottom=point.Y-radius,point.Y+radius
@@ -139,7 +185,7 @@ module GeoPath =
                                 if (Bounds.width clip)=0. || (Bounds.height clip)=0. || right < (Bounds.x clip) || left > (Bounds.x clip)+(Bounds.width clip) || bottom < (Bounds.y clip) || top > (Bounds.y clip)+(Bounds.height clip) then false
                                 elif left >= (Bounds.x clip) && right <= (Bounds.x clip)+(Bounds.width clip) && top >= (Bounds.y clip) && bottom <= (Bounds.y clip)+(Bounds.height clip) then true
                                 else
-                                    clippedCircle point clip
+                                    clippedCircle point radius clip
                                     false
                         if visible then
                             reserve 3
@@ -149,6 +195,38 @@ module GeoPath =
                                 ArcTo(radius,radius,0.,false,true,{X=left;Y=point.Y})
                                 ArcTo(radius,radius,0.,false,true,start)
                                 Close])
+                let sphere () =
+                    let origin =
+                        match GeoPosition.create 0. 0. |> Result.bind(fun value ->
+                            match Projection.projectRotatedValue projection value with
+                            | ValueSome point -> Ok point
+                            | ValueNone -> Error [InvalidObservation "Projection boundary exceeds representable screen coordinates."]) with
+                        | Ok point -> point
+                        | Error errors -> raise(Rejected errors.Head)
+                    let scale=Projection.scale projection
+                    match Projection.kind projection with
+                    | ProjectionKind.Orthographic -> circle scale origin
+                    | kind ->
+                        let halfWidth=scale*Math.PI
+                        let halfHeight=if kind=ProjectionKind.Mercator then halfWidth else halfWidth/2.
+                        let mutable left=origin.X-halfWidth
+                        let mutable right=origin.X+halfWidth
+                        let mutable top=origin.Y-halfHeight
+                        let mutable bottom=origin.Y+halfHeight
+                        if not(Double.IsFinite left && Double.IsFinite right && Double.IsFinite top && Double.IsFinite bottom) then
+                            raise(Rejected(InvalidObservation "Projection boundary exceeds representable screen coordinates."))
+                        match options.ClipExtent with
+                        | Some clip ->
+                            left<-max left (Bounds.x clip)
+                            right<-min right (Bounds.x clip+Bounds.width clip)
+                            top<-max top (Bounds.y clip)
+                            bottom<-min bottom (Bounds.y clip+Bounds.height clip)
+                        | None -> ()
+                        if left<right && top<bottom then
+                            reserve 4
+                            paths.Add(Path.ofCommands [
+                                MoveTo {X=left;Y=top};LineTo {X=right;Y=top}
+                                LineTo {X=right;Y=bottom};LineTo {X=left;Y=bottom};Close])
                 let lineInput=ResizeArray<GeoPosition>()
                 let lineCommands=ResizeArray<PathCommand>()
                 let mutable inLine=false
@@ -241,155 +319,19 @@ module GeoPath =
                             match Projection.projectRotatedValue projection position with
                             | ValueSome value -> value
                             | ValueNone -> raise(Rejected(InvalidObservation "This line requires spherical preclipping before projection."))
-                        let rec segment depth (first:GeoPosition) (last:GeoPosition) (a:Point) (b:Point) =
-                            spend 1L
-                            let arc =
-                                match GeoArc.create first last with
-                                | Ok value -> value
-                                | Error errors -> raise(Rejected errors.Head)
-                            let interpolate amount =
-                                let value=GeoArc.atFraction amount arc
-                                if first.Longitude=last.Longitude && abs first.Longitude=180. then
-                                    match GeoPosition.create first.Longitude value.Latitude with
-                                    | Ok signed -> signed
-                                    | Error errors -> raise(Rejected errors.Head)
-                                else value
-                            let midpoint=interpolate 0.5
-                            let middle=screen midpoint
-                            let dx,dy=b.X-a.X,b.Y-a.Y
-                            let mx,my=middle.X-a.X,middle.Y-a.Y
-                            let length=Double.Hypot(dx,dy)
-                            if not(Double.IsFinite length && Double.IsFinite mx && Double.IsFinite my) then
-                                raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
-                            let error,parameter =
-                                if length=0. then Double.Hypot(mx,my),0.5
-                                else
-                                    let ux,uy=dx/length,dy/length
-                                    abs(ux*my-uy*mx),(ux*mx+uy*my)/length
-                            let mutable subdivide=error>options.Precision || abs(parameter-0.5)>0.3 || arc.Angle>Math.PI/6.
-                            if not subdivide then
-                                let quarterExceeds amount =
-                                    spend 1L
-                                    let sample=interpolate amount |> screen
-                                    let qx,qy=sample.X-a.X,sample.Y-a.Y
-                                    if not(Double.IsFinite qx && Double.IsFinite qy) then
-                                        raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
-                                    if length=0. then Double.Hypot(qx,qy)>options.Precision
-                                    else
-                                        let ux,uy=dx/length,dy/length
-                                        abs(ux*qy-uy*qx)>options.Precision || abs((ux*qx+uy*qy)/length-amount)>0.3
-                                subdivide<-quarterExceeds 0.25 || quarterExceeds 0.75
-                            if subdivide then
-                                if depth>=options.MaxSubdivisionDepth then
-                                    raise(Rejected(BudgetExceeded "Projected line cannot meet precision within its subdivision depth."))
-                                segment (depth+1) first midpoint a middle
-                                segment (depth+1) midpoint last middle b
-                            else addLine b
-                        let position longitude latitude =
-                            match GeoPosition.create longitude latitude with
-                            | Ok value -> value
-                            | Error errors -> raise(Rejected errors.Head)
-                        let tailPoint () =
-                            match tail with
-                            | ValueSome point -> point
-                            | ValueNone -> raise(Rejected(InvalidObservation "Projected line fragment has no starting point."))
-                        let arcBetween first last =
-                            match GeoArc.create first last with
-                            | Ok value -> value
-                            | Error errors -> raise(Rejected errors.Head)
-                        let ensureStart first =
-                            let point=screen first
-                            match tail with
-                            | ValueSome current when current=point -> ()
-                            | _ -> flush(); startFragment point
-                        let cylindrical=Projection.kind projection<>ProjectionKind.Orthographic
-                        let edge (source:GeoPosition) (destination:GeoPosition) =
-                            let first=if abs source.Latitude=90. then position destination.Longitude source.Latitude else source
-                            let last=if abs destination.Latitude=90. then position first.Longitude destination.Latitude else destination
-                            if cylindrical && abs source.Latitude=90. then flush()
-                            let delta=abs(first.Longitude-last.Longitude)
-                            let side longitude=if longitude>0. then 180. else -180.
-                            if not cylindrical then
-                                let struct(x0,_,_)=GeoMath.vector first
-                                let struct(x1,_,_)=GeoMath.vector last
-                                if x0>=0. && x1>=0. then
-                                    ensureStart first
-                                    segment 0 first last (tailPoint()) (screen last)
-                                elif x0<=0. && x1<=0. then flush()
-                                else
-                                    let arc=arcBetween first last
-                                    let root=atan2 (-arc.X) arc.TangentX
-                                    let root=if root<0. then root+Math.PI else root
-                                    if root>arc.Angle+1e-12 then
-                                        raise(Rejected(InvalidObservation "Hemisphere intersection lies outside its great-circle arc."))
-                                    let sine,cosine=sin root,cos root
-                                    let boundary=GeoMath.position(struct(0.,arc.Y*cosine+arc.TangentY*sine,arc.Z*cosine+arc.TangentZ*sine))
-                                    if x0>0. then
-                                        ensureStart first
-                                        segment 0 first boundary (tailPoint()) (screen boundary)
-                                        flush()
-                                    else
-                                        flush()
-                                        startFragment(screen boundary)
-                                        segment 0 boundary last (tailPoint()) (screen last)
-                            elif abs first.Longitude=180. && abs last.Longitude=180. then
-                                let positive=position 180. first.Latitude
-                                let longitude =
-                                    match tail with
-                                    | ValueSome current when current=screen positive -> 180.
-                                    | _ -> -180.
-                                let before,after=position longitude first.Latitude,position longitude last.Latitude
-                                ensureStart before
-                                segment 0 before after (tailPoint()) (screen after)
-                            elif cylindrical && delta=180. then
-                                ensureStart first
-                                arcBetween first last |> ignore
-                                let latitude=if first.Latitude+last.Latitude>0. then 90. else -90.
-                                let before=position first.Longitude latitude
-                                let seamBefore=position (side first.Longitude) latitude
-                                let seamAfter=position (side last.Longitude) latitude
-                                let after=position last.Longitude latitude
-                                segment 0 first before (tailPoint()) (screen before)
-                                if screen seamBefore<>tailPoint() then addLine(screen seamBefore)
-                                flush()
-                                startFragment(screen seamAfter)
-                                if screen after<>tailPoint() then addLine(screen after)
-                                segment 0 after last (tailPoint()) (screen last)
-                            elif cylindrical && delta>180. then
-                                let arc=arcBetween first last
-                                let latitude =
-                                    if abs first.Longitude=180. then first.Latitude
-                                    elif abs last.Longitude=180. then last.Latitude
-                                    else
-                                        let root=atan2 (-arc.Y) arc.TangentY
-                                        let root=if root<0. then root+Math.PI else root
-                                        if root<0. || root>arc.Angle+1e-12 then
-                                            raise(Rejected(InvalidObservation "Antimeridian intersection lies outside its great-circle arc."))
-                                        (GeoArc.atFraction (Math.Clamp(root/arc.Angle,0.,1.)) arc).Latitude
-                                let before=position (side first.Longitude) latitude
-                                let after=position (side last.Longitude) latitude
-                                if abs first.Longitude=180. then
-                                    ensureStart after
-                                    if Geodesic.distance after last>0. then segment 0 after last (tailPoint()) (screen last)
-                                elif abs last.Longitude=180. then
-                                    ensureStart first
-                                    segment 0 first before (tailPoint()) (screen before)
-                                else
-                                    ensureStart first
-                                    segment 0 first before (tailPoint()) (screen before)
-                                    flush()
-                                    startFragment(screen after)
-                                    segment 0 after last (tailPoint()) (screen last)
-                            else
-                                ensureStart first
-                                segment 0 first last (tailPoint()) (screen last)
-                        let mutable previous=Projection.rotate projection lineInput[0]
-                        for index=1 to lineInput.Count-1 do
-                            spend 1L
-                            let current=Projection.rotate projection lineInput[index]
-                            edge previous current
-                            previous<-current
-                        flush()
+                        let segment=resampler options spend screen addLine
+                        let sink = {
+                            Start=fun point -> startFragment(screen point)
+                            Arc=fun first last ->
+                                match tail with
+                                | ValueSome previous -> segment 0 first last previous (screen last)
+                                | ValueNone -> raise(Rejected(InvalidObservation "Projected line fragment has no starting point."))
+                            Boundary=fun point -> addLine(screen point)
+                            Finish=flush
+                        }
+                        match GeoPreclip.line projection spend sink lineInput with
+                        | Ok () -> ()
+                        | Error error -> raise(Rejected error)
                 let folder () event =
                     spend 1L
                     match event with
@@ -400,8 +342,9 @@ module GeoPath =
                             lineInput.Add position
                         else
                             match Projection.projectValue projection position with
-                            | ValueSome point -> circle point
+                            | ValueSome point -> circle options.PointRadius point
                             | ValueNone -> ()
+                    | GeoStreamEvent.Sphere -> sphere()
                     | GeoStreamEvent.LineStart -> lineInput.Clear(); inLine<-true
                     | GeoStreamEvent.LineEnd -> finishLine(); inLine<-false
                     | _ -> raise(Rejected(InvalidObservation "Geographic polygon path projection is not yet implemented."))

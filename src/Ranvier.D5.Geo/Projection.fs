@@ -70,6 +70,7 @@ module Projection =
     let internal rotate projection position = GeoRotation.apply projection.Config.Rotation position
 
     let internal kind projection = projection.Config.Kind
+    let internal scale projection = projection.Config.Scale
 
     let internal projectRotatedValue projection (rotated:GeoPosition) =
         let config=projection.Config

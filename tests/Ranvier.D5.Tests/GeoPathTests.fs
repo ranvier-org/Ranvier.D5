@@ -13,6 +13,65 @@ let private projection kind = Projection.create (ProjectionConfig.defaultValue k
 
 [<Tests>]
 let tests = testList "geographic paths" [
+    testCase "sphere emits the complete equirectangular boundary" <| fun _ ->
+        let paths=GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Equirectangular) GeoGeometry.Sphere |> ok
+        Expect.equal paths.Length 1 "one world boundary"
+        let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+        Expect.equal vertices.Length 4 "rectangle corners"
+        Expect.isLessThan (abs(Polygon.area vertices-2.*Math.PI*Math.PI)) 1e-12 "world screen area and winding"
+        Expect.equal (Path.commands paths.Head |> List.last) Close "closed boundary"
+    testCase "orthographic sphere uses its projection radius independently of point symbols" <| fun _ ->
+        let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Orthographic with Scale=20.;Translate={X=100.;Y=80.}} |> ok
+        let paths=GeoPath.project {GeoPathOptions.defaultValue with PointRadius=0.} projected GeoGeometry.Sphere |> ok
+        match Path.commands paths.Head with
+        | [MoveTo start;ArcTo(rx,ry,_,false,true,middle);ArcTo(_,_,_,false,true,finish);Close] ->
+            Expect.equal (rx,ry) (20.,20.) "projection scale"
+            Expect.equal start {X=120.;Y=80.} "translated disk"
+            Expect.equal middle {X=80.;Y=80.} "opposite limb"
+            Expect.equal finish start "closed circle"
+        | commands -> failtestf "Unexpected globe boundary %A" commands
+    testCase "mercator sphere has the finite canonical world square" <| fun _ ->
+        let paths=GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Mercator) GeoGeometry.Sphere |> ok
+        let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+        Expect.equal vertices.Length 4 "finite world corners"
+        Expect.isTrue (vertices |> List.forall(fun point -> abs(abs point.X-Math.PI)<1e-12 && abs(abs point.Y-Math.PI)<1e-12)) "canonical Mercator extent"
+    testCase "sphere clipping preserves an enclosed viewport for every projection" <| fun _ ->
+        for kind in [ProjectionKind.Equirectangular;ProjectionKind.Mercator;ProjectionKind.Orthographic] do
+            let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.1 -0.1 0.2 0.2);Precision=0.001}
+            let paths=GeoPath.project options (projection kind) GeoGeometry.Sphere |> ok
+            let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+            Expect.isLessThan (abs(Polygon.area vertices-0.04)) 1e-12 "viewport survives without visible input vertices"
+    testCase "sphere clipping can omit a disjoint or empty viewport" <| fun _ ->
+        for kind in [ProjectionKind.Equirectangular;ProjectionKind.Mercator;ProjectionKind.Orthographic] do
+            for extent in [Bounds.create 10. 10. 1. 1.;Bounds.create 0. 0. 0. 1.] do
+                let options={GeoPathOptions.defaultValue with ClipExtent=Some extent;MaxOutputPoints=1}
+                Expect.equal (GeoPath.project options (projection kind) GeoGeometry.Sphere |> ok) [] "no phantom output"
+    testCase "sphere boundary ignores globe rotation but respects projection center" <| fun _ ->
+        let rotation=GeoRotation.create 120. 35. 20. |> ok
+        for kind in [ProjectionKind.Equirectangular;ProjectionKind.Mercator;ProjectionKind.Orthographic] do
+            let config={ProjectionConfig.defaultValue kind with Center=p 20. 10.;Scale=30.;Translate={X=50.;Y=60.}}
+            let unrotated=Projection.create config |> ok
+            let rotated=Projection.create {config with Rotation=rotation} |> ok
+            let paths projection=GeoPath.project GeoPathOptions.defaultValue projection GeoGeometry.Sphere |> ok |> List.map Path.commands
+            Expect.equal (paths rotated) (paths unrotated) "the full sphere has no orientation"
+            let origin=Projection.project unrotated (p 0. 0.) |> Option.get
+            match paths unrotated |> List.head |> List.head with
+            | MoveTo point ->
+                let expectedX=if kind=ProjectionKind.Orthographic then origin.X+30. else origin.X-30.*Math.PI
+                Expect.equal point.X expectedX "center shifts the projection frame"
+            | _ -> failtest "expected boundary start"
+    testCase "sphere overflow and clipped precision exhaustion return typed errors" <| fun _ ->
+        for kind in [ProjectionKind.Equirectangular;ProjectionKind.Mercator;ProjectionKind.Orthographic] do
+            let projected=Projection.create {ProjectionConfig.defaultValue kind with Scale=Double.MaxValue;Translate={X=Double.MaxValue;Y=0.}} |> ok
+            Expect.isError (GeoPath.project GeoPathOptions.defaultValue projected GeoGeometry.Sphere) "unrepresentable frame"
+        let options={GeoPathOptions.defaultValue with Precision=1e-20;ClipExtent=Some(Bounds.create 0. -2. 2. 4.);MaxBufferedPoints=100}
+        match GeoPath.project options (projection ProjectionKind.Orthographic) GeoGeometry.Sphere with
+        | Error [BudgetExceeded _] -> ()
+        | other -> failtestf "Expected bounded circular clipping, got %A" other
+    testCase "sphere output remains budgeted and preserves collection ownership" <| fun _ ->
+        Expect.isError (GeoPath.project {GeoPathOptions.defaultValue with MaxOutputPoints=3} (projection ProjectionKind.Equirectangular) GeoGeometry.Sphere) "rectangle requires four endpoints"
+        let paths=GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Equirectangular) (GeoGeometry.Collection[GeoGeometry.Sphere;GeoGeometry.Point(Some(p 0. 0.))]) |> ok
+        Expect.equal paths.Length 2 "sphere and point are independent owned paths"
     testCase "point paths use existing circle commands and omit hidden points" <| fun _ ->
         let options={GeoPathOptions.defaultValue with PointRadius=2.}
         let paths=GeoPath.project options (projection ProjectionKind.Orthographic) (GeoGeometry.MultiPoint[p 0. 0.;p 180. 0.;p 90. 0.]) |> ok
