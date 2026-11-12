@@ -15,12 +15,9 @@ module GeoPath =
             | ProjectionKind.Equirectangular | ProjectionKind.Mercator -> true
             | _ -> false
         let scale=Projection.scale projection
-        let rec segment depth (first:GeoPosition) (last:GeoPosition) (a:Point) (b:Point) =
+        // Halves stay on the parent's great circle, so recursion rotates the parent frame rather than re-solving each arc.
+        let rec subdivideArc depth (first:GeoPosition) (last:GeoPosition) (arc:GeoArc) (a:Point) (b:Point) =
             spend 1L
-            let arc =
-                match GeoArc.create first last with
-                | Ok value -> value
-                | Error errors -> raise(Rejected errors.Head)
             // On a preclipped arc, latitude changes by at most arc length and these maps expand by at most sec(latitude).
             let withinPrecision =
                 if cylindrical && arc.Angle<=Math.PI/6. then
@@ -29,14 +26,15 @@ module GeoPath =
                 else false
             if withinPrecision then emit b
             else
-                let interpolate amount =
-                    let value=GeoArc.atFraction amount arc
+                let signed (value:GeoPosition) =
                     if first.Longitude=last.Longitude && abs first.Longitude=180. then
                         match GeoPosition.create first.Longitude value.Latitude with
                         | Ok signed -> signed
                         | Error errors -> raise(Rejected errors.Head)
                     else value
-                let midpoint=interpolate 0.5
+                let interpolate amount=signed(GeoArc.atFraction amount arc)
+                let struct(halfway,firstHalf,secondHalf)=GeoArc.bisect arc
+                let midpoint=signed halfway
                 let middle=screen midpoint
                 let dx,dy=b.X-a.X,b.Y-a.Y
                 let mx,my=middle.X-a.X,middle.Y-a.Y
@@ -64,10 +62,13 @@ module GeoPath =
                 if subdivide then
                     if depth>=options.MaxSubdivisionDepth then
                         raise(Rejected(BudgetExceeded "Projected line cannot meet precision within its subdivision depth."))
-                    segment (depth+1) first midpoint a middle
-                    segment (depth+1) midpoint last middle b
+                    subdivideArc (depth+1) first midpoint firstHalf a middle
+                    subdivideArc (depth+1) midpoint last secondHalf middle b
                 else emit b
-        segment
+        fun depth (first:GeoPosition) (last:GeoPosition) (a:Point) (b:Point) ->
+            match GeoArc.create first last with
+            | Ok arc -> subdivideArc depth first last arc a b
+            | Error errors -> raise(Rejected errors.Head)
 
     /// <summary>Projects geometry with cooperative cancellation and atomic result publication.</summary>
     /// <remarks>Sphere emits the complete equirectangular rectangle, orthographic disk, or canonical Mercator square (raw coordinates bounded by pi), intersected with ClipExtent. PointRadius affects point symbols only.</remarks>

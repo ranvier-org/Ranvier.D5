@@ -20,7 +20,16 @@ module internal Recipe =
         let scene=Scene.compose frame.Viewport frame.Title [RectClip("plot-clip",bounds)]
                     [Group({GroupSpec.create "plot" with Clip=Some "plot-clip"},List.map Leaf marks)
                      Group(GroupSpec.create "axes",List.map Leaf axes)]
-        {Scene=scene;PlotBounds=bounds;Semantics=semantics;HitTargets=hits |> List.map(fun hit -> {hit with Clip=Some bounds});Description=frame.Title}
+        // A recipe may narrow a target's clip to its own extent so picking rejects it cheaply; disjoint extents keep the plot clip.
+        let clip (hit:HitTarget)=
+            match hit.Clip with
+            | None -> bounds
+            | Some own ->
+                let left,top=max (Bounds.x own) (Bounds.x bounds),max (Bounds.y own) (Bounds.y bounds)
+                let right=min (Bounds.x own+Bounds.width own) (Bounds.x bounds+Bounds.width bounds)
+                let bottom=min (Bounds.y own+Bounds.height own) (Bounds.y bounds+Bounds.height bounds)
+                if right>=left && bottom>=top then Bounds.create left top (right-left) (bottom-top) else bounds
+        {Scene=scene;PlotBounds=bounds;Semantics=semantics;HitTargets=hits |> List.map(fun hit -> {hit with Clip=Some(clip hit)});Description=frame.Title}
     let semantic id dataIds description = {MarkPath=["plot";id];DataIds=dataIds;Description=description}
     let hit id dataIds geometry = {MarkPath=["plot";id];DataIds=dataIds;Geometry=geometry;Clip=None}
     let rectangle id label color bounds = Mark.path id (Shape.rectangle bounds) |> Mark.withFill color |> Mark.withLabel(Some label)

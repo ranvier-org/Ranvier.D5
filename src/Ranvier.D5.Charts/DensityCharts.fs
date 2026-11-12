@@ -39,7 +39,10 @@ module DensityChart =
                         let mark=Mark.path key path |> Mark.withFill(spec.Color bin.Weight) |> Mark.withLabel(Some label)
                         let mark=if spec.Selected.Contains key then Mark.withStroke (Paint.rgb 20 20 20) 2. mark else mark
                         let region=HitRegion([{Outer=vertices;Holes=[]}],[],project bin.Center)
-                        key,bin.Members,mark,Recipe.semantic key [key] label,Recipe.hit key [key] region)
+                        let xs,ys=vertices |> List.map(fun p -> p.X),vertices |> List.map(fun p -> p.Y)
+                        let left,top=List.min xs,List.min ys
+                        let extent=Bounds.create left top (List.max xs-left) (List.max ys-top)
+                        key,bin.Members,mark,Recipe.semantic key [key] label,{Recipe.hit key [key] region with Clip=Some extent})
                     token.ThrowIfCancellationRequested()
                     {Chart=Recipe.output spec.Frame bounds (cells |> List.map(fun (_,_,m,_,_) -> m)) (cells |> List.map(fun (_,_,_,s,_) -> s)) (cells |> List.map(fun (_,_,_,_,h) -> h)) []
                      Membership=cells |> List.map(fun (key,members,_,_,_) -> key,members) |> Map.ofList}))

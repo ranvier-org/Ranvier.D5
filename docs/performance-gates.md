@@ -113,3 +113,19 @@ The focused allocations were 1,886,448 and 1,854,280 bytes respectively. The
 retained allocation gate tightens from 32 MB to 2 MB, with unchanged timing
 limits and paired tolerances. These local results do not establish the macOS
 result; all platform checks remain release requirements.
+
+Hexbin region picking scanned every target and rebuilt each hexagon's bounds
+per query. The recipe now narrows each target's hit clip to its hexagon bounds
+intersected with the plot, so a non-matching target is rejected by four
+comparisons; recipes that set no clip keep the plot bounds. Three alternating
+same-machine runs of the 100-query workload measured medians of 9.6–14.5 ms
+before and 1.9–2.2 ms after. Picking semantics are unchanged and covered by a
+test; the 100 ms p95 gate is unchanged.
+
+Geographic resampling previously rebuilt each half of a subdivided arc from its
+rounded degree endpoints. Halves now rotate the parent's great-circle frame,
+removing most trigonometry from the recursion while producing the same vertex
+counts and passing the pinned D3 fixtures. In two alternating runs the
+10,000-vertex Mercator polar workload measured 49.6–50.9 ms before and
+34.0–34.1 ms after; the equirectangular variant measured 46.5–46.9 and
+19.1–20.5 ms. The 150 ms p95 gate is unchanged.
