@@ -14,6 +14,7 @@ type OwnedChartInteraction internal (readGesture:unit->GestureState,readSelectio
 [<RequireQualifiedAccess>]
 module ChartInteraction =
     let private center = function
+        | HitRegion(_,_,anchor) -> anchor
         | HitPoint(point,_) -> point
         | HitSector(point,inner,outer,start,finish) ->
             let offset=Curves.radialPoint ((start+finish)/2.) ((inner+outer)/2.)

@@ -107,6 +107,11 @@ let main args =
             results.Add(measure (sprintf "contour-grid-%d-three-levels" size) limit bytes (fun () ->
                 let polygons=Contour.compute (ContourConfig.create [0.025;0.075;0.15]) field |> Result.defaultWith(fun errors -> failwithf "%A" errors)
                 if polygons.Length<>3 || polygons |> List.exists(fun polygon -> polygon.Holes.Length<>1) then failwith "Contour benchmark lost ring topology."))
+            let spec=Ranvier.D5.Charts.DensityChartSpec.create (Ranvier.D5.Charts.ChartFrame.create 800. 600. "Bands") (fun _ -> Paint.currentColor)
+            let chartLimit,chartBytes=if size=256 then 100.,32000000L else 400.,100000000L
+            results.Add(measure (sprintf "isoband-chart-%d-three-levels" size) chartLimit chartBytes (fun () ->
+                let chart=Ranvier.D5.Charts.ContourChart.isobands spec (ContourConfig.create [0.025;0.075;0.15]) field |> Result.defaultWith(fun e -> failwithf "%A" e)
+                if chart.Chart.HitTargets.Length<>3 then failwith "Isoband chart lost levels."))
         let fragmented=DensityGrid.create (Bounds.create 0. 0. 64. 64.) 64 64 [for row in 0..63 do for column in 0..63 -> Some(if (row+column)%2=0 then 1. else -1.)]
                        |> Result.defaultWith(fun errors -> failwithf "%A" errors)
         results.Add(measure "contour-fragments-2048" 100. 32000000L (fun () ->
@@ -116,6 +121,15 @@ let main args =
         results.Add(measure "hexbin-100000" 150. 40000000L (fun () ->
             let bins=Hexbin.aggregate hexConfig densityPoints |> Result.defaultWith(fun errors -> failwithf "%A" errors)
             if (bins |> List.sumBy(fun bin -> bin.Members.Length))<>100000 then failwith "Hexbin lost source identities."))
+        let densityChartSpec=Ranvier.D5.Charts.DensityChartSpec.create (Ranvier.D5.Charts.ChartFrame.create 800. 600. "Density") (fun _ -> Paint.currentColor)
+        let heatGrid=Density.grid (DensityConfig.create (Bounds.create 0. 0. 1024. 1024.) 64 64) densityPoints |> Result.defaultWith(fun e -> failwithf "%A" e)
+        results.Add(measure "density-heatmap-chart-4096" 75. 24000000L (fun () ->
+            Ranvier.D5.Charts.DensityChart.heatmap densityChartSpec heatGrid |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+        let hexChart()=Ranvier.D5.Charts.DensityChart.hexbin densityChartSpec hexConfig densityPoints |> Result.defaultWith(fun e -> failwithf "%A" e)
+        results.Add(measure "hexbin-chart-100000" 200. 64000000L (fun () -> hexChart() |> ignore))
+        let hexOutput=(hexChart()).Chart
+        results.Add(measure "hexbin-region-pick-100" 100. 1000000L (fun () ->
+            for i in 0..99 do Ranvier.D5.Charts.HitTest.at (Point.create (40.+float i*7.) (20.+float(i%50)*10.)) hexOutput |> ignore))
         let series=[for i in 0..99999 -> {SeriesSample.Id=string i;X=float i;Y=Some(sin(float i*0.01)+(if i%997=0 then 3. else 0.))}]
         for label,reduce,limit,bytes in ["minmax",Sampling.minMax,50.,16000000L;"lttb",Sampling.lttb,75.,24000000L] do
             results.Add(measure ("sampling-"+label+"-100000-to-1000") limit bytes (fun () ->
@@ -230,4 +244,7 @@ let main args =
     let directory = Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore
     File.WriteAllText(output, JsonSerializer.Serialize(results, JsonSerializerOptions(WriteIndented=true)))
-    if results |> Seq.exists(fun r -> r.P95Ms > r.LimitMs || r.MedianBytes > r.LimitBytes) then 1 else 0
+    let failures=results |> Seq.filter(fun r -> r.P95Ms > r.LimitMs || r.MedianBytes > r.LimitBytes) |> Seq.toArray
+    for result in failures do
+        eprintfn "FAIL %s: p95 %.3f ms (limit %.3f); allocation %d bytes (limit %d)" result.Name result.P95Ms result.LimitMs result.MedianBytes result.LimitBytes
+    if failures.Length>0 then 1 else 0

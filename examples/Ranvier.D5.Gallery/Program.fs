@@ -63,6 +63,46 @@ let capture kind path =
             input.Send(InputEvent.Key "Enter")
             if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Flow keyboard selection failed."
             owner :> IDisposable
+        elif kind.StartsWith("density-recipe-") then
+            let recipe=kind.Substring("density-recipe-".Length)
+            let owner,bandwidth,worker,input=DensityRecipesGallery.mount recipe host graph
+            graph.Run(fun () -> bandwidth.Value<-2.5)
+            let timer=Stopwatch.StartNew()
+            let ready()=graph.Run(fun () -> worker.LastGood |> Option.exists(fun (width,output) -> width=2.5 && not output.Chart.HitTargets.IsEmpty))
+            while not(ready()) && timer.Elapsed.TotalSeconds<15. do
+                host.Cycle()
+                host.Frame()
+                System.Threading.Thread.Yield() |> ignore
+            if not(ready()) then failwith "Density recipe worker failed to publish."
+            host.Cycle()
+            let struct(w,h)=host.PaintSize
+            host.Paint(Array.zeroCreate<byte>(w*h*4))
+            let output=graph.Run(fun () -> worker.LastGood.Value |> snd)
+            if recipe="isobands" || recipe="contours" then
+                host.Mouse(0,408,308,0,0,0) |> ignore
+                if graph.Run(fun () -> input.Selection.Hovered.IsSome) then failwith "Density hole must not be picked."
+                host.Mouse(1,405,305,0,1,0) |> ignore
+                host.Mouse(0,411,311,0,0,0) |> ignore
+                host.Mouse(2,411,311,0,1,0) |> ignore
+                if graph.Run(fun () -> not input.Selection.Selected.IsEmpty) then failwith "Brush in a density hole must not select a region."
+                let anchor=
+                    output.Chart.HitTargets |> List.choose(fun target ->
+                        match target.Geometry with
+                        | Ranvier.D5.Charts.HitRegion(_,_,anchor) -> Some anchor
+                        | _ -> None) |> List.last
+                host.Mouse(0,int(Math.Round anchor.X)+8,int(Math.Round anchor.Y)+8,0,0,0) |> ignore
+                if graph.Run(fun () -> input.Selection.Hovered.IsNone) then failwith "Density filled region must be picked."
+                let x,y=int(Math.Round anchor.X)+8,int(Math.Round anchor.Y)+8
+                host.Mouse(1,x-3,y-3,0,1,0) |> ignore
+                host.Mouse(0,x+3,y+3,0,0,0) |> ignore
+                host.Mouse(2,x+3,y+3,0,1,0) |> ignore
+                if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Brush around a density anchor must select a region."
+            input.Send(InputEvent.Key "ArrowRight")
+            input.Send(InputEvent.Key "Enter")
+            if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Density keyboard selection failed."
+            if recipe="heatmap" || recipe="hexbin" then
+                if (output.Membership |> Map.toList |> List.sumBy(fun (_,members) -> members.Length))<>100000 then failwith "Density recipe lost source membership."
+            owner :> IDisposable
         elif kind="reduction" then
             let owner,target,worker=ReductionGallery.mount host graph
             graph.Run(fun () -> target.Value<-250)
@@ -203,6 +243,13 @@ let main args =
         let kind=args |> Array.find(fun arg -> arg.StartsWith "--flow-") |> fun arg -> arg.Substring 7
         use window=Window.Create("Ranvier.D5 interactive flow recipes",820,590)
         let owner,_,_=FlowGallery.mount kind window.Host window.Graph
+        while window.Step() do ()
+        owner.Dispose()
+    elif args.Length=3 && args[0]="--capture-density-recipe" then
+        capture ("density-recipe-"+args[1]) args[2]
+    elif args.Length=2 && args[0]="--density-recipe" then
+        use window=Window.Create("Ranvier.D5 density recipes",820,590)
+        let owner,_,_,_=DensityRecipesGallery.mount args[1] window.Host window.Graph
         while window.Step() do ()
         owner.Dispose()
     elif args.Length=2 && args[0]="--capture-reduction" then
