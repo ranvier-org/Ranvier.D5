@@ -176,6 +176,9 @@ let acceptance () =
         host.Cycle()
         host.Frame()
         host.Paint before
+        let nodeBounds=(networkSvg.querySelector "[data-d5-key='4:node4:node']").getBoundingClientRect()
+        Expect.floatClose Accuracy.medium nodeBounds.width 24. "shared circle geometry preserves native radius"
+        Expect.floatClose Accuracy.medium nodeBounds.height 24. "shared circle geometry preserves native height"
         host.Mouse(1,108,108,0,1,0) |> ignore
         Expect.equal (graph.Run(fun () -> force.Snapshot.Nodes.Head.Pinned)) (Some(Point.create 100. 100.)) "native drag starts pin"
         Expect.isTrue (networkSvg.hasPointerCapture 1) "network captures pointer"

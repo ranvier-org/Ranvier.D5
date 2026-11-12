@@ -64,7 +64,10 @@ variable-radius nodes using center/axis attraction and collision. The benchmark
 suite measures chart construction and native update-plus-paint separately from
 force stepping. With individual edge marks, the local update-plus-paint median
 was 58.85 ms (18.66 MB allocated). Explicit aggregation reduced it to 28.61 ms
-(11.94 MB), with a 34.38 ms p95. Chart construction alone took 5.19 ms. These
+(11.94 MB), with a 34.38 ms p95. Reusing immutable unit-circle geometry and
+avoiding repeated validation of the already validated links reduced it further
+to 24.15 ms / 8.85 MB (Traced 30.13 ms / 12.94 MB). Chart construction fell
+from 5.19 ms to 1.96 ms. Selected outlines retain their unscaled stroke width. These
 measurements still exceed a 16.7 ms frame budget: dense SVG updates remain the
 main bottleneck, even though simulation no longer blocks the host. Shared CI
 gates are regression guards, not a 60 FPS guarantee.
