@@ -48,6 +48,10 @@ dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --capture gallery
 
 It renders a signal-driven line, donut, treemap and bars using the same scene primitives.
 
+![Working native linked charts](docs/images/linked.png)
+
+See the [native example gallery](examples/Ranvier.D5.Gallery/README.md) for rendered snapshots and reproduction commands, including [hierarchy layouts](docs/hierarchy.md).
+
 ## Expansion packages and examples
 
 `Ranvier.D5.Charts` adds typed, pure chart recipes. See [alpha.2 scope and validation](docs/release-alpha.2.md), [owned interaction](docs/interaction.md), [keyed transitions](docs/transitions.md), [background layouts](docs/background-layout.md), and [palettes](docs/chromatic.md).

@@ -17,15 +17,15 @@ let mount (host: WebCoreHost) graph read =
     Mounting.mount graph None (fun errors -> raise (AggregateException errors)) container None
         (fun context -> Program.run (Component.render Renderer.passive read) context.Backend)
 
-let capture linked path =
+let capture kind path =
     use host = WebCoreHost.Create(820, 590)
     use graph = new Graph()
     let mounted:IDisposable =
-        if linked then
+        if kind="linked" then
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
         else
-            let mounted=mount host graph (fun () -> Scenes.scene 0.)
+            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene else fun () -> Scenes.scene 0.)
             {new IDisposable with member _.Dispose()=mounted.Dispose()}
     host.Cycle()
     host.Frame()
@@ -57,9 +57,16 @@ let capture linked path =
 [<EntryPoint>]
 let main args =
     if args.Length = 2 && args[0] = "--capture" then
-        capture false args[1]
+        capture "foundation" args[1]
     elif args.Length=2 && args[0]="--capture-linked" then
-        capture true args[1]
+        capture "linked" args[1]
+    elif args.Length=2 && args[0]="--capture-hierarchy" then
+        capture "hierarchy" args[1]
+    elif Array.contains "--hierarchy" args then
+        use window = Window.Create("Ranvier.D5 hierarchy layouts",820,590)
+        let mounted=mount window.Host window.Graph HierarchyGallery.scene
+        while window.Step() do ()
+        mounted.Dispose()
     elif Array.contains "--linked" args then
         use window = Window.Create("Ranvier.D5 linked selection",820,590)
         let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount window.Host window.Graph

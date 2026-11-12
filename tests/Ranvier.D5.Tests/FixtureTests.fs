@@ -22,5 +22,10 @@ let tests = testList "reference fixture provenance" [
         for file in json.RootElement.GetProperty("files").EnumerateArray() do
             let path = Path.Combine(directory, file.GetString())
             use fixture = JsonDocument.Parse(File.ReadAllText path)
-            Expect.isTrue (fixture.RootElement.GetArrayLength() > 0) "fixture cases exist"
+            let populated=
+                match fixture.RootElement.ValueKind with
+                | JsonValueKind.Array -> fixture.RootElement.GetArrayLength()>0
+                | JsonValueKind.Object -> fixture.RootElement.EnumerateObject() |> Seq.isEmpty |> not
+                | _ -> false
+            Expect.isTrue populated "fixture cases exist"
 ]
