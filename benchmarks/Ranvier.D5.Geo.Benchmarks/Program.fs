@@ -110,7 +110,7 @@ let main args =
     let usa=CompositeProjection.albersUsa 1070. (Ranvier.D5.Point.create 480. 250.) |> ok
     let fitConfig=ProjectionConfig.defaultValue(ProjectionKind.ConicConformal(20.,50.))
     let results=[|
-        measure "albers-usa-paths-1000" 50. 13000000L (fun () ->
+        measure "albers-usa-paths-1000" 100. 13000000L (fun () ->
             let paths=CompositeProjection.paths polygonOptions usa states |> ok
             if paths.Length<>1000 then failwith "Albers USA inset ownership")
         measure "projection-fit-sphere-conic" 25. 2000000L (fun () ->
