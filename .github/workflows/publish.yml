@@ -5,7 +5,7 @@ on:
       tag:
         description: Existing reviewed release tag
         required: true
-        default: v0.1.0-alpha.8
+        default: v0.1.0-alpha.9
 permissions:
   contents: read
   id-token: write

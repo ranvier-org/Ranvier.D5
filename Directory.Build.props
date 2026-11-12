@@ -6,7 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarnOn>$(WarnOn);3390</WarnOn>
     <Deterministic>true</Deterministic>
-    <Version>0.1.0-alpha.8</Version>
+    <Version>0.1.0-alpha.9</Version>
     <Authors>Ranvier contributors</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/ranvier-org/Ranvier.D5</RepositoryUrl>
