@@ -1,0 +1,1103 @@
+{
+  "schema": 1,
+  "seed": 42,
+  "source": {
+    "d3-geo": "3.1.1"
+  },
+  "coordinates": "Input and rotation degrees; scale in screen units per raw projected unit; screen Y down. Orthographic visibility recorded separately from D3 point projection.",
+  "tolerance": 1e-9,
+  "cases": [
+    {
+      "kind": "Equirectangular",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "visible": true,
+      "projected": [
+        -2.9670597283903604,
+        1.0471975511965976
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "visible": true,
+      "projected": [
+        -1.5707963267948966,
+        0.5235987755982988
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "visible": true,
+      "projected": [
+        -0.7853981633974483,
+        -1.2217304763960306
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "visible": true,
+      "projected": [
+        0.5235987755982988,
+        -0.9599310885968813
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        1.5707963267948966,
+        0
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "visible": true,
+      "projected": [
+        2.9670597283903604,
+        -0.6981317007977318
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "visible": true,
+      "projected": [
+        -62.66449823501057,
+        367.6758743789975
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "visible": true,
+      "projected": [
+        153.9363798601669,
+        355.03728978809534
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "visible": true,
+      "projected": [
+        270.947638050042,
+        128.87123441622668
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        389.84379287016486,
+        276.231197282843
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "visible": true,
+      "projected": [
+        404.21366059595044,
+        134.9125239991988
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        595.506342015829,
+        217.62000145218656
+      ]
+    },
+    {
+      "kind": "Equirectangular",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "visible": true,
+      "projected": [
+        -26.716164106397855,
+        130.86252962292392
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "visible": true,
+      "projected": [
+        -2.9670597283903604,
+        1.3169578969248166
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "visible": true,
+      "projected": [
+        -1.5707963267948966,
+        0.5493061443340547
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "visible": true,
+      "projected": [
+        -0.7853981633974483,
+        -1.735415162668894
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "visible": true,
+      "projected": [
+        0.5235987755982988,
+        -1.1542345536088652
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        1.5707963267948966,
+        0
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "visible": true,
+      "projected": [
+        2.9670597283903604,
+        -0.7629096520666108
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "visible": true,
+      "projected": [
+        -62.66449823501057,
+        385.2840486971164
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "visible": true,
+      "projected": [
+        153.9363798601669,
+        366.9000217683845
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "visible": true,
+      "projected": [
+        270.947638050042,
+        107.23335565514284
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        389.84379287016486,
+        276.3809541033996
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "visible": true,
+      "projected": [
+        404.21366059595044,
+        116.81205021037277
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        595.506342015829,
+        217.26447384943725
+      ]
+    },
+    {
+      "kind": "Mercator",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "visible": true,
+      "projected": [
+        -26.716164106397855,
+        110.44937217679083
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "visible": false,
+      "projected": [
+        -0.08682408883346515,
+        0.8660254037844386
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "visible": true,
+      "projected": [
+        -0.8660254037844387,
+        0.49999999999999994
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "visible": true,
+      "projected": [
+        -0.2418447626479753,
+        -0.9396926207859083
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "visible": true,
+      "projected": [
+        0.28678821817552297,
+        -0.8191520442889918
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        1,
+        0
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "visible": false,
+      "projected": [
+        0.13302222155948895,
+        -0.6427876096865393
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "visible": false,
+      "projected": [
+        320.39223017997364,
+        353.9408395768178
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "visible": true,
+      "projected": [
+        241.57207855608263,
+        345.24504183837865
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "visible": true,
+      "projected": [
+        298.03231880258096,
+        145.14636688408154
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "visible": true,
+      "projected": [
+        387.8194133367313,
+        276.0828004423774
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "visible": true,
+      "projected": [
+        378.75083885021166,
+        148.95757488708978
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "visible": false,
+      "projected": [
+        459.5027783452404,
+        217.9684512431321
+      ]
+    },
+    {
+      "kind": "Orthographic",
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "visible": false,
+      "projected": [
+        299.82916084233295,
+        146.37937430168262
+      ]
+    }
+  ]
+}

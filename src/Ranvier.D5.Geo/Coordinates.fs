@@ -105,6 +105,65 @@ module Geodesic =
                     let struct(sine,cosine)=Math.SinCos(angle*t)
                     GeoMath.position struct(cosine*x+sine*tangentX,cosine*y+sine*tangentY,cosine*z+sine*tangentZ) |> Ok
 
+[<Struct>]
+type internal GeoArc = {
+    Start:GeoPosition
+    Finish:GeoPosition
+    Angle:float
+    X:float
+    Y:float
+    Z:float
+    TangentX:float
+    TangentY:float
+    TangentZ:float
+}
+
+module internal GeoArc =
+    let create from destination =
+        let start,finish=GeoPosition.normalize from,GeoPosition.normalize destination
+        let struct(x,y,z)=GeoMath.vector start
+        let initial={Start=start;Finish=finish;Angle=0.;X=x;Y=y;Z=z;TangentX=0.;TangentY=0.;TangentZ=0.}
+        if start.Latitude=finish.Latitude && (start.Longitude=finish.Longitude || abs start.Latitude=90.) then Ok initial
+        elif start.Latitude= -finish.Latitude && (abs(start.Longitude-finish.Longitude)=180. || abs start.Latitude=90.) then
+            Error [InvalidObservation "Antipodal endpoints require an explicit intermediate route point."]
+        else
+            let struct(angle,east,north)=GeoMath.arc start finish
+            let magnitude=Double.Hypot(east,north)
+            if magnitude=0. then Error [InvalidObservation "The initial great-circle direction is not representable."]
+            else
+                let east,north=east/magnitude,north/magnitude
+                let struct(sinLongitude,cosLongitude)=GeoMath.sinCosDegrees start.Longitude
+                let struct(sinLatitude,cosLatitude)=GeoMath.sinCosDegrees start.Latitude
+                Ok {initial with Angle=angle
+                                 TangentX= -east*sinLongitude-north*sinLatitude*cosLongitude
+                                 TangentY=east*cosLongitude-north*sinLatitude*sinLongitude
+                                 TangentZ=north*cosLatitude}
+
+    let atFraction amount arc =
+        if amount=0. then arc.Start
+        elif amount=1. then arc.Finish
+        elif arc.Angle=0. then arc.Start
+        else
+            let struct(sine,cosine)=Math.SinCos(arc.Angle*amount)
+            GeoMath.position struct(cosine*arc.X+sine*arc.TangentX,
+                                    cosine*arc.Y+sine*arc.TangentY,
+                                    cosine*arc.Z+sine*arc.TangentZ)
+
+    /// <summary>Returns the midpoint and both halves of an arc, rotating its frame instead of rebuilding each half from rounded degrees.</summary>
+    let bisect arc =
+        if arc.Angle=0. then struct(arc.Start,arc,arc)
+        else
+            let half=arc.Angle*0.5
+            let struct(sine,cosine)=Math.SinCos half
+            let x,y,z=cosine*arc.X+sine*arc.TangentX,cosine*arc.Y+sine*arc.TangentY,cosine*arc.Z+sine*arc.TangentZ
+            let middle=GeoMath.position struct(x,y,z)
+            let first={arc with Finish=middle;Angle=half}
+            let second={Start=middle;Finish=arc.Finish;Angle=half;X=x;Y=y;Z=z
+                        TangentX=cosine*arc.TangentX-sine*arc.X
+                        TangentY=cosine*arc.TangentY-sine*arc.Y
+                        TangentZ=cosine*arc.TangentZ-sine*arc.Z}
+            struct(middle,first,second)
+
 /// <summary>A longitude shift followed by spherical pitch and roll, in the D3 rotation convention.</summary>
 type GeoRotation = private { SinLongitude:float; CosLongitude:float; SinLatitude:float; CosLatitude:float; SinRoll:float; CosRoll:float }
 

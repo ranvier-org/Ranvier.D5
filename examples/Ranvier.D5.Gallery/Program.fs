@@ -213,6 +213,30 @@ let capture kind path =
             let after=graph.Run(fun () -> scene.Value)
             if Object.ReferenceEquals(before,after) then failwith "Geographic signal did not update the scene."
             {new IDisposable with member _.Dispose()=mounted.Dispose()}
+        elif kind="projections" then
+            let phase=graph.Run(fun () -> Api.createSignal 0.)
+            let scene=graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) ProjectionGallery.scene)
+            let mounted=mount host graph (fun () -> scene.Value)
+            // Samples painted pixels: fills, holes and clip behavior must survive the native renderer, before and after a signal update.
+            let verify value =
+                host.Cycle()
+                host.Frame()
+                let struct(w,h)=host.PaintSize
+                let pixels=Array.zeroCreate<byte>(w*h*4)
+                host.Paint pixels
+                for name,(point:Point),(r,g,b) in ProjectionGallery.probes value do
+                    let x,y=int(Math.Round point.X)+8,int(Math.Round point.Y)+8
+                    let i=(y*w+x)*4
+                    let actual=int pixels[i],int pixels[i+1],int pixels[i+2]
+                    let (ar,ag,ab)=actual
+                    if abs(ar-r)>12 || abs(ag-g)>12 || abs(ab-b)>12 then
+                        failwithf "Projection gallery %s at phase %.2f painted %A at (%d,%d), expected %A." name value actual x y (r,g,b)
+            verify 0.
+            let before=graph.Run(fun () -> scene.Value)
+            graph.Run(fun () -> phase.Value<-1.)
+            if Object.ReferenceEquals(before,graph.Run(fun () -> scene.Value)) then failwith "Projection signal did not update the scene."
+            verify 1.
+            {new IDisposable with member _.Dispose()=mounted.Dispose()}
         elif kind="linked" then
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
@@ -259,6 +283,16 @@ let main args =
         let mounted=mount window.Host window.Graph (fun () -> scene.Value)
         let timer=Stopwatch.StartNew()
         while window.Step() do window.Graph.Run(fun () -> phase.Value<-timer.Elapsed.TotalSeconds)
+        mounted.Dispose()
+    elif args.Length=2 && args[0]="--capture-projections" then
+        capture "projections" args[1]
+    elif Array.contains "--projections" args then
+        use window=Window.Create("Ranvier.D5 bounded projections",820,590)
+        let phase=window.Graph.Run(fun () -> Api.createSignal 0.)
+        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) ProjectionGallery.scene)
+        let mounted=mount window.Host window.Graph (fun () -> scene.Value)
+        let timer=Stopwatch.StartNew()
+        while window.Step() do window.Graph.Run(fun () -> phase.Value<-0.5-0.5*cos(timer.Elapsed.TotalSeconds*0.6))
         mounted.Dispose()
     elif args.Length=2 && args[0]="--capture-linked" then
         capture "linked" args[1]

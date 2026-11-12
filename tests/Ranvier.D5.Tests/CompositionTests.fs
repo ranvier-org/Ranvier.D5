@@ -114,6 +114,24 @@ let tests = testList "Radial and composition recipes" [
         | _ -> failwith "polygon region"
         Expect.equal (DensityChart.hexbin spec config (List.rev points) |> ok).Membership result.Membership "reorder"
         Expect.isError (DensityChart.hexbin {spec with MaxMarks=0} config points) "invalid budget"
+    testCase "hexbin hit clips bound each hexagon within the plot" <| fun _ ->
+        let config=HexbinConfig.create (Bounds.create 0. 0. 10. 10.) 1.
+        let points=[for x in 0..9 do for y in 0..9 -> {Id=sprintf "%d,%d" x y;Position=Point.create (float x+0.5) (float y+0.5);Weight=1.}]
+        let output=(DensityChart.hexbin (DensityChartSpec.create frame (fun _ -> Paint.currentColor)) config points |> ok).Chart
+        let plot=output.PlotBounds
+        Expect.isGreaterThan output.HitTargets.Length 1 "several bins"
+        for target in output.HitTargets do
+            match target.Geometry,target.Clip with
+            | HitRegion([polygon],[],anchor),Some clip ->
+                let xs,ys=polygon.Outer |> List.map(fun p -> p.X),polygon.Outer |> List.map(fun p -> p.Y)
+                let left,top=max (List.min xs) (Bounds.x plot),max (List.min ys) (Bounds.y plot)
+                let right,bottom=min (List.max xs) (Bounds.x plot+Bounds.width plot),min (List.max ys) (Bounds.y plot+Bounds.height plot)
+                Expect.equal clip (Bounds.create left top (right-left) (bottom-top)) "hexagon bounds intersect plot"
+                Expect.isTrue (HitTest.visibleAt anchor target) "anchor remains selectable"
+            | other -> failwithf "Unexpected hexbin target %A" other
+        let corner=Point.create (Bounds.x plot) (Bounds.y plot)
+        let far=output.HitTargets |> List.filter(fun target -> not (HitTest.contains corner target.Geometry))
+        Expect.isTrue (far |> List.exists(fun target -> not (HitTest.visibleAt corner target))) "distant targets reject by clip"
     testCase "aggregate identities change when the source lattice changes" <| fun _ ->
         let spec=DensityChartSpec.create frame (fun _ -> Paint.currentColor)
         let points=[{Id="a";Position=Point.create 0.1 0.1;Weight=1.}]

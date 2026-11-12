@@ -10,7 +10,7 @@ Functional-first visualization foundations for native F# applications. Compose i
 - **Ranvier.D5.Geo**: optional [geographic geometry, interchange and spherical kernels](docs/geographic-kernels.md); full projection and map-chart pipelines are still in development.
 - All packages have a **.Traced** variant. Use one variant throughout the dependency graph.
 
-Target: .NET 10. Version: **0.1.0-alpha.7**. APIs may change during alpha. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
+Target: .NET 10. Version: **0.1.0-alpha.8**. APIs may change during alpha. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
 
 ## A reactive scene
 

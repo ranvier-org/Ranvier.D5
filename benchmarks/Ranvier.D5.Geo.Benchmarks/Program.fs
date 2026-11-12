@@ -34,7 +34,116 @@ let main args =
     let polygons=GeoGeometry.MultiPolygon(List.replicate 10000 [ring])
     let document=GeoDocument.Geometry(GeoGeometry.MultiPoint(List.take 10000 points))
     let json=GeoJson.serialize document |> ok
+    let projections =
+        [ProjectionKind.Equirectangular;ProjectionKind.Mercator;ProjectionKind.Orthographic]
+        |> List.map (fun kind -> kind,Projection.create (ProjectionConfig.defaultValue kind) |> ok)
+    let projectionResults =
+        projections |> List.map (fun (kind,projection) ->
+            measure (sprintf "geo-project-%A-100000" kind) 50. 4000000L (fun () ->
+                let mutable count=0
+                let mutable checksum=0.
+                for point in points do
+                    match Projection.project projection point with
+                    | Some screen -> count<-count+1; checksum<-checksum+screen.X+screen.Y
+                    | None -> ()
+                if count=0 || not(Double.IsFinite checksum) then failwith "Projection output"))
+    let pointProjection=Projection.create (ProjectionConfig.defaultValue ProjectionKind.Equirectangular) |> ok
+    let pointGeometry=GeoGeometry.MultiPoint(List.take 10000 points)
+    let clippedPointGeometry=GeoGeometry.MultiPoint(List.replicate 1000 (p 0. 0.))
+    let clippedPointOptions={GeoPathOptions.defaultValue with PointRadius=2.;Precision=0.01;ClipExtent=Some(Ranvier.D5.Bounds.create 0. -3. 3. 6.)}
+    let seamLine=GeoGeometry.LineString[for index in 0..99999 -> p (if index%2=0 then 170. else -170.) 10.]
+    let hemisphereProjection=Projection.create (ProjectionConfig.defaultValue ProjectionKind.Orthographic) |> ok
+    let hemisphereLine=GeoGeometry.LineString[for index in 0..9999 -> p (if index%2=0 then 0. else 120.) 0.]
+    let rectangleLine=GeoGeometry.LineString[for index in 0..9999 -> p (if index%2=0 then -60. else 60.) 0.]
+    let rectangleOptions={GeoPathOptions.defaultValue with ClipExtent=Some(Ranvier.D5.Bounds.create -0.5 -0.5 1. 1.)}
+    let spheres=GeoGeometry.Collection(List.replicate 10000 GeoGeometry.Sphere)
+    let clippedSpheres=GeoGeometry.Collection(List.replicate 1000 GeoGeometry.Sphere)
+    let sphereOptions={GeoPathOptions.defaultValue with ClipExtent=Some(Ranvier.D5.Bounds.create -0.25 -0.25 0.5 0.5);Precision=0.01}
+    let polygonProjection=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Scale=100.} |> ok
+    let globeProjection=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Orthographic with Scale=100.} |> ok
+    let polygonOptions={GeoPathOptions.defaultValue with Precision=0.1}
+    let outer=[p -10. -10.;p -10. 10.;p 10. 10.;p 10. -10.;p -10. -10.]
+    let hole=[p -3. -3.;p 3. -3.;p 3. 3.;p -3. 3.;p -3. -3.]
+    let seamOuter=[p 170. -20.;p 170. 20.;p -170. 20.;p -170. -20.;p 170. -20.]
+    let seamHole=[p 175. -5.;p -175. -5.;p -175. 5.;p 175. 5.;p 175. -5.]
+    let mercatorProjection=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Mercator with Scale=100.} |> ok
+    let polarRing=[p -30. 80.;p -30. 89.;p 30. 89.;p 30. 80.;p -30. 80.]
+    let polarLine=GeoGeometry.LineString[for index in 0..9999 -> p 25. (if index%2=0 then -89. else 89.)]
+    let polygonCases=[
+        "geo-mercator-polar-polygons-1000",75.,12000000L,mercatorProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [polarRing])
+        "geo-polygons-holes-1000",50.,5000000L,polygonProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [outer;hole])
+        "geo-polygons-seam-holes-1000",75.,9000000L,polygonProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [seamOuter;seamHole])
+        "geo-polygons-globe-complements-1000",100.,20000000L,globeProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [List.rev outer])
+    ]
+    let polygonResults=polygonCases |> List.map(fun (name,limit,bytes,projection,geometry) ->
+        measure name limit bytes (fun () ->
+            let paths=GeoPath.project polygonOptions projection geometry |> ok
+            if paths.Length<>1000 then failwith "Polygon path ownership"))
+    let denseRing=[for index in 0..99999 do
+                       let angle= -float index*2.*Math.PI/100000.
+                       yield p (10.*cos angle) (10.*sin angle)
+                   yield p 10. 0.]
+    let densePolygon=GeoGeometry.Polygon[denseRing]
+    let denseClipOptions={polygonOptions with ClipExtent=Some(Ranvier.D5.Bounds.create -5. -20. 10. 40.)}
+    let concaveRing=[p -40. -40.;p -40. 40.;p -20. 40.;p -20. -20.;p 20. -20.;p 20. 40.;p 40. 40.;p 40. -40.;p -40. -40.]
+    let concavePolygons=GeoGeometry.MultiPolygon(List.replicate 1000 [concaveRing])
+    let radians=100.*Math.PI/180.
+    let concaveOptions={polygonOptions with ClipExtent=Some(Ranvier.D5.Bounds.create (-50.*radians) (-15.*radians) (100.*radians) (10.*radians))}
+    let planarProjection=IdentityProjection.create IdentityProjectionConfig.defaultValue |> ok
+    let planarLine=PlanarGeometry.LineString[for index in 0..99999 -> Ranvier.D5.Point.create (float index) (float(index%2))]
+    let planarPolygon=PlanarGeometry.Polygon[denseRing |> List.map(fun point -> Ranvier.D5.Point.create (point.Longitude*10.) (point.Latitude*10.))]
+    let planarPoints=PlanarGeometry.MultiPoint(List.replicate 1000 (Ranvier.D5.Point.create 0. 0.))
     let results=[|
+        measure "identity-line-100000" 50. 12000000L (fun () ->
+            let paths=PlanarPath.project GeoPathOptions.defaultValue planarProjection planarLine |> ok
+            if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100000 then failwith "Identity line output")
+        measure "identity-clipped-polygon-100000" 50. 8000000L (fun () ->
+            let paths=PlanarPath.project denseClipOptions planarProjection planarPolygon |> ok
+            if paths.Length<>1 then failwith "Identity clipped polygon output")
+        measure "identity-clipped-point-paths-1000" 50. 2000000L (fun () ->
+            let paths=PlanarPath.project clippedPointOptions planarProjection planarPoints |> ok
+            if paths.Length<>1000 then failwith "Identity clipped point output")
+        measure "geo-mercator-line-100000" 100. 16000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue mercatorProjection line |> ok
+            if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100000 then failwith "Mercator ordinary line count")
+        measure "geo-mercator-polar-line-10000" 150. 16000000L (fun () ->
+            let paths=GeoPath.project polygonOptions mercatorProjection polarLine |> ok
+            if paths.Length<>9999 then failwith "Mercator polar fragment count")
+        measure "geo-rectangle-polygon-100000" 150. 28000000L (fun () ->
+            let paths=GeoPath.project denseClipOptions polygonProjection densePolygon |> ok
+            if paths.Length<>1 then failwith "Dense clipped polygon count")
+        measure "geo-rectangle-concave-polygons-1000" 100. 12000000L (fun () ->
+            let paths=GeoPath.project concaveOptions polygonProjection concavePolygons |> ok
+            let rings=paths |> List.sumBy(fun path -> Ranvier.D5.Path.commands path |> List.sumBy(function Ranvier.D5.PathCommand.Close -> 1 | _ -> 0))
+            if paths.Length<>1000 || rings<>2000 then failwith "Disconnected rectangle polygon components")
+        measure "geo-polygon-100000" 150. 32000000L (fun () ->
+            let paths=GeoPath.project polygonOptions polygonProjection densePolygon |> ok
+            if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100001 then failwith "Dense polygon closure")
+        measure "geo-sphere-boundaries-10000" 50. 6000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue pointProjection spheres |> ok
+            if paths.Length<>10000 then failwith "World boundary count")
+        measure "geo-clipped-sphere-boundaries-1000" 50. 2000000L (fun () ->
+            let paths=GeoPath.project sphereOptions hemisphereProjection clippedSpheres |> ok
+            if paths.Length<>1000 then failwith "Clipped globe count")
+        measure "geo-rectangle-line-path-10000" 100. 5000000L (fun () ->
+            let paths=GeoPath.project rectangleOptions pointProjection rectangleLine |> ok
+            if paths.Length<>9999 then failwith "Rectangle fragment count")
+        measure "geo-hemisphere-path-10000" 100. 6000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue hemisphereProjection hemisphereLine |> ok
+            let commands=paths |> List.sumBy(fun path -> Ranvier.D5.Path.commands path |> List.length)
+            if paths.Length<>5000 || commands<>44996 then failwithf "Hemisphere output: %d paths, %d commands" paths.Length commands)
+        measure "geo-seam-path-100000" 250. 40000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue pointProjection seamLine |> ok
+            if paths.Length<>100000 || (paths |> List.sumBy(fun path -> Ranvier.D5.Path.commands path |> List.length))<>299998 then failwith "Seam fragment count")
+        measure "geo-line-path-100000" 100. 16000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue pointProjection line |> ok
+            if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100000 then failwith "Line path count")
+        measure "geo-clipped-point-paths-1000" 50. 4000000L (fun () ->
+            let paths=GeoPath.project clippedPointOptions pointProjection clippedPointGeometry |> ok
+            if paths.Length<>1000 then failwith "Clipped point path count")
+        measure "geo-point-paths-10000" 50. 8000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue pointProjection pointGeometry |> ok
+            if paths.Length<>10000 then failwith "Point path count")
         measure "geo-stream-100000" 10. 65536L (fun () ->
             let count=GeoStream.fold config (fun count event -> match event with GeoStreamEvent.Point _ -> count+1 | _ -> count) 0 geometry |> ok
             if count<>100000 then failwith "Stream count")
@@ -56,8 +165,12 @@ let main args =
         measure "geojson-read-10000" 100. 8000000L (fun () -> GeoJson.parse json |> ok |> ignore)
         measure "geojson-write-10000" 100. 8000000L (fun () -> GeoJson.serialize document |> ok |> ignore)
     |]
+    let results=Array.append results (List.toArray (projectionResults@polygonResults))
     let output=if args.Length=0 then "artifacts/geography-benchmarks.json" else args[0]
     let directory=Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore
     File.WriteAllText(output,JsonSerializer.Serialize(results,JsonSerializerOptions(WriteIndented=true)))
-    if results |> Array.exists(fun value -> value.P95Ms>value.LimitMs || value.MedianBytes>value.LimitBytes) then 1 else 0
+    let failures=results |> Array.filter(fun value -> value.P95Ms>value.LimitMs || value.MedianBytes>value.LimitBytes)
+    for value in failures do
+        printfn "FAIL %s: p95 %.3f ms (limit %.3f); allocation %d bytes (limit %d)" value.Name value.P95Ms value.LimitMs value.MedianBytes value.LimitBytes
+    if failures.Length>0 then 1 else 0

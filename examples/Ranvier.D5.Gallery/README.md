@@ -2,6 +2,15 @@
 
 Every image below comes from a working native WebCore view.
 
+## Bounded geographic projections
+
+![Native equirectangular, Mercator, orthographic and planar identity paths](../../docs/images/projections.png)
+
+Run `--projections`; capture with `--capture-projections artifacts/projections.bmp`.
+One signal rotates all four panels. The capture paints two phases and fails unless
+native pixels show filled polygons, open holes and the clipped Mercator polar cap.
+[Source](ProjectionGallery.fs) · [Pipeline contracts](../../docs/geographic-projections.md).
+
 ## Planar geometry
 
 ![Native hull, centroid and containment](../../docs/images/planar.png)
