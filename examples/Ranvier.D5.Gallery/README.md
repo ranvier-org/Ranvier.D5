@@ -2,6 +2,16 @@
 
 Every image below comes from a working native WebCore view.
 
+## Hierarchy chart family and explorer
+
+![Native hierarchy charts](../../docs/images/hierarchy-charts.png)
+
+![Native reactive hierarchy explorer](../../docs/images/hierarchy-explorer.png)
+
+Run `--hierarchy-charts` or `--hierarchy-explorer`. The explorer supports selection,
+collapse, drill-down and transitions using Ranvier signals and the owned worker.
+[Source](HierarchyExplorer.fs) · [Interaction and capture instructions](../../docs/hierarchy-charts.md).
+
 ## Hierarchy layouts
 
 ![Native hierarchy layout gallery](../../docs/images/hierarchy.png)

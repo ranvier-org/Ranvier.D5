@@ -13,11 +13,29 @@ module Renderer =
 
     type private RenderMark = { Mark:Mark; Namespace:string; Path:string list }
     type private RenderNode = { Node:SceneNode; Namespace:string; Path:string list }
+    type private Appearance = { Transform:string; Fill:string; Stroke:string; StrokeWidth:string; Opacity:string; FontSize:string; Family:string; Weight:string; Anchor:string; Baseline:string }
+    type private RenderRow = { Read:unit -> RenderMark; Appearance:unit -> Appearance }
     let private definitionId prefix (key:string) = prefix + (key |> Seq.map(fun code -> (int code).ToString("X4",CultureInfo.InvariantCulture)) |> String.concat "")
 
     let private row (dispatch: string list -> string -> Ranvier.Dom.Event -> unit) =
-        Component.define (fun _ (read: unit -> RenderMark) -> read) (fun t ->
-            let attribute name read = t.Attrs.attribute(name, fun (mark: unit -> RenderMark) -> Some(read (mark ()).Mark))
+        Component.define (fun _ (read: unit -> RenderMark) ->
+            let mutable cached=ValueNone
+            let appearance () =
+                let item=read()
+                let value=
+                    match cached with
+                    | ValueSome struct(mark,scope,value) when scope=item.Namespace && Mark.style mark=Mark.style item.Mark && Mark.textStyle mark=Mark.textStyle item.Mark && Mark.transform mark=Mark.transform item.Mark && Mark.fillDefinition mark=Mark.fillDefinition item.Mark -> value
+                    | _ ->
+                        let style,text=Mark.style item.Mark,Mark.textStyle item.Mark
+                        {Transform=Transform.toSvg(Mark.transform item.Mark)
+                         Fill=Mark.fillDefinition item.Mark |> Option.map(fun key -> "url(#"+definitionId item.Namespace key+")") |> Option.defaultWith(fun () -> Paint.toCss style.Fill)
+                         Stroke=Paint.toCss style.Stroke;StrokeWidth=number style.StrokeWidth;Opacity=number style.Opacity;FontSize=number style.FontSize
+                         Family=text.Family;Weight=string text.Weight;Anchor=text.Anchor;Baseline=text.Baseline}
+                cached<-ValueSome struct(item.Mark,item.Namespace,value)
+                value
+            {Read=read;Appearance=appearance}) (fun t ->
+            let attribute name read = t.Attrs.attribute(name, fun (row:RenderRow) -> Some(read (row.Read()).Mark))
+            let appearance name read = t.Attrs.attribute(name,fun (row:RenderRow) -> Some(read(row.Appearance())))
             let path =
                 t.element (HtmlTag "path")
                     [|
@@ -32,22 +50,22 @@ module Renderer =
                         attribute "y" (fun mark -> match Mark.geometry mark with TextGeometry(point, _) -> number point.Y | _ -> "0")
                         attribute "display" (fun mark -> match Mark.geometry mark with TextGeometry _ -> "inline" | _ -> "none")
                     |]
-                    [| t.text(fun read -> match Mark.geometry (read ()).Mark with TextGeometry(_, text) -> text | _ -> "") |]
+                    [| t.text(fun row -> match Mark.geometry (row.Read()).Mark with TextGeometry(_, text) -> text | _ -> "") |]
             t.element (HtmlTag "g") ([|
                 attribute "data-d5-key" Mark.key
-                attribute "transform" (Mark.transform >> Transform.toSvg)
-                t.Attrs.attribute("fill", fun read -> let item = read () in Some(Mark.fillDefinition item.Mark |> Option.map (fun key -> "url(#"+definitionId item.Namespace key+")") |> Option.defaultWith (fun () -> Paint.toCss (Mark.style item.Mark).Fill)))
-                attribute "stroke" (Mark.style >> fun style -> Paint.toCss style.Stroke)
-                attribute "stroke-width" (Mark.style >> fun style -> number style.StrokeWidth)
-                attribute "opacity" (Mark.style >> fun style -> number style.Opacity)
-                attribute "font-size" (Mark.style >> fun style -> number style.FontSize)
-                attribute "font-family" (Mark.textStyle >> fun style -> style.Family)
-                attribute "font-weight" (Mark.textStyle >> fun style -> string style.Weight)
-                attribute "text-anchor" (Mark.textStyle >> fun style -> style.Anchor)
-                attribute "dominant-baseline" (Mark.textStyle >> fun style -> style.Baseline)
-                t.Attrs.attribute("aria-label", fun read -> Mark.label (read ()).Mark)
+                appearance "transform" (fun style -> style.Transform)
+                appearance "fill" (fun style -> style.Fill)
+                appearance "stroke" (fun style -> style.Stroke)
+                appearance "stroke-width" (fun style -> style.StrokeWidth)
+                appearance "opacity" (fun style -> style.Opacity)
+                appearance "font-size" (fun style -> style.FontSize)
+                appearance "font-family" (fun style -> style.Family)
+                appearance "font-weight" (fun style -> style.Weight)
+                appearance "text-anchor" (fun style -> style.Anchor)
+                appearance "dominant-baseline" (fun style -> style.Baseline)
+                t.Attrs.attribute("aria-label", fun row -> Mark.label (row.Read()).Mark)
                 for event in ["click"; "pointerdown"; "pointermove"; "pointerup"; "pointercancel"; "wheel"; "keydown"] do
-                    t.Events.on(event, fun read payload -> dispatch (read()).Path event payload)
+                    t.Events.on(event, fun row payload -> dispatch (row.Read()).Path event payload)
             |]) [| path; text |])
 
     let private definitionRow =

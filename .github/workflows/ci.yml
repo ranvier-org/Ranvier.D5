@@ -59,6 +59,8 @@ jobs:
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-linked artifacts/linked.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-hierarchy artifacts/hierarchy.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-tiling artifacts/tiling.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-hierarchy-charts artifacts/hierarchy-charts.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-hierarchy-explorer artifacts/hierarchy-explorer.bmp
       - name: Paired performance regression gate
         shell: bash
         run: |
@@ -77,7 +79,7 @@ jobs:
           if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
           mkdir -p artifacts/consumer
           cat > artifacts/consumer/Consumer.fsproj <<EOF
-          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.0-alpha.2]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.0-alpha.2]" /></ItemGroup></Project>
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.0-alpha.3]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.0-alpha.3]" /></ItemGroup></Project>
           EOF
           cat > artifacts/consumer/Program.fs <<'EOF'
           open Ranvier

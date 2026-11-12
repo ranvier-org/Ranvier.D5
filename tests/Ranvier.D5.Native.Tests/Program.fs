@@ -56,12 +56,24 @@ let acceptance () =
         let struct(width, height) = host.PaintSize
         let before = Array.zeroCreate<byte> (width * height * 4)
         host.Paint before
-        graph.Run(fun () -> source.Value <- make [box "b" 90. (Paint.rgb 0 0 255); box "a" 20. (Paint.rgb 0 255 0)])
+        let updated=box "a" 20. (Paint.rgb 0 255 0)
+        let updated=updated |> Mark.withStroke (Paint.rgb 1 2 3) 2. |> Mark.withOpacity 0.75 |> Mark.withFontSize 18. |> Mark.withTransform(Transform.translate 1. 2.)
+        let updated=updated |> Mark.withTextStyle {Mark.textStyle updated with Family="serif";Weight=700;Anchor="middle";Baseline="central"}
+        graph.Run(fun () -> source.Value <- make [box "b" 90. (Paint.rgb 0 0 255); updated])
         host.Cycle()
         host.Frame()
         let retained = container.querySelector "[data-d5-key='a']"
         Expect.isTrue (Object.ReferenceEquals(original, retained)) "key retained"
         Expect.equal (retained.getAttribute "fill") "#00ff00" "paint updated"
+        Expect.equal (retained.getAttribute "stroke") "#010203" "stroke updated"
+        Expect.equal (retained.getAttribute "stroke-width") "2" "stroke width updated"
+        Expect.equal (retained.getAttribute "opacity") "0.75" "opacity updated"
+        Expect.equal (retained.getAttribute "font-size") "18" "font size updated"
+        Expect.equal (retained.getAttribute "font-family") "serif" "font family updated"
+        Expect.equal (retained.getAttribute "font-weight") "700" "font weight updated"
+        Expect.equal (retained.getAttribute "text-anchor") "middle" "text anchor updated"
+        Expect.equal (retained.getAttribute "dominant-baseline") "central" "text baseline updated"
+        Expect.equal (retained.getAttribute "transform") (Transform.toSvg(Transform.translate 1. 2.)) "transform updated"
         let after = Array.zeroCreate<byte> before.Length
         host.Paint after
         Expect.isFalse (before = after) "native pixels changed"

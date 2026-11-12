@@ -89,7 +89,7 @@ module Pack =
             let radii=Array.zeroCreate values.Length
             let x,y=Array.zeroCreate values.Length,Array.zeroCreate values.Length
             let own=values |> Array.mapi(fun i total -> max 0. (total-(index.Children[i] |> Seq.map(fun child -> values[child]) |> Data.sum)))
-            let leafRadius value=if maximum=0. then 1. else sqrt(value/maximum)
+            let leafRadius value=if maximum=0. then 1. else sqrt value / sqrt maximum
             let pack padding =
                 for i in index.Postorder do
                     let children=index.Children[i]

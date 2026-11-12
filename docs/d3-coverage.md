@@ -19,7 +19,7 @@ Baseline: alpha.1 / 52ef102. This ledger separates algorithms from native infras
 | force | Absent | Task 7 |
 | format | Caller-provided labels | Task 2 explicit culture/SI/percent/time formatting |
 | geo | Absent | Task 10 separate package |
-| hierarchy | Partial simple tree and slice-and-dice treemap | Task 5 |
+| hierarchy | Parent-table/forest validation; iterative tidy tree, cluster, partition, packing and five treemap modes; caller-owned resquarify; six chart recipes with signal-driven collapse/focus/selection | Task 5 delivered; packing uses conservative enclosure, not exact D3 coordinates |
 | interpolate | Anime scalar/color facilities; pure D5 Transition | Task 2 public reusable color interpolation, task 4 topology-aware scene transition |
 | path | Immutable SVG commands | Task 2 shapes use existing paths |
 | polygon | Absent | Task 6 |
@@ -65,8 +65,10 @@ transitions and bounded background layouts.
 
 The table above records baseline and planned ownership, not exhaustive parity.
 See [release validation](release-alpha.2.md) for tested scope and deliberate
-policies. Task 5–11 algorithms remain planned. Full locale/time parsers, all D3
-palette tables, geographic pipelines, spatial triangulation, forces, contours,
-flow layouts and hierarchy expansion are not claimed by this release.
+policies for alpha.2. The current hierarchy milestone adds task 5 construction,
+layouts and recipes, with [native snapshots and explicit limitations](hierarchy-charts.md).
+Tasks 6–11 remain planned. Full locale/time parsers, all D3 palette tables,
+geographic pipelines, spatial triangulation, forces, contours and flow layouts
+are not claimed by this milestone.
 
 Reference fixtures: `tests/fixtures/manifest.json`, exact npm lockfile and copied licenses in `tools/reference-fixtures/`. Generation is development-only. Numeric tolerance and coordinate conventions travel with the fixtures. Native ownership, topology errors and missing-data behavior are tested as D5 contracts rather than copied blindly from JavaScript.
