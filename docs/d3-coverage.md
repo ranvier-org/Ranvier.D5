@@ -19,7 +19,7 @@ Baseline: alpha.1 / 52ef102. This ledger separates algorithms from native infras
 | force | Absent | Task 7 |
 | format | Caller-provided labels | Task 2 explicit culture/SI/percent/time formatting |
 | geo | Absent | Task 10 separate package |
-| hierarchy | Partial simple tree and slice-and-dice treemap | Task 5 |
+| hierarchy | Parent-table/forest validation; iterative tidy tree, cluster, partition, packing and five treemap modes; caller-owned resquarify; six chart recipes with signal-driven collapse/focus/selection | Task 5 delivered; packing uses conservative enclosure, not exact D3 coordinates |
 | interpolate | Anime scalar/color facilities; pure D5 Transition | Task 2 public reusable color interpolation, task 4 topology-aware scene transition |
 | path | Immutable SVG commands | Task 2 shapes use existing paths |
 | polygon | Absent | Task 6 |

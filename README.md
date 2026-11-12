@@ -50,7 +50,7 @@ It renders a signal-driven line, donut, treemap and bars using the same scene pr
 
 ![Working native linked charts](docs/images/linked.png)
 
-See the [native example gallery](examples/Ranvier.D5.Gallery/README.md) for rendered snapshots and reproduction commands, including [hierarchy layouts](docs/hierarchy.md).
+See the [native example gallery](examples/Ranvier.D5.Gallery/README.md) for rendered snapshots and reproduction commands, including [hierarchy layouts](docs/hierarchy.md), [tiling and packing](docs/tiling.md), and the [reactive hierarchy explorer](docs/hierarchy-charts.md).
 
 ## Expansion packages and examples
 

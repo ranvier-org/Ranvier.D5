@@ -21,11 +21,35 @@ let capture kind path =
     use host = WebCoreHost.Create(820, 590)
     use graph = new Graph()
     let mounted:IDisposable =
-        if kind="linked" then
+        if kind="hierarchy-explorer" then
+            let owner,tick,state,worker=HierarchyExplorer.mount host graph
+            graph.Run(fun () -> state.Value<-{state.Value with Collapsed=set ["Signals"];Selected=set ["Scene"]})
+            let timer=Stopwatch.StartNew()
+            let mutable ready=false
+            while not ready && timer.Elapsed.TotalSeconds<5. do
+                host.Cycle()
+                host.Frame()
+                graph.Run(fun () -> tick timer.Elapsed.TotalMilliseconds)
+                ready<-graph.Run(fun () -> worker.LastGood |> Option.exists(fun output -> output.Semantics |> List.exists(fun semantic -> semantic.DataIds=["State"]) |> not))
+                if not ready then System.Threading.Thread.Yield() |> ignore
+            if not ready then failwith "Hierarchy worker failed to publish the collapsed state."
+            graph.Run(fun () -> tick (timer.Elapsed.TotalMilliseconds+500.))
+            host.Cycle()
+            host.Frame()
+            let selectedBounds=graph.Run(fun () -> worker.LastGood.Value.HitTargets |> List.pick(fun hit ->
+                match hit.DataIds,hit.Geometry with ["Scene"],Ranvier.D5.Charts.HitBounds bounds -> Some bounds | _ -> None))
+            let clickX=int(Bounds.x selectedBounds+Bounds.width selectedBounds/2.)+8
+            let clickY=int(Bounds.y selectedBounds+Bounds.height selectedBounds/2.)+8
+            host.Click(clickX,clickY) |> ignore
+            if graph.Run(fun () -> state.Value.Selected.Contains "Scene") then failwith "Native transition mark did not receive selection click."
+            host.Click(clickX,clickY) |> ignore
+            if graph.Run(fun () -> not(state.Value.Selected.Contains "Scene")) then failwith "Native transition selection did not toggle back."
+            owner :> IDisposable
+        elif kind="linked" then
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
         else
-            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene elif kind="tiling" then TilingGallery.scene else fun () -> Scenes.scene 0.)
+            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene elif kind="tiling" then TilingGallery.scene elif kind="hierarchy-charts" then HierarchyChartsGallery.scene else fun () -> Scenes.scene 0.)
             {new IDisposable with member _.Dispose()=mounted.Dispose()}
     host.Cycle()
     host.Frame()
@@ -64,6 +88,21 @@ let main args =
         capture "hierarchy" args[1]
     elif args.Length=2 && args[0]="--capture-tiling" then
         capture "tiling" args[1]
+    elif args.Length=2 && args[0]="--capture-hierarchy-charts" then
+        capture "hierarchy-charts" args[1]
+    elif args.Length=2 && args[0]="--capture-hierarchy-explorer" then
+        capture "hierarchy-explorer" args[1]
+    elif Array.contains "--hierarchy-charts" args then
+        use window = Window.Create("Ranvier.D5 hierarchy chart family",820,590)
+        let mounted=mount window.Host window.Graph HierarchyChartsGallery.scene
+        while window.Step() do ()
+        mounted.Dispose()
+    elif Array.contains "--hierarchy-explorer" args then
+        use window = Window.Create("Ranvier.D5 hierarchy explorer",820,590)
+        let owner,tick,_,_=HierarchyExplorer.mount window.Host window.Graph
+        let timer=Stopwatch.StartNew()
+        while window.Step() do window.Graph.Run(fun () -> tick timer.Elapsed.TotalMilliseconds)
+        owner.Dispose()
     elif Array.contains "--tiling" args then
         use window = Window.Create("Ranvier.D5 tiling layouts",820,590)
         let mounted=mount window.Host window.Graph TilingGallery.scene
