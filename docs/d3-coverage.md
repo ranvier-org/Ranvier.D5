@@ -67,7 +67,7 @@ The table above records baseline and planned ownership, not exhaustive parity.
 See [release validation](release-alpha.2.md) for tested scope and deliberate
 policies for alpha.2. The current hierarchy milestone adds task 5 construction,
 layouts and recipes, with [native snapshots and explicit limitations](hierarchy-charts.md).
-Tasks 6–11 remain planned. Full locale/time parsers, all D3 palette tables,
+Task 6 now includes robust planar predicates/polygon operations and an immutable quadtree with aggregate traversal; see [planar contracts](planar.md) and [quadtree contracts](quadtree.md). Triangulation/Voronoi and tasks 7–11 remain open. Full locale/time parsers, all D3 palette tables,
 geographic pipelines, spatial triangulation, forces, contours and flow layouts
 are not claimed by this milestone.
 

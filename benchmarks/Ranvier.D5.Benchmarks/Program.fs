@@ -55,6 +55,11 @@ let main args =
         results.Add(measure "orientation-100000" 10. 1000000L (fun () -> for i in 0..99999 do Predicates.orient2d points[i%9998] points[i%9998+1] (Point.create 200. 300.) |> ignore))
         results.Add(measure "orientation-exact-10000" 30. 10000000L (fun () -> for _ in 0..9999 do Predicates.orient2d (Point.create 0. 0.) (Point.create 1e-300 0.) (Point.create 0. 1e-300) |> ignore))
         results.Add(measure "polygon-hull-10000" 60. 20000000L (fun () -> Polygon.hull (Array.toList points) |> ignore))
+        let quadPoints=Array.init 100000 (fun i -> Point.create (float(i%1000)) (float(i/1000)))
+        results.Add(measure "quadtree-build-100000" 120. 60000000L (fun () -> Quadtree.build id (fun _ -> 1.) quadPoints |> ignore))
+        let quad=Quadtree.build id (fun _ -> 1.) quadPoints
+        results.Add(measure "quadtree-nearest-1000-in-100000" 25. 4000000L (fun () ->
+            for i in 0..999 do Quadtree.nearest (Point.create (float(i%1000)+0.2) (float(i%100)+0.3)) infinity quad |> ignore))
         let curvePoints=points |> Array.map Some |> Array.toList
         results.Add(measure "natural-10000" 100. 16000000L (fun () -> Curves.line CurveSpec.Natural curvePoints |> ignore))
         let chartData=[0..999]
