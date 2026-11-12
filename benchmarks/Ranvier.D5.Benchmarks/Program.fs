@@ -7,6 +7,7 @@ open System.Text.Json
 open Ranvier
 open Ranvier.D5
 open Ranvier.D5.View
+open Ranvier.D5.Charts
 open Ranvier.View
 open Ranvier.View.Dom
 open Ranvier.View.WebCore
@@ -46,6 +47,8 @@ let main args =
     let chartSpec=Ranvier.D5.Charts.ChartSpec.scatter (Ranvier.D5.Charts.ChartFrame.create 800. 600. "Benchmark") string
                     (Ranvier.D5.Charts.Encoding.create "X" (float >> Some)) (Ranvier.D5.Charts.Encoding.create "Y" (fun i -> Some(float(i%100))))
     results.Add(measure "scatter-chart-1000" 100. 16000000L (fun () -> Ranvier.D5.Charts.Chart.scatter chartSpec chartData |> Result.defaultWith (fun e -> failwithf "%A" e) |> ignore))
+    let histogramSpec={Ranvier.D5.Charts.HistogramSpec.Frame=chartSpec.Frame;Key=string;Value=Ranvier.D5.Charts.Encoding.create "Value" (float >> Some);Bins=BinRule.Count 100;Color=Paint.currentColor}
+    results.Add(measure "histogram-chart-10000" 100. 20000000L (fun () -> Ranvier.D5.Charts.Chart.histogram histogramSpec data |> Result.defaultWith (fun e -> failwithf "%A" e) |> ignore))
     let observations = Array.init 100000 (fun i -> float(i % 1000))
     results.Add(measure "statistics-100000" 100. 16000000L (fun () -> Statistics.variance observations |> ignore; Statistics.histogram BinRule.FreedmanDiaconis observations |> ignore))
     use host = WebCoreHost.Create(800, 600)
