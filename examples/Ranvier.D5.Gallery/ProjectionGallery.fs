@@ -7,6 +7,8 @@ let private ok = function Ok value -> value | Error errors -> failwithf "%A" err
 let private p longitude latitude=GeoPosition.create longitude latitude |> ok
 
 let private rgb (r,g,b)=Paint.rgb r g b
+/// <summary>A sampled pixel must match a color, or differ from it (a hole may show grid lines but never the fill).</summary>
+type Probe = Matches of (int*int*int) | Differs of (int*int*int)
 let oceanColor,landColor,planarColor,backgroundColor=(222,234,243),(74,135,102),(214,120,64),(255,255,255)
 let private ocean,land,planarFill=rgb oceanColor,rgb landColor,rgb planarColor
 let private ink=Paint.rgb 31 44 65
@@ -89,11 +91,11 @@ let scene phase =
 let probes phase =
     let equirectangular,mercator,orthographic,identity=projections phase
     let at projection longitude latitude=Projection.project projection (p longitude latitude) |> Option.get
-    ["equirectangular seam land",at equirectangular -145. 24.,landColor
-     "equirectangular seam hole",at equirectangular 165. 5.,oceanColor
-     "mercator polar cap",at mercator 15. 78.,landColor
-     "mercator below cap",at mercator 15. 66.5,oceanColor
-     "orthographic visible land",at orthographic 145. 25.,landColor
-     "orthographic visible hole",at orthographic 165. 5.,oceanColor
-     "planar ring",IdentityProjection.project identity (Point.create -80. 0.) |> Option.get,planarColor
-     "planar hole",IdentityProjection.project identity (Point.create 5. 3.) |> Option.get,backgroundColor]
+    ["equirectangular seam land",at equirectangular -145. 24.,Matches landColor
+     "equirectangular seam hole",at equirectangular 165. 5.,Matches oceanColor
+     "mercator polar cap",at mercator 15. 78.,Matches landColor
+     "mercator below cap",at mercator 15. 66.5,Matches oceanColor
+     "orthographic visible land",at orthographic 145. 25.,Matches landColor
+     "orthographic visible hole",at orthographic 165. 5.,Matches oceanColor
+     "planar ring",IdentityProjection.project identity (Point.create -80. 0.) |> Option.get,Matches planarColor
+     "planar hole",IdentityProjection.project identity (Point.create 5. 3.) |> Option.get,Matches backgroundColor]

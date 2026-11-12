@@ -18,7 +18,7 @@ Baseline: alpha.1 / 52ef102. This ledger separates algorithms from native infras
 | fetch | .NET/toolkit async IO | Reuse; no network engine |
 | force | Absent | Task 7 |
 | format | Caller-provided labels | Task 2 explicit culture/SI/percent/time formatting |
-| geo | Optional immutable coordinates, GeoJSON, bounded streams, graticules, spherical distance/interpolation/rotation and measurements | Task 10 J1 kernels and J2 bounded [projection paths](geographic-projections.md) (identity, equirectangular, Mercator, orthographic; preclipping, resampling, rejoining, viewport clipping) implemented; J3 projections/fit and J4 map charts remain open |
+| geo | Optional immutable coordinates, GeoJSON, bounded streams, graticules, spherical distance/interpolation/rotation and measurements | Task 10 J1 kernels and J2 bounded [projection paths](geographic-projections.md) (identity, equirectangular, Mercator, orthographic; preclipping, resampling, rejoining, viewport clipping) and J3 azimuthal, gnomonic, stereographic, conic, transverse Mercator, fitting and Albers USA implemented; J4 map charts remain open |
 | hierarchy | Parent-table/forest validation; iterative tidy tree, cluster, partition, packing and five treemap modes; caller-owned resquarify; six chart recipes with signal-driven collapse/focus/selection | Task 5 delivered; packing uses conservative enclosure, not exact D3 coordinates |
 | interpolate | Anime scalar/color facilities; pure D5 Transition | Task 2 public reusable color interpolation, task 4 topology-aware scene transition |
 | path | Immutable SVG commands | Task 2 shapes use existing paths |
