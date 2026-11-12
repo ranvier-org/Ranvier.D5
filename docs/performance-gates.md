@@ -85,3 +85,12 @@ tolerance. These measurements support compatibility within the performance
 budget, not a universal speedup or a proven explanation for runner variability.
 The native release also targets hover repainting; these scene-update workloads
 do not independently establish its pointer-motion improvement.
+
+The unbounded many-body force path skips nearest/farthest cell-distance cutoff
+calculations when MaxDistance is positive infinity. Finite cutoffs retain their
+existing exact traversal checks. Three alternating Windows Traced focused pairs
+measured median-time ratios of 0.7346 under default tiering and 0.8405 with fully
+optimized code, with unchanged allocations and bit-identical output positions
+and velocities for the 1,000-node/2,000-link fixture. The default-runtime samples
+remain noisy; this is measured kernel headroom, not proof that hosted-runner tail
+variation is eliminated. The 25 ms spatial-force p95 gate is unchanged.
