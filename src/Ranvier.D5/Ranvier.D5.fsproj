@@ -12,6 +12,8 @@
     <Compile Include="TimeTicks.fs" />
     <Compile Include="Format.fs" />
     <Compile Include="Geometry.fs" />
+    <Compile Include="Chord.fs" />
+    <Compile Include="Ribbon.fs" />
     <Compile Include="Predicates.fs" />
     <Compile Include="Polygon.fs" />
     <Compile Include="Mark.fs" />
@@ -44,6 +46,7 @@
     <PackageReference Include="Ranvier$(RanvierPackageSuffix)" Version="[0.1.1-preview.2]" />
     <PackageReference Include="Ranvier.Anime$(RanvierPackageSuffix)" Version="[0.1.0-rc.2]" />
     <PackageReference Include="Ranvier.Css$(RanvierPackageSuffix)" Version="[0.1.1-alpha.2]" />
+    <None Include="../../tools/reference-fixtures/licenses/d3-chord.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-shape.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-scale-chromatic.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-hierarchy.txt" Pack="true" PackagePath="licenses/" />

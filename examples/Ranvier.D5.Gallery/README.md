@@ -79,6 +79,14 @@ Capture with `--capture-network artifacts/network.bmp` or
 `--capture-bubbles artifacts/bubbles.bmp`.
 [Source](NetworkGallery.fs) and [contracts and measured limits](../../docs/network.md).
 
+## Chords and directed ribbons
+
+![Native chord and directed ribbon view](../../docs/images/chord.png)
+
+Run `--chord` for a signal-driven matrix; capture with
+`--capture-chord artifacts/chord.bmp`.
+[Source](ChordGallery.fs) and [layout contracts](../../docs/chord.md).
+
 ## Foundation scene
 
 ![Native foundation gallery](../../docs/images/gallery.png)

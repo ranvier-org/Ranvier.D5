@@ -67,6 +67,7 @@ jobs:
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-force artifacts/force.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-network artifacts/network.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-bubbles artifacts/bubbles.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-chord artifacts/chord.bmp
       - name: Paired performance regression gate
         shell: bash
         run: |
@@ -85,7 +86,7 @@ jobs:
           if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
           mkdir -p artifacts/consumer
           cat > artifacts/consumer/Consumer.fsproj <<EOF
-          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.0-alpha.4]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.0-alpha.4]" /></ItemGroup></Project>
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.0-alpha.5]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.0-alpha.5]" /></ItemGroup></Project>
           EOF
           cat > artifacts/consumer/Program.fs <<'EOF'
           open Ranvier
@@ -106,6 +107,8 @@ jobs:
           if (Force.step 1 force |> Force.snapshot).Nodes.Length <> 1 then failwith "Packed force failed"
           let networkSpec = Ranvier.D5.Charts.NetworkSpec.create(Ranvier.D5.Charts.ChartFrame.create 300. 200. "Packed network")
           Ranvier.D5.Charts.NetworkChart.network networkSpec forceGraph (Force.snapshot force) |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
+          let chords = Chord.layout ChordConfig.defaultValue [[1.]] |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          Ribbon.path (RibbonSpec.create 10. chords.Flows.Head) |> Path.toSvg |> ignore
           Ranvier.D5.View.ForceChunk.defaultValue |> ignore
           Ranvier.D5.View.Renderer.passive |> ignore
           graph.Dispose()
