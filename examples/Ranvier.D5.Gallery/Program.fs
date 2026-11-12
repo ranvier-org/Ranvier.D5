@@ -56,7 +56,7 @@ let capture kind path =
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
         else
-            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene elif kind="tiling" then TilingGallery.scene elif kind="hierarchy-charts" then HierarchyChartsGallery.scene elif kind="planar" then PlanarGallery.scene elif kind="quadtree" then (fun () -> QuadtreeGallery.scene(Point.create 410. 265.)) else fun () -> Scenes.scene 0.)
+            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene elif kind="tiling" then TilingGallery.scene elif kind="hierarchy-charts" then HierarchyChartsGallery.scene elif kind="planar" then PlanarGallery.scene elif kind="quadtree" then (fun () -> QuadtreeGallery.scene(Point.create 410. 265.)) elif kind="force" then (fun () -> ForceGallery.initial() |> Force.step 200 |> ForceGallery.scene) else fun () -> Scenes.scene 0.)
             {new IDisposable with member _.Dispose()=mounted.Dispose()}
     host.Cycle()
     host.Frame()
@@ -105,6 +105,16 @@ let main args =
         capture "quadtree" args[1]
     elif args.Length=2 && args[0]="--capture-spatial" then
         capture "spatial" args[1]
+    elif args.Length=2 && args[0]="--capture-force" then
+        capture "force" args[1]
+    elif Array.contains "--force" args then
+        use window=Window.Create("Ranvier.D5 force state",820,590)
+        let state=window.Graph.Run(fun () -> Api.createSignal(ForceGallery.initial()))
+        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> state.Value) ForceGallery.scene)
+        let mounted=mount window.Host window.Graph (fun () -> scene.Value)
+        while window.Step() do
+            window.Graph.Run(fun () -> if not(Force.isFinished state.Value) then state.Value<-Force.step 1 state.Value)
+        mounted.Dispose()
     elif Array.contains "--spatial" args then
         use window=Window.Create("Ranvier.D5 spatial picking",820,590)
         let owner,_=SpatialGallery.mount window.Host window.Graph
