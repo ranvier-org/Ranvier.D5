@@ -34,6 +34,16 @@ record scene construction, signal updates, host cycling, painting, and generatio
 0/1/2 collection counts. The first three rows are warmups. These diagnostics do
 not replace or relax the total-time and allocation gates.
 
+Runtime diagnostics accompany these phases in RuntimeSamples and
+NetworkRuntimeSamples, with columns in RuntimeColumns: process-wide GC pause
+time, total JIT compilation time, calling-thread JIT compilation time, current
+managed heap size, and the graph trace sequence count (zero in normal builds).
+The trace count grows with retained history because these workloads do not
+checkpoint their diagnostic logs. These counters help distinguish runtime and
+history costs; overlapping durations must not be subtracted from wall-clock
+timings. The probes remain inside the measured action, and gates still evaluate
+the whole action without adjustment.
+
 ```sh
 python -m unittest discover -s tools -p test_benchmark_comparison.py
 python tools/compare-benchmarks.py --traced true
@@ -44,3 +54,16 @@ Preserve failed-run artifacts. A passing repeat alone is not proof of a code fix
 use matched evidence and the phase diagnostics to distinguish renderer work,
 collection, compilation and host variability. Run the amended head through all
 cross-platform checks before merging or releasing.
+
+The retained renderer caches transform serialization separately from paint/text
+appearance and reuses the composed-leaf adapter for repeated reads of the same
+immutable node. Caches remain local to the mounted row and always read the reactive
+source before checking their keys. This preserves dependency tracking, keyed DOM
+identity and live event paths.
+
+Three alternating full-workload process pairs on Windows Traced reduced network
+update allocation by 1,104,880 bytes (about 8.3 percent) and flow update allocation
+by 528,880 bytes. The paired network median-time ratio was 0.981; this is an
+allocation improvement, not evidence of a large latency improvement or a macOS
+tail-latency fix. The network allocation gate is tightened from 32 MB to 13 MB;
+the 100 ms p95 gate and paired comparison tolerances remain unchanged.

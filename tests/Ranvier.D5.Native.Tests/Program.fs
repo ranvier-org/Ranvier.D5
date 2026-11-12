@@ -101,6 +101,17 @@ let acceptance () =
         host.Cycle()
         Expect.equal ((retained.querySelector "path").getAttribute "opacity") "0.75" "adding stroke restores combined opacity"
         Expect.equal ((retained.querySelector "path").getAttribute "fill-opacity") "1" "fill alpha resets for combined paint"
+        let moving = updated |> Mark.withTransform(Transform.translate 3. 4.)
+        graph.Run(fun () -> source.Value <- make [box "b" 90. (Paint.rgb 0 0 255); moving])
+        host.Cycle()
+        Expect.equal (retained.getAttribute "transform") (Transform.toSvg(Transform.translate 3. 4.)) "movement updates independently of appearance"
+        Expect.equal (retained.getAttribute "fill") "#00ff00" "movement preserves cached paint"
+        graph.Run(fun () -> source.Value <- make [box "b" 90. (Paint.rgb 0 0 255); moving |> Mark.withFill(Paint.rgb 7 8 9)])
+        host.Cycle()
+        Expect.equal (retained.getAttribute "fill") "#070809" "paint change at fixed transform invalidates appearance"
+        Expect.equal (retained.getAttribute "transform") (Transform.toSvg(Transform.translate 3. 4.)) "paint update preserves movement"
+        graph.Run(fun () -> source.Value <- make [box "b" 90. (Paint.rgb 0 0 255); updated])
+        host.Cycle()
         host.Click(40, 40) |> ignore
         Expect.isTrue (events.Contains ("a", "click")) "retained mark receives pointer event"
         let svg=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
