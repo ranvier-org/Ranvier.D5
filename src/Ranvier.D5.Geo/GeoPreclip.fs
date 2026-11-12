@@ -101,7 +101,7 @@ module internal GeoPreclip =
 
     let line projection spend sink (input:IReadOnlyList<GeoPosition>) =
         try
-            let sink=if Projection.kind projection=ProjectionKind.Mercator then mercatorBand spend sink else sink
+            let sink=if Projection.mercatorBand projection then mercatorBand spend sink else sink
             let cap=Projection.clipCircle projection
             let cylindrical=cap.IsNone
             let struct(_,capSine,capCosine)=cap |> ValueOption.defaultValue struct(0.,0.,0.)

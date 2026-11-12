@@ -1,0 +1,5385 @@
+{
+  "schema": 1,
+  "seed": 42,
+  "source": {
+    "d3-geo": "3.1.1"
+  },
+  "coordinates": "Input, parallels and rotation degrees; scale in screen units per raw projected unit; screen Y down. Transverse Mercator applies the D3 extra 90 degree roll and swapped center.",
+  "tolerance": 1e-9,
+  "cases": [
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -4.386912183184913,
+        -1.895701973042335
+      ],
+      "inverse": [
+        -170,
+        -60.00000000000001
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -2.121320343559642,
+        -0.15818671339513468
+      ],
+      "inverse": [
+        -89.99999999999999,
+        -29.999999999999993
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.3663025880777172,
+        -1.3951743808851873
+      ],
+      "inverse": [
+        -45,
+        70
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.3312823687993154,
+        -1.0431444249439614
+      ],
+      "inverse": [
+        29.999999999999996,
+        54.999999999999986
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1.6118548977353127,
+        -0.6676521592194644
+      ],
+      "inverse": [
+        90,
+        0
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        1.5506773414772275,
+        -2.1438403687890015
+      ],
+      "inverse": [
+        169.99999999999997,
+        40.00000000000001
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -2.1289327034343075
+      ],
+      "inverse": [
+        0,
+        89.5
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        2.299055851747029,
+        -1.3272069425079298
+      ],
+      "inverse": [
+        135,
+        -10.000000000000002
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        2.381280611795711,
+        -2.2691166942429772
+      ],
+      "inverse": [
+        179.5,
+        -5.000000000000007
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -168.04436661185014,
+        -6.784948337793622
+      ],
+      "inverse": [
+        -170,
+        -59.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        39.453948499668115,
+        314.23360906285507
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999993
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        291.055178735275,
+        121.42373948362379
+      ],
+      "inverse": [
+        -45.000000000000014,
+        69.99999999999997
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        400.56394384731516,
+        277.03980749436386
+      ],
+      "inverse": [
+        -9.54166404439055e-15,
+        2.067360542951286e-14
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        380.6910332197181,
+        127.35336448530867
+      ],
+      "inverse": [
+        29.999999999999993,
+        55.00000000000003
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        556.0780111898798,
+        101.95358444405929
+      ],
+      "inverse": [
+        90.00000000000001,
+        3.975693351829396e-15
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        156.63941041527983,
+        -12.643417841400975
+      ],
+      "inverse": [
+        169.99999999999997,
+        39.99999999999998
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        300.6830753501692,
+        65.23411394426174
+      ],
+      "inverse": [
+        -1.1418191306454024e-12,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        615.7658998577017,
+        5.691383599727544
+      ],
+      "inverse": [
+        135,
+        -10.000000000000018
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        30,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        46.317523988210894,
+        -0.3263352921356386
+      ],
+      "inverse": [
+        179.5,
+        -4.999999999999968
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -4.227317166329004,
+        -2.6352260099071616
+      ],
+      "inverse": [
+        -169.99999999999997,
+        -59.999999999999986
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -2.1650498710303974,
+        -0.31379024181847925
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999993
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.32014233986963203,
+        -1.3381513096580862
+      ],
+      "inverse": [
+        -45,
+        70
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        -1.2722218725854067e-14
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.30491520040850606,
+        -1.0188370609505062
+      ],
+      "inverse": [
+        30.000000000000004,
+        54.999999999999986
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1.5740357757231855,
+        -0.7716786299636238
+      ],
+      "inverse": [
+        90.00000000000001,
+        -1.2722218725854067e-14
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        1.2642460281377053,
+        -2.1837805245854405
+      ],
+      "inverse": [
+        170.00000000000003,
+        39.99999999999998
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -1.9061807201865228
+      ],
+      "inverse": [
+        0,
+        89.5
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        2.159150194317518,
+        -1.5459848236131217
+      ],
+      "inverse": [
+        135,
+        -10.000000000000014
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        2.0309498964091897,
+        -2.5041797404992217
+      ],
+      "inverse": [
+        179.5,
+        -4.999999999999995
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -137.99886609914176,
+        -83.1330308183758
+      ],
+      "inverse": [
+        -170.00000000000003,
+        -59.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        22.649995719471235,
+        297.81617965189406
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999996
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        294.0449024082032,
+        124.49879834735762
+      ],
+      "inverse": [
+        -45.00000000000003,
+        69.99999999999997
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        402.15740596928003,
+        276.72769157824047
+      ],
+      "inverse": [
+        -9.54166404439055e-15,
+        -9.54166404439055e-15
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        377.38380187383405,
+        129.91210804685988
+      ],
+      "inverse": [
+        29.99999999999998,
+        55.000000000000014
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        542.1002229353433,
+        88.05491684799449
+      ],
+      "inverse": [
+        90.00000000000001,
+        3.975693351829396e-15
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        187.76923606056687,
+        -12.802560213881463
+      ],
+      "inverse": [
+        170.00000000000003,
+        39.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        304.84290222366684,
+        74.09113899263022
+      ],
+      "inverse": [
+        -1.2340552164078445e-12,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        582.6354367023316,
+        -17.197650775674333
+      ],
+      "inverse": [
+        134.99999999999997,
+        -9.999999999999993
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        20,
+        50
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        80.57858877858476,
+        -24.541948643643366
+      ],
+      "inverse": [
+        179.50000000000003,
+        -5
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -1.3496012039429488,
+        2.0619528527464626
+      ],
+      "inverse": [
+        -170,
+        -59.999999999999986
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -1.221463858700303,
+        0.9460407745679476
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999993
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -1.7182868928856279,
+        -2.440137510702374
+      ],
+      "inverse": [
+        -45,
+        70
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.9028957680700058,
+        -1.4826429399902286
+      ],
+      "inverse": [
+        29.999999999999996,
+        54.999999999999986
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1.5448574282855883,
+        0.5392421459053345
+      ],
+      "inverse": [
+        90,
+        0
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        3.284301694009264,
+        1.4590448595336507
+      ],
+      "inverse": [
+        170,
+        40.00000000000003
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -22.874573816022227
+      ],
+      "inverse": [
+        0,
+        89.5
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        1.947290261950788,
+        1.2527179063160763
+      ],
+      "inverse": [
+        135.00000000000003,
+        -10.000000000000039
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        2.3278572842066017,
+        1.9345457666224521
+      ],
+      "inverse": [
+        179.5,
+        -4.999999999999995
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        124.72045695175606,
+        520.6382811038956
+      ],
+      "inverse": [
+        -169.99999999999997,
+        -59.999999999999986
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        206.88613551866246,
+        391.99505933787736
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999993
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        224.95549904548702,
+        68.52111509394146
+      ],
+      "inverse": [
+        -45,
+        70
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        386.25493699481945,
+        281.32246041862504
+      ],
+      "inverse": [
+        -1.2722218725854067e-14,
+        2.067360542951286e-14
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        443.54225013217126,
+        84.79245166106745
+      ],
+      "inverse": [
+        29.999999999999993,
+        55.000000000000014
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        607.5639436610091,
+        332.0201648319877
+      ],
+      "inverse": [
+        90.00000000000003,
+        3.1805546814635168e-15
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        -144.6444153993374,
+        372.8405303741365
+      ],
+      "inverse": [
+        170,
+        39.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        162.67940173581414,
+        -125.08165313905766
+      ],
+      "inverse": [
+        -1.1418191306454024e-12,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        660.5045778214308,
+        447.1337521423484
+      ],
+      "inverse": [
+        134.99999999999997,
+        -10.000000000000018
+      ]
+    },
+    {
+      "kind": "ConicConformal",
+      "parallels": [
+        -10,
+        -40
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        9.817500786209223,
+        456.1176184548699
+      ],
+      "inverse": [
+        179.5,
+        -5.000000000000006
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -2.9309355905985446,
+        -1.4474556625378026
+      ],
+      "inverse": [
+        -170,
+        -60.00000000000007
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -1.7387051415091987,
+        -0.16006656557107268
+      ],
+      "inverse": [
+        -90,
+        -29.99999999999996
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.3324131536607573,
+        -1.3699435055629485
+      ],
+      "inverse": [
+        -44.99999999999999,
+        69.99999999999997
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.27984298817733605,
+        -1.0963388322378604
+      ],
+      "inverse": [
+        29.999999999999996,
+        54.99999999999998
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1.452449088699319,
+        -0.5139276077064396
+      ],
+      "inverse": [
+        89.99999999999999,
+        0
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        1.4751990198476437,
+        -1.8755665584227115
+      ],
+      "inverse": [
+        169.99999999999997,
+        39.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -1.4639975934148797
+      ],
+      "inverse": [
+        0,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        2.1109856850032553,
+        -1.01359270049024
+      ],
+      "inverse": [
+        135,
+        -10.000000000000009
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        2.3402256270437873,
+        -1.8002522967785226
+      ],
+      "inverse": [
+        179.5,
+        -4.999999999999989
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -46.942189938001206,
+        56.04820602122675
+      ],
+      "inverse": [
+        -170.00000000000006,
+        -59.999999999999986
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        119.50031026744918,
+        269.7506362488143
+      ],
+      "inverse": [
+        -89.99999999999997,
+        -30.000000000000053
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        300.8197221736894,
+        112.49781620468494
+      ],
+      "inverse": [
+        -44.999999999999986,
+        70
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        394.50615908233567,
+        271.3824452542301
+      ],
+      "inverse": [
+        -6.3611093629270335e-15,
+        -9.54166404439055e-15
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        376.6032349931957,
+        118.72193079000436
+      ],
+      "inverse": [
+        29.99999999999998,
+        54.99999999999998
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        541.1473922939175,
+        127.09191278883677
+      ],
+      "inverse": [
+        90.00000000000001,
+        7.156248033292914e-15
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        174.34294383876346,
+        11.160341174847417
+      ],
+      "inverse": [
+        170,
+        39.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        306.2387917323036,
+        68.72479616996907
+      ],
+      "inverse": [
+        -2.684388151155208e-12,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        608.4165647329795,
+        52.45054839556374
+      ],
+      "inverse": [
+        135,
+        -9.999999999999982
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        59.22721137555334,
+        48.46218238326867
+      ],
+      "inverse": [
+        179.5,
+        -4.999999999999992
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -2.5066705305409225,
+        -2.4831526918208593
+      ],
+      "inverse": [
+        -169.99999999999997,
+        -60.00000000000006
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -1.8820279027850466,
+        -0.573649604570083
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999986
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.3533672327235444,
+        -1.2385313091914294
+      ],
+      "inverse": [
+        -45,
+        70
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.3105056483344865,
+        -0.9774200903402985
+      ],
+      "inverse": [
+        29.999999999999996,
+        54.999999999999986
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1.5650223409801776,
+        -0.8018161804796591
+      ],
+      "inverse": [
+        89.99999999999999,
+        0
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        1.2294444385746528,
+        -2.2004126285006143
+      ],
+      "inverse": [
+        169.99999999999997,
+        39.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -1.2952981513083752
+      ],
+      "inverse": [
+        0,
+        89.4999999999994
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        2.04886581779489,
+        -1.61776618439664
+      ],
+      "inverse": [
+        135,
+        -9.999999999999995
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        1.9015761378183549,
+        -2.553796349980897
+      ],
+      "inverse": [
+        179.5,
+        -4.999999999999991
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        4.310043525558115,
+        -79.29667746940868
+      ],
+      "inverse": [
+        -170.00000000000006,
+        -59.999999999999986
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        92.80270682592925,
+        218.50143227121978
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999996
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        292.9648228147816,
+        126.84690236966955
+      ],
+      "inverse": [
+        -44.999999999999986,
+        70
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        399.9969082515913,
+        263.9118227386479
+      ],
+      "inverse": [
+        9.54166404439055e-15,
+        3.657637883683044e-14
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        377.66903130200626,
+        132.0651576417617
+      ],
+      "inverse": [
+        29.99999999999998,
+        55.000000000000014
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        543.7750998014079,
+        83.66553368964694
+      ],
+      "inverse": [
+        90,
+        7.951386703658792e-16
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        190.53544668561074,
+        -15.893616238887773
+      ],
+      "inverse": [
+        170,
+        39.99999999999998
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        300.49992184350805,
+        87.51321941732633
+      ],
+      "inverse": [
+        8.587497639951495e-14,
+        89.4999999999994
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        577.2738213027928,
+        -26.491111379838742
+      ],
+      "inverse": [
+        135,
+        -9.999999999999982
+      ]
+    },
+    {
+      "kind": "ConicEqualArea",
+      "parallels": [
+        29.5,
+        45.5
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        86.48008399774133,
+        -34.194510510111
+      ],
+      "inverse": [
+        179.5,
+        -5.000000000000008
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -3.104350705392185,
+        -1.6120973737852315
+      ],
+      "inverse": [
+        -170,
+        -59.99999999999996
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -1.7845261007428022,
+        -0.1788381230870113
+      ],
+      "inverse": [
+        -90.00000000000001,
+        -29.999999999999993
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.31963307960791143,
+        -1.2823740165295745
+      ],
+      "inverse": [
+        -45,
+        70
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.28067088864498585,
+        -0.9951988274422303
+      ],
+      "inverse": [
+        29.999999999999996,
+        55
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1.4276208805942419,
+        -0.561949518948248
+      ],
+      "inverse": [
+        90.00000000000001,
+        0
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        1.379711424618749,
+        -1.8800405563452116
+      ],
+      "inverse": [
+        170,
+        40.00000000000001
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -1.562069680534925
+      ],
+      "inverse": [
+        0,
+        89.5
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        2.047180232640006,
+        -1.1160866185889378
+      ],
+      "inverse": [
+        135,
+        -9.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        2.1755345655319904,
+        -1.9310043488517044
+      ],
+      "inverse": [
+        179.5,
+        -5.0000000000000195
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -56.147522423036435,
+        33.19693590923066
+      ],
+      "inverse": [
+        -170,
+        -59.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        105.23931887682951,
+        278.3216110601832
+      ],
+      "inverse": [
+        -90,
+        -30.000000000000004
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        300.75462281383335,
+        125.54311990019102
+      ],
+      "inverse": [
+        -44.99999999999997,
+        70
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        395.12551855059394,
+        271.70786042461725
+      ],
+      "inverse": [
+        -1.2722218725854067e-14,
+        -6.3611093629270335e-15
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        376.82764263711283,
+        131.1100499953904
+      ],
+      "inverse": [
+        30.000000000000018,
+        55.000000000000014
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        534.6548548016004,
+        121.31144618610224
+      ],
+      "inverse": [
+        90.00000000000003,
+        1.5902773407317584e-14
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        182.21267718114436,
+        15.693734849827138
+      ],
+      "inverse": [
+        170,
+        39.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        307.8009270701206,
+        79.75612752615615
+      ],
+      "inverse": [
+        -1.1418191306454024e-12,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        592.4794477453677,
+        40.17908230305338
+      ],
+      "inverse": [
+        135.00000000000003,
+        -10.000000000000016
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        0,
+        60
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        76.09399080156777,
+        35.32214258085193
+      ],
+      "inverse": [
+        179.5,
+        -4.999999999999968
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -2.932100973967876,
+        0.6780662366185624
+      ],
+      "inverse": [
+        -170.00000000000006,
+        -59.99999999999993
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -1.4948193791807267,
+        0.42434603747399535
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999964
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.6334239830949326,
+        -1.24273633358529
+      ],
+      "inverse": [
+        -45,
+        70.00000000000003
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.43402245381269744,
+        -0.9695246184162691
+      ],
+      "inverse": [
+        29.999999999999996,
+        55.00000000000004
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        1.4255929481037406,
+        -0.09465625447506731
+      ],
+      "inverse": [
+        90,
+        -1.0177774980683254e-13
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        2.4995073234624052,
+        -1.0128024547378764
+      ],
+      "inverse": [
+        170.00000000000006,
+        39.99999999999996
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -1.5620696805349255
+      ],
+      "inverse": [
+        0,
+        89.50000000000003
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        2.1650420583933956,
+        -0.04149478986513522
+      ],
+      "inverse": [
+        135,
+        -9.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        2.841300944229513,
+        -0.2906515675766812
+      ],
+      "inverse": [
+        179.5,
+        -4.999999999999995
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -49.410266053772546,
+        319.147496894227
+      ],
+      "inverse": [
+        -170,
+        -59.99999999999999
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        161.21226282284022,
+        345.054006349912
+      ],
+      "inverse": [
+        -90,
+        -30.000000000000004
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        284.1651963818877,
+        127.91057852619747
+      ],
+      "inverse": [
+        -45,
+        70.00000000000001
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        388.14626002535186,
+        275.56266448429994
+      ],
+      "inverse": [
+        -3.81666561775622e-14,
+        -1.335832966214677e-13
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        395.4488240057582,
+        133.8671173455686
+      ],
+      "inverse": [
+        30.00000000000008,
+        55.0000000000001
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        567.9984231390991,
+        199.16538680415368
+      ],
+      "inverse": [
+        90.00000000000004,
+        -2.3854160110976374e-14
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        38.232047838923165,
+        96.75317437193928
+      ],
+      "inverse": [
+        170.00000000000003,
+        39.999999999999936
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        278.7520983596777,
+        81.50620552347411
+      ],
+      "inverse": [
+        4.010679453325494e-12,
+        89.4999999999994
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        666.7470621997215,
+        195.7859970800662
+      ],
+      "inverse": [
+        135.00000000000003,
+        -10.00000000000003
+      ]
+    },
+    {
+      "kind": "ConicEquidistant",
+      "parallels": [
+        -20,
+        30
+      ],
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        3.736505884265398,
+        199.1491495946361
+      ],
+      "inverse": [
+        179.49999999999997,
+        -5.000000000000056
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        -0.08704325320171176,
+        2.0877916818966105
+      ],
+      "inverse": [
+        -170,
+        -60.00000000000001
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        -1.316957896924817,
+        1.5707963267948966
+      ],
+      "inverse": [
+        -90,
+        -29.999999999999996
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        -0.24673255078682832,
+        -1.318897231156064
+      ],
+      "inverse": [
+        -45.00000000000001,
+        70.00000000000001
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        0
+      ],
+      "inverse": [
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        0.2950631169483293,
+        -1.0256860445560685
+      ],
+      "inverse": [
+        30.000000000000004,
+        55
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": false,
+      "projected": null,
+      "inverse": null
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        0.13381526390680368,
+        -2.4359130829509152
+      ],
+      "inverse": [
+        170,
+        39.99999999999999
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        0,
+        -1.562069680534925
+      ],
+      "inverse": [
+        -4.020176234344449e-13,
+        89.50000000000014
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        0.860206866770216,
+        2.897212661127698
+      ],
+      "inverse": [
+        135,
+        -10.000000000000002
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 1,
+      "translate": [
+        0,
+        0
+      ],
+      "center": [
+        0,
+        0
+      ],
+      "rotate": [
+        0,
+        0,
+        0
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        0.008693547402533858,
+        3.054322884869887
+      ],
+      "inverse": [
+        179.5,
+        -5.000000000000004
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -170,
+        -60
+      ],
+      "defined": true,
+      "projected": [
+        319.9838039515114,
+        558.8497571764783
+      ],
+      "inverse": [
+        -170.00000000000003,
+        -59.99999999999997
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -90,
+        -30
+      ],
+      "defined": true,
+      "projected": [
+        218.09858167596025,
+        433.7945169812431
+      ],
+      "inverse": [
+        -89.99999999999999,
+        -30.000000000000004
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        -45,
+        70
+      ],
+      "defined": true,
+      "projected": [
+        296.5951358646846,
+        120.99200067482963
+      ],
+      "inverse": [
+        -45,
+        69.99999999999997
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        390.17685694967935,
+        278.22760756772686
+      ],
+      "inverse": [
+        -1.5902773407317584e-14,
+        1.1131941385122309e-14
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        30,
+        55
+      ],
+      "defined": true,
+      "projected": [
+        379.8724814313581,
+        126.25274237674608
+      ],
+      "inverse": [
+        29.999999999999964,
+        55
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        90,
+        0
+      ],
+      "defined": true,
+      "projected": [
+        542.5686680320814,
+        -84.78973163187123
+      ],
+      "inverse": [
+        90.00000000000001,
+        1.5902773407317584e-15
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        170,
+        40
+      ],
+      "defined": true,
+      "projected": [
+        298.54413964690076,
+        -44.5507216277461
+      ],
+      "inverse": [
+        169.99999999999997,
+        39.99999999999999
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        0,
+        89.5
+      ],
+      "defined": true,
+      "projected": [
+        313.91789703155007,
+        76.68902532175613
+      ],
+      "inverse": [
+        6.329303816112399e-13,
+        89.4999999999994
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        135,
+        -10
+      ],
+      "defined": true,
+      "projected": [
+        393.3313712073594,
+        -152.44863466413557
+      ],
+      "inverse": [
+        135,
+        -10
+      ]
+    },
+    {
+      "kind": "TransverseMercator",
+      "parallels": null,
+      "scale": 135,
+      "translate": [
+        360,
+        240
+      ],
+      "center": [
+        10,
+        5
+      ],
+      "rotate": [
+        20,
+        -15,
+        10
+      ],
+      "point": [
+        179.5,
+        -5
+      ],
+      "defined": true,
+      "projected": [
+        286.2009775940083,
+        -158.05397323220456
+      ],
+      "inverse": [
+        179.5,
+        -4.999999999999998
+      ]
+    }
+  ]
+}

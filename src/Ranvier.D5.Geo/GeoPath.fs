@@ -102,6 +102,37 @@ module GeoPath =
                     if count > options.MaxOutputPoints-emitted then raise(Rejected(BudgetExceeded "Geographic projection exceeds its output-point budget."))
                     emitted <- emitted+count
                 let circle=ProjectedPath.circle options (fun () -> options.MaxWork-work) spend reserve paths.Add
+                let polygonScreen point =
+                    match Projection.projectRotatedValue projection point with
+                    | ValueSome value -> value
+                    | ValueNone -> raise(Rejected(InvalidObservation "Polygon contains an undefined projected vertex."))
+                let makeSampler emit =
+                    let segment=resampler options projection spend polygonScreen emit
+                    fun first last -> segment 0 first last (polygonScreen first) (polygonScreen last)
+                // Intersects rejoined rings with the viewport and publishes them as one compound path.
+                let addRings rings =
+                    let rings =
+                        match options.ClipExtent with
+                        | None -> rings
+                        | Some clip ->
+                            match GeoRectangle.polygons options.MaxBufferedPoints spend clip rings with
+                            | Ok clipped -> clipped
+                            | Error error -> raise(Rejected error)
+                    let commands=ResizeArray<PathCommand>()
+                    for (ring:Point array) in rings do
+                        reserve ring.Length
+                        commands.Add(MoveTo ring[0])
+                        for index=1 to ring.Length-1 do
+                            spend 1L
+                            commands.Add(LineTo ring[index])
+                        spend 1L
+                        commands.Add Close
+                    if commands.Count>0 then
+                        let mutable owned=[]
+                        for index=commands.Count-1 downto 0 do
+                            spend 1L
+                            owned<-commands[index]::owned
+                        paths.Add(Path.ofCommands owned)
                 let sphere () =
                     let origin =
                         match GeoPosition.create 0. 0. |> Result.bind(fun value ->
@@ -113,9 +144,13 @@ module GeoPath =
                     let scale=Projection.scale projection
                     match Projection.kind projection with
                     | _ when (Projection.clipCircle projection).IsSome -> circle (scale*Projection.clipPlaneRadius projection) origin
-                    | kind ->
+                    | _ when Projection.conic projection ->
+                        match GeoPolygon.outline projection options.Precision options.MaxSubdivisionDepth options.MaxBufferedPoints spend makeSampler with
+                        | Ok rings -> addRings rings
+                        | Error error -> raise(Rejected error)
+                    | _ ->
                         let halfWidth=scale*Math.PI
-                        let halfHeight=if kind=ProjectionKind.Mercator then halfWidth else halfWidth/2.
+                        let halfHeight=if Projection.mercatorBand projection then halfWidth else halfWidth/2.
                         let mutable left=origin.X-halfWidth
                         let mutable right=origin.X+halfWidth
                         let mutable top=origin.Y-halfHeight
@@ -210,38 +245,9 @@ module GeoPath =
                         | Ok () -> ()
                         | Error error -> raise(Rejected error)
                 let finishPolygon () =
-                    let screen point =
-                        match Projection.projectRotatedValue projection point with
-                        | ValueSome value -> value
-                        | ValueNone -> raise(Rejected(InvalidObservation "Polygon contains an undefined projected vertex."))
-                    let makeSampler emit =
-                        let segment=resampler options projection spend screen emit
-                        fun first last -> segment 0 first last (screen first) (screen last)
                     match GeoPolygon.project projection options.Precision options.MaxSubdivisionDepth options.MaxBufferedPoints spend makeSampler (polygonInput.ToArray()) with
                     | Error error -> raise(Rejected error)
-                    | Ok rings ->
-                        let rings =
-                            match options.ClipExtent with
-                            | None -> rings
-                            | Some clip ->
-                                match GeoRectangle.polygons options.MaxBufferedPoints spend clip rings with
-                                | Ok clipped -> clipped
-                                | Error error -> raise(Rejected error)
-                        let commands=ResizeArray<PathCommand>()
-                        for ring in rings do
-                            reserve ring.Length
-                            commands.Add(MoveTo ring[0])
-                            for index=1 to ring.Length-1 do
-                                spend 1L
-                                commands.Add(LineTo ring[index])
-                            spend 1L
-                            commands.Add Close
-                        if commands.Count>0 then
-                            let mutable owned=[]
-                            for index=commands.Count-1 downto 0 do
-                                spend 1L
-                                owned<-commands[index]::owned
-                            paths.Add(Path.ofCommands owned)
+                    | Ok rings -> addRings rings
                     polygonInput.Clear()
                     polygonInputCount<-0
                 let folder () event =
@@ -259,7 +265,7 @@ module GeoPath =
                                 match Projection.clipCircle projection with
                                 | ValueSome struct(_,_,cosine) -> let struct(x,_,_)=GeoMath.vector rotated in x>=cosine
                                 | ValueNone -> true
-                            if insideCap && (Projection.kind projection<>ProjectionKind.Mercator || abs rotated.Latitude<=GeoPreclip.mercatorLatitude) then
+                            if insideCap && (not(Projection.mercatorBand projection) || abs rotated.Latitude<=GeoPreclip.mercatorLatitude) then
                                 match Projection.projectRotatedValue projection rotated with
                                 | ValueSome point -> circle options.PointRadius point
                                 | ValueNone -> ()

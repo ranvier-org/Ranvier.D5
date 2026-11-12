@@ -59,9 +59,9 @@ module internal GeoPolygon =
         let southInside=angle< -1e-9 || (abs angle<1e-9 && area<0.)
         if point.Latitude= -90. then southInside else southInside <> (winding%2<>0)
 
-    let project projection precision maxDepth maxBuffer spend makeSampler (rings:GeoPosition array array) =
+    let private projectWith whole projection precision maxDepth maxBuffer spend makeSampler (rings:GeoPosition array array) =
         try
-            let mercator=Projection.kind projection=ProjectionKind.Mercator
+            let mercator=Projection.mercatorBand projection
             let halfHeight=if mercator then Math.PI else Math.PI/2.
             let latitude y=if mercator then atan(sinh y)*180./Math.PI else y*180./Math.PI
             let screen point =
@@ -117,11 +117,39 @@ module internal GeoPolygon =
                         spend 1L
                         emit(boundaryPoint(first+(last-first)*float index/float count))
                 else
+                    let curved=Projection.conic projection
+                    let mutable previousParameter=first
+                    let mutable previousPoint=boundaryPoint first
+                    // Conic pole edges are circular arcs about the apex; refine them until their chords meet precision.
+                    let rec refine depth t0 (p0:Point) t1 (p1:Point) =
+                        spend 1L
+                        let middle=(t0+t1)/2.
+                        let point=boundaryPoint middle
+                        let dx,dy=p1.X-p0.X,p1.Y-p0.Y
+                        let length=Double.Hypot(dx,dy)
+                        let deviation=
+                            if length=0. then Double.Hypot(point.X-p0.X,point.Y-p0.Y)
+                            else abs(dx*(point.Y-p0.Y)-dy*(point.X-p0.X))/length
+                        let imprecise=deviation>precision
+                        if imprecise && depth>=maxDepth then
+                            raise(Rejected(BudgetExceeded "Polygon boundary precision exceeds its subdivision budget."))
+                        if (imprecise || abs(t1-t0)>0.125) && depth<maxDepth then
+                            refine (depth+1) t0 p0 middle point
+                            emit point
+                            refine (depth+1) middle point t1 p1
+                    let advance parameter (point:Point) =
+                        if curved && int(floor(normalize((previousParameter+parameter)/2.)))%2=0 then
+                            refine 0 previousParameter previousPoint parameter point
+                        previousParameter<-parameter
+                        previousPoint<-point
                     let mutable corner=if direction>0 then floor first+1. else ceil first-1.
                     while (if direction>0 then corner<last else corner>last) do
                         spend 1L
-                        emit(boundaryPoint corner)
+                        let point=boundaryPoint corner
+                        advance corner point
+                        emit point
                         corner<-corner+float direction
+                    advance last toPoint
                 emit toPoint
             let fragments=ResizeArray<struct(Point array*GeoPosition*GeoPosition)>()
             let working=ResizeArray<Point>()
@@ -195,7 +223,7 @@ module internal GeoPolygon =
             let boundary = {
                 Period=period
                 PointAt=boundaryPoint
-                ContainsAt=fun amount -> if wholeCut then coversWorld else contains spend rotated (boundaryPosition amount)
+                ContainsAt=fun amount -> whole || (if wholeCut then coversWorld else contains spend rotated (boundaryPosition amount))
                 Between=boundaryBetween
             }
             // Fragments of a whole-cut ring lie on the boundary itself, so emit the complete world or nothing.
@@ -208,3 +236,10 @@ module internal GeoPolygon =
                     ended.Add(struct(points,parameter first,parameter last))
                 GeoRejoin.run maxBuffer spend boundary ended
         with Rejected error -> Error error
+
+    let project projection precision maxDepth maxBuffer spend makeSampler rings =
+        projectWith false projection precision maxDepth maxBuffer spend makeSampler rings
+
+    /// The complete projected world boundary, used for Sphere where no rectangle or circle describes it.
+    let outline projection precision maxDepth maxBuffer spend makeSampler =
+        projectWith true projection precision maxDepth maxBuffer spend makeSampler [||]

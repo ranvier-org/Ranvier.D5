@@ -20,6 +20,14 @@ type ProjectionKind =
     | Gnomonic
     /// <summary>Conformal azimuthal projection with radius tan(c/2), singular at the antipode.</summary>
     | Stereographic
+    /// <summary>Lambert conformal conic with two standard parallels in degrees; the pole away from the apex is clamped one microradian short, as in D3.</summary>
+    | ConicConformal of firstParallel:float * secondParallel:float
+    /// <summary>Albers equal-area conic with two standard parallels in degrees.</summary>
+    | ConicEqualArea of firstParallel:float * secondParallel:float
+    /// <summary>Equidistant conic with two standard parallels in degrees.</summary>
+    | ConicEquidistant of firstParallel:float * secondParallel:float
+    /// <summary>Mercator about a rotated axis, with the D3 extra 90 degree roll and swapped center; its rotated poles are singular.</summary>
+    | TransverseMercator
 
 /// <summary>Immutable point-projection parameters; create a Projection to validate them.</summary>
 type ProjectionConfig = {
@@ -47,15 +55,49 @@ module ProjectionConfig =
         ClipAngle=None
     }
 
-/// <summary>A validated immutable projection with a cached raw center and visible cap.</summary>
-type Projection = private { Config:ProjectionConfig; CenterX:float; CenterY:float; ClipSine:float; ClipCosine:float; ClipRadius:float }
+/// <summary>A validated immutable projection with a cached raw center, visible cap and conic constants.</summary>
+type Projection = private {
+    Config:ProjectionConfig; CenterX:float; CenterY:float; ClipSine:float; ClipCosine:float; ClipRadius:float
+    Roll:GeoRotation voption; ConicN:float; ConicA:float; ConicB:float }
 
 /// <summary>Pure point projections and inverse mappings; these do not clip or rejoin polygon edges.</summary>
 module Projection =
     let private radians = Math.PI / 180.
     let private degrees = 180. / Math.PI
 
-    let private raw kind (position:GeoPosition) =
+    let private halfPi=Math.PI/2.
+    let private tanHalf latitude=tan((halfPi+latitude)/2.)
+
+    // Constants of the d3-geo conic raw projections: exponent n plus the two scalars each family needs.
+    let private conicConstants kind =
+        let finite a b=Double.IsFinite a && Double.IsFinite b && abs a<=90. && abs b<=90.
+        match kind with
+        | ProjectionKind.ConicConformal(a,b) when finite a b ->
+            let phi0,phi1=a*radians,b*radians
+            if abs a=90. || abs b=90. then Error "Conformal conic parallels cannot lie on a pole."
+            else
+                let cy0=cos phi0
+                let n=if phi0=phi1 then sin phi0 else log(cy0/cos phi1)/log(tanHalf phi1/tanHalf phi0)
+                if not(Double.IsFinite n) || abs n<1e-6 then Error "Conformal conic parallels describe a cylinder; use Mercator."
+                else Ok(struct(n,cy0*Math.Pow(tanHalf phi0,n)/n,0.))
+        | ProjectionKind.ConicEqualArea(a,b) when finite a b ->
+            let sy0=sin(a*radians)
+            let n=(sy0+sin(b*radians))/2.
+            if abs n<1e-6 then Error "Equal-area conic parallels describe a cylinder."
+            else
+                let c=1.+sy0*(2.*n-sy0)
+                Ok(struct(n,c,sqrt c/n))
+        | ProjectionKind.ConicEquidistant(a,b) when finite a b ->
+            let phi0,phi1=a*radians,b*radians
+            let cy0=cos phi0
+            let n=if phi0=phi1 then sin phi0 else (cy0-cos phi1)/(phi1-phi0)
+            if not(Double.IsFinite n) || abs n<1e-6 then Error "Equidistant conic parallels describe a cylinder; use equirectangular."
+            else Ok(struct(n,cy0/n+phi0,0.))
+        | ProjectionKind.ConicConformal _ | ProjectionKind.ConicEqualArea _ | ProjectionKind.ConicEquidistant _ ->
+            Error "Conic parallels must be finite degrees in [-90,90]."
+        | _ -> Ok(struct(nan,nan,nan))
+
+    let private raw kind (struct(n,a,b)) (position:GeoPosition) =
         let canonical=position
         match kind with
         | ProjectionKind.Equirectangular ->
@@ -82,6 +124,23 @@ module Projection =
                 | _ -> 1./(1.+cosine)
             if cosine <= -1. || (kind=ProjectionKind.Gnomonic && cosine<=0.) || not(Double.IsFinite k) then ValueNone
             else ValueSome (struct(k*cosLatitude*sinLongitude,k*sinLatitude))
+        | ProjectionKind.ConicConformal _ ->
+            let latitude=canonical.Latitude*radians
+            let latitude=if a>0. then max latitude (-halfPi+1e-6) else min latitude (halfPi-1e-6)
+            let r=a/Math.Pow(tanHalf latitude,n)
+            let struct(sine,cosine)=Math.SinCos(n*canonical.Longitude*radians)
+            if Double.IsFinite r then ValueSome(struct(r*sine,a-r*cosine)) else ValueNone
+        | ProjectionKind.ConicEqualArea _ ->
+            let r=sqrt(max 0. (a-2.*n*sin(canonical.Latitude*radians)))/n
+            let struct(sine,cosine)=Math.SinCos(n*canonical.Longitude*radians)
+            ValueSome(struct(r*sine,b-r*cosine))
+        | ProjectionKind.ConicEquidistant _ ->
+            let gy=a-canonical.Latitude*radians
+            let struct(sine,cosine)=Math.SinCos(n*canonical.Longitude*radians)
+            ValueSome(struct(gy*sine,a-gy*cosine))
+        | ProjectionKind.TransverseMercator ->
+            if abs canonical.Latitude = 90. then ValueNone
+            else ValueSome (struct(Math.Asinh(tan(canonical.Latitude*radians)),-canonical.Longitude*radians))
 
     let private defaultClipAngle kind =
         match kind with
@@ -112,17 +171,39 @@ module Projection =
                 | ValueSome _,Some angle when not(validClipAngle config.Kind angle) ->
                     Error [InvalidObservation "Clip angle must be positive and finite, at most 90 degrees orthographic, below 90 gnomonic and below 180 otherwise."]
                 | ValueSome fallback,angle -> Ok(ValueSome(Option.defaultValue fallback angle))
-            match clip with
-            | Error errors -> Error errors
-            | Ok clip ->
-                match raw config.Kind (GeoPosition.normalize config.Center) with
+            match clip,conicConstants config.Kind with
+            | Error errors,_ -> Error errors
+            | _,Error message -> Error [InvalidObservation message]
+            | Ok clip,Ok constants ->
+                // D3 transverse Mercator swaps its center into the rolled frame before projecting it.
+                let center =
+                    if config.Kind=ProjectionKind.TransverseMercator then
+                        GeoPosition.create -config.Center.Latitude config.Center.Longitude |> Result.toOption
+                    else Some(GeoPosition.normalize config.Center)
+                match center |> Option.map(raw config.Kind constants) |> Option.defaultValue ValueNone with
                 | ValueNone -> Error [InvalidObservation "The projection center is singular."]
                 | ValueSome struct(x,y) ->
                     let struct(sine,cosine)=clip |> ValueOption.map GeoMath.sinCosDegrees |> ValueOption.defaultValue struct(0.,1.)
                     let radius=clip |> ValueOption.map(fun angle -> angle*radians) |> ValueOption.defaultValue nan
-                    Ok {Config=config;CenterX=x;CenterY=y;ClipSine=sine;ClipCosine=cosine;ClipRadius=radius}
+                    let roll=if config.Kind=ProjectionKind.TransverseMercator then GeoRotation.create 0. 0. 90. |> Result.toOption |> Option.toValueOption else ValueNone
+                    let struct(n,a,b)=constants
+                    Ok {Config=config;CenterX=x;CenterY=y;ClipSine=sine;ClipCosine=cosine;ClipRadius=radius;Roll=roll;ConicN=n;ConicA=a;ConicB=b}
 
-    let internal rotate projection position = GeoRotation.apply projection.Config.Rotation position
+    let internal rotate projection position =
+        let rotated=GeoRotation.apply projection.Config.Rotation position
+        match projection.Roll with
+        | ValueSome roll -> GeoRotation.apply roll rotated
+        | ValueNone -> rotated
+    /// Whether streams clip to the finite Mercator latitude band in the rotated frame.
+    let internal mercatorBand projection =
+        match projection.Config.Kind with
+        | ProjectionKind.Mercator | ProjectionKind.TransverseMercator -> true
+        | _ -> false
+    /// Whether antimeridian-cut boundary edges at the poles curve on screen.
+    let internal conic projection =
+        match projection.Config.Kind with
+        | ProjectionKind.ConicConformal _ | ProjectionKind.ConicEqualArea _ | ProjectionKind.ConicEquidistant _ -> true
+        | _ -> false
 
     let internal kind projection = projection.Config.Kind
     let internal scale projection = projection.Config.Scale
@@ -151,7 +232,7 @@ module Projection =
             | _ -> true
         if not visible then ValueNone
         else
-            match raw config.Kind rotated with
+            match raw config.Kind (struct(projection.ConicN,projection.ConicA,projection.ConicB)) rotated with
             | ValueNone -> ValueNone
             | ValueSome struct(x,y) ->
                 let screenX=config.Translate.X + config.Scale*(x-projection.CenterX)
@@ -204,9 +285,35 @@ module Projection =
                         let sine,cosine=sin angle,cos angle
                         let latitude=if radius=0. then 0. else asin(Math.Clamp(y*sine/radius,-1.,1.))
                         Some(struct(atan2 (x*sine) (radius*cosine)*degrees,latitude*degrees))
+                | ProjectionKind.ConicConformal _ | ProjectionKind.ConicEqualArea _ | ProjectionKind.ConicEquidistant _ ->
+                    let n,a,b=projection.ConicN,projection.ConicA,projection.ConicB
+                    let reference=match config.Kind with ProjectionKind.ConicEqualArea _ -> b | _ -> a
+                    let offset=reference-y
+                    // Angle about the apex; the D3 correction keeps it on the cone's side of the apex.
+                    let mutable angle=atan2 x (abs offset)*float(sign offset)
+                    if offset*n<0. then angle<-angle-Math.PI*float(sign x)*float(sign offset)
+                    let longitude=angle/n*degrees
+                    let distance=Double.Hypot(x,offset)
+                    let latitude =
+                        match config.Kind with
+                        | ProjectionKind.ConicConformal _ ->
+                            let r=float(sign n)*distance
+                            if r=0. then float(sign n)*halfPi else 2.*atan(Math.Pow(a/r,1./n))-halfPi
+                        | ProjectionKind.ConicEqualArea _ ->
+                            let value=(a-distance*distance*n*n)/(2.*n)
+                            if abs value>1.+1e-12 then nan else asin(Math.Clamp(value,-1.,1.))
+                        | _ -> a-float(sign n)*distance
+                    if Double.IsNaN latitude || abs latitude>halfPi*(1.+1e-12) || abs longitude>180.*(1.+1e-12) then None
+                    else Some(struct(Math.Clamp(longitude,-180.,180.),Math.Clamp(latitude,-halfPi,halfPi)*degrees))
+                | ProjectionKind.TransverseMercator ->
+                    let latitude=atan(Math.Sinh x)*degrees
+                    if abs y > Math.PI || abs latitude >= 90. then None
+                    else Some(struct(-y*degrees,latitude))
             match geographic with
             | None -> None
             | Some struct(longitude,latitude) ->
                 GeoPosition.create longitude latitude
                 |> Result.toOption
-                |> Option.map (GeoRotation.inverse config.Rotation)
+                |> Option.map(fun position ->
+                    let unrolled=match projection.Roll with ValueSome roll -> GeoRotation.inverse roll position | ValueNone -> position
+                    GeoRotation.inverse config.Rotation unrolled)
