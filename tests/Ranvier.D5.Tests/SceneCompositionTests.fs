@@ -4,6 +4,13 @@ open Expecto
 open Ranvier.D5
 
 let tests = testList "Scene composition" [
+    testCase "axis label anchors keep text outside the plot" <| fun _ ->
+        for orientation,anchor in [AxisOrientation.Left,"end";AxisOrientation.Right,"start";AxisOrientation.Bottom,"middle";AxisOrientation.Top,"middle"] do
+            let mark=Axis.values "test" orientation 20. (0.,100.) ["one",50.,"1.000"] |> List.last
+            Expect.equal (Mark.textStyle mark).Anchor anchor "orientation anchor"
+    testCase "explicit fill replaces a gradient reference" <| fun _ ->
+        let mark=Mark.text "a" (Point.create 0. 0.) "a" |> Mark.withFillDefinition "paint" |> Mark.withFill Paint.currentColor
+        Expect.equal (Mark.fillDefinition mark) None "explicit paint wins"
     testCase "keys are scoped by structured paths" <| fun _ ->
         let leaf = Leaf(Mark.text "same" (Point.create 0. 0.) "label")
         let scene = Scene.compose {Width=100.;Height=100.} "two charts" []

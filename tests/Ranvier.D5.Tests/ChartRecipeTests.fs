@@ -37,6 +37,23 @@ let tests = testList "Chart recipes" [
             let result=Chart.line {line with Kind=kind;Series=(fun d -> d.Series)} grouped |> ok
             Expect.equal result.Semantics.Length 2 "both series"
         Expect.isError (Chart.bar {bar with Frame={frame with Viewport={Width=20.;Height=10.}}} data) "invalid resize"
+    testCase "small domains retain unique axis identity" <| fun _ ->
+        let spec=ChartSpec.bar frame fst (Encoding.create "Category" fst) (Encoding.create "Value" (snd >> Some))
+        Chart.bar spec ["a",0.0001;"b",0.0002] |> ok |> ignore
+        let dimension=Encoding.create "Value" (snd >> Some)
+        Chart.parallelCoordinates {Frame=frame;Key=fst;Dimensions=[dimension;dimension];Domains=[Auto;Auto];Color=ChartSpec.color} ["a",0.0001;"b",0.0002] |> ok |> ignore
+    testCase "stacked area preserves explicit missing gaps" <| fun _ ->
+        let spec=ChartSpec.line frame (fun d -> d.Id) (Encoding.create "X" (fun d -> d.X)) (Encoding.create "Y" (fun d -> d.Y))
+        let rows=[{data.Head with X=Some 0.;Y=Some 1.};{data.Head with Id="gap";X=Some 1.;Y=None};{data.Head with Id="end";X=Some 2.;Y=Some 1.}]
+        let output=Chart.line {spec with Kind=LineKind.StackedArea {Order=StackOrder.Input;Offset=StackOffset.Zero}} rows |> ok
+        let paths=Scene.marks output.Scene |> List.filter(fun mark -> Mark.key mark=List.last output.Semantics.Head.MarkPath)
+        let moves=paths |> List.collect(fun mark -> match Mark.geometry mark with PathGeometry p -> Path.commands p | _ -> []) |> List.filter(function MoveTo _ -> true | _ -> false)
+        Expect.equal moves.Length 2 "two separate observed runs"
+    testCase "clipped scatter cannot be picked in margin" <| fun _ ->
+        let spec=ChartSpec.scatter frame fst (Encoding.create "X" (snd >> Some)) (Encoding.create "Y" (fun _ -> Some 0.5))
+        let output=Chart.scatter {spec with XDomain=Fixed(0.,1.);YDomain=Fixed(0.,1.)} ["outside",1.03] |> ok
+        let point=match output.HitTargets.Head.Geometry with HitPoint(p,_) -> p | _ -> failwith "point"
+        Expect.isEmpty (HitTest.at point output) "clipped hit"
     testCase "normalized bars reject negative observations" <| fun _ ->
         let spec={ChartSpec.bar frame (fun d -> d.Id) (Encoding.create "Category" (fun d -> d.Category)) (Encoding.create "Value" (fun d -> d.Y)) with Mode=BarMode.Normalized}
         Expect.isError (Chart.bar spec data) "negative normalized data"

@@ -164,6 +164,7 @@ module Scale =
                         let v=float k*power
                         if v>=lo && v<=hi && Double.IsFinite v then yield v]
             else ticks count (linear (start,finish) (0.,1.)) |> List.map (fun exponent -> Math.Pow(basis,exponent))
+        let values=if values.Length<2 && lo<hi then ticks count (linear (lo,hi) (0.,1.)) else values
         if values.Length>10001 then invalidArg "scale" "Tick capacity exceeded."
         let values=values |> List.map (fun v -> if a<0. then -v else v) |> List.sort
         if a>b then List.rev values else values

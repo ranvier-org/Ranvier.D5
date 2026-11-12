@@ -20,9 +20,9 @@ module internal Recipe =
         let scene=Scene.compose frame.Viewport frame.Title [RectClip("plot-clip",bounds)]
                     [Group({GroupSpec.create "plot" with Clip=Some "plot-clip"},List.map Leaf marks)
                      Group(GroupSpec.create "axes",List.map Leaf axes)]
-        {Scene=scene;PlotBounds=bounds;Semantics=semantics;HitTargets=hits;Description=frame.Title}
+        {Scene=scene;PlotBounds=bounds;Semantics=semantics;HitTargets=hits |> List.map(fun hit -> {hit with Clip=Some bounds});Description=frame.Title}
     let semantic id dataIds description = {MarkPath=["plot";id];DataIds=dataIds;Description=description}
-    let hit id dataIds geometry = {MarkPath=["plot";id];DataIds=dataIds;Geometry=geometry}
+    let hit id dataIds geometry = {MarkPath=["plot";id];DataIds=dataIds;Geometry=geometry;Clip=None}
     let rectangle id label color bounds = Mark.path id (Shape.rectangle bounds) |> Mark.withFill color |> Mark.withLabel(Some label)
     let axes bounds x y =
         let label value=number value

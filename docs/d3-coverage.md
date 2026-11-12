@@ -39,7 +39,7 @@ Sankey and hexbin are ecosystem extensions (tasks 8/9), not core-module parity. 
 
 ## Compatibility audit
 
-Current package cohort is unchanged: Ranvier 0.1.1-preview.2, Anime 0.1.0-rc.1, CSS 0.1.1-alpha.2, View 0.1.49-rc.2, Dom 0.1.0-rc.1, WebCore managed 0.1.0-rc.6 and SDL 0.1.0-rc.10. Source snapshot revisions are reference material, not an API compatibility guarantee.
+Current package cohort (only Anime deliberately upgraded for public perceptual interpolation): Ranvier 0.1.1-preview.2, Anime 0.1.0-rc.2, CSS 0.1.1-alpha.2, View 0.1.49-rc.2, Dom 0.1.0-rc.1, WebCore managed 0.1.0-rc.6 and SDL 0.1.0-rc.10. Source snapshot revisions are reference material, not an API compatibility guarantee.
 
 | Need | Audited symbol/source | Decision |
 |---|---|---|
@@ -53,5 +53,20 @@ Current package cohort is unchanged: Ranvier 0.1.1-preview.2, Anime 0.1.0-rc.1, 
 | Measurement | Dom.CanvasRenderingContext2D.measureText; WebCore Generated/Objects.fs adapter | Inject/cache native measurements; pure label placement consumes bounds |
 | Frame scheduling | Existing WebCore frame integration and host-thread graph execution | Adapter consumes frame scheduling/post functions; no standalone runtime |
 | Persistence | Snapshot Ranvier.Persistence PersistCodec module / Persist.fs and versioned codec Types.fs | Optional consumer adapter only; not added as a mandatory chart dependency |
+
+## Completed expansion through task 4
+
+Tasks 0–4 are implemented: pinned fixture provenance; scene groups, clips,
+gradients and scoped identity; native text measurement and pure label placement;
+statistics, scale/time/format additions, extended curves/arcs/symbols/stacks;
+shared Anime perceptual colors and D5 palette policy; Cartesian, distribution,
+radial, calendar, legend and facet recipes; owned gestures, selection, keyed
+transitions and bounded background layouts.
+
+The table above records baseline and planned ownership, not exhaustive parity.
+See [release validation](release-alpha.2.md) for tested scope and deliberate
+policies. Task 5–11 algorithms remain planned. Full locale/time parsers, all D3
+palette tables, geographic pipelines, spatial triangulation, forces, contours,
+flow layouts and hierarchy expansion are not claimed by this release.
 
 Reference fixtures: `tests/fixtures/manifest.json`, exact npm lockfile and copied licenses in `tools/reference-fixtures/`. Generation is development-only. Numeric tolerance and coordinate conventions travel with the fixtures. Native ownership, topology errors and missing-data behavior are tested as D5 contracts rather than copied blindly from JavaScript.

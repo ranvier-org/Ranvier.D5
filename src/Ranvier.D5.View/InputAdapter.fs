@@ -45,7 +45,14 @@ module InputAdapter =
                             match event.target with
                             | :? Ranvier.Dom.Element as target ->
                                 let value=target.closest("[data-d5-key]")
-                                if isNull value then None else Some(value.getAttribute "data-d5-key")
+                                if isNull value then None else
+                                let mutable path=[value.getAttribute "data-d5-key"]
+                                let mutable parent=value.parentElement
+                                while not(isNull parent) do
+                                    let group=parent.getAttribute "data-d5-group"
+                                    if not(String.IsNullOrEmpty group) then path<-group::path
+                                    parent<-parent.parentElement
+                                Some path
                             | _ -> None
                         match kind with
                         | "pointerdown" -> send(InputEvent.Down(pointer.pointerId,point,target))

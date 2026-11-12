@@ -12,7 +12,7 @@ let tests = testList "Owned gesture contracts" [
         Expect.equal (Zoom.scaleValue state.Zoom) 4. "clamped scale"
         Expect.equal (Zoom.invert (p 20. 30.) state.Zoom) (p 20. 30.) "anchor"
     testCase "cancel releases all captured pointers and resize cancels drag" <| fun _ ->
-        let first,_=Gesture.update config (InputEvent.Down(1,p 0. 0.,Some "a")) Gesture.empty
+        let first,_=Gesture.update config (InputEvent.Down(1,p 0. 0.,Some ["a"])) Gesture.empty
         let second,_=Gesture.update config (InputEvent.Down(2,p 10. 0.,None)) first
         let final,commands=Gesture.update config InputEvent.Resize second
         Expect.equal final.Pointers Map.empty "no capture state"
@@ -24,10 +24,10 @@ let tests = testList "Owned gesture contracts" [
         DataScaleTests.near 2. (Zoom.scaleValue c.Zoom)
     testCase "lasso storage stays bounded and exit cancels active drag" <| fun _ ->
         let lasso={config with Mode=GestureMode.Lasso}
-        let start,_=Gesture.update lasso (InputEvent.Down(1,p 0. 0.,Some "a")) Gesture.empty
+        let start,_=Gesture.update lasso (InputEvent.Down(1,p 0. 0.,Some ["a"])) Gesture.empty
         let moved=[1..1000] |> List.fold (fun state i -> Gesture.update lasso (InputEvent.Move(1,p (float i) (float(i%20)))) state |> fst) start
         Expect.isLessThanOrEqual moved.Lasso.Length lasso.MaxLassoPoints "bounded gesture history"
-        let exited,commands=Gesture.update lasso (InputEvent.NodeExit "a") moved
+        let exited,commands=Gesture.update lasso (InputEvent.NodeExit ["a"]) moved
         Expect.equal exited.Pointers Map.empty "exited target cancels"
         Expect.contains commands (GestureCommand.Release 1) "released"
     testCase "finishing a pinch cannot accidentally commit a brush" <| fun _ ->
