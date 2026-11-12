@@ -92,6 +92,15 @@ let acceptance () =
         (retained.querySelector "path").setAttribute("opacity","0.75")
         (retained.querySelector "text").setAttribute("opacity","0.75")
         host.Cycle()
+        graph.Run(fun () -> source.Value <- make [box "b" 90. (Paint.rgb 0 0 255); updated |> Mark.withStroke Paint.none 0.])
+        host.Cycle()
+        Expect.equal ((retained.querySelector "path").getAttribute "opacity") "1" "removing stroke disables combined opacity"
+        Expect.equal ((retained.querySelector "path").getAttribute "fill-opacity") "0.75" "fill-only alpha updates after style change"
+        Expect.equal ((retained.querySelector "path").getAttribute "stroke-opacity") "1" "unused stroke alpha resets"
+        graph.Run(fun () -> source.Value <- make [box "b" 90. (Paint.rgb 0 0 255); updated])
+        host.Cycle()
+        Expect.equal ((retained.querySelector "path").getAttribute "opacity") "0.75" "adding stroke restores combined opacity"
+        Expect.equal ((retained.querySelector "path").getAttribute "fill-opacity") "1" "fill alpha resets for combined paint"
         host.Click(40, 40) |> ignore
         Expect.isTrue (events.Contains ("a", "click")) "retained mark receives pointer event"
         let svg=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
@@ -237,6 +246,21 @@ let acceptance () =
         host.Cycle()
         host.Frame()
         host.Paint before
+        let flowPath=flowSvg.querySelector "[data-d5-key='4:link2:ab'] path"
+        Expect.equal (flowPath.getAttribute "opacity") "1" "single stroke avoids element opacity layer"
+        Expect.floatClose Accuracy.high (Double.Parse(flowPath.getAttribute "stroke-opacity",Globalization.CultureInfo.InvariantCulture)) 0.4 "link alpha applies directly to stroke paint"
+        let paintOnly=Array.zeroCreate<byte> before.Length
+        host.Paint paintOnly
+        flowPath.setAttribute("stroke-opacity","1")
+        flowPath.setAttribute("opacity","0.4")
+        host.Cycle()
+        host.Frame()
+        let elementOpacity=Array.zeroCreate<byte> before.Length
+        host.Paint elementOpacity
+        Expect.isLessThanOrEqual (Array.map2(fun a b -> abs(int a-int b)) paintOnly elementOpacity |> Array.max) 1 "stroke opacity preserves element-opacity pixels"
+        flowPath.setAttribute("stroke-opacity","0.4")
+        flowPath.setAttribute("opacity","1")
+        host.Cycle()
         let initialFlow=graph.Run(fun () -> flowState.Value)
         let flowBox=(flowSvg.querySelector "[data-d5-key='4:node1:a']").getBoundingClientRect()
         let fx,fy=int(flowBox.x+flowBox.width/2.),int(flowBox.y+flowBox.height/2.)

@@ -76,6 +76,8 @@ and 16.66 ms median (22.56 ms p95)/3.32 MB for native update and paint.
 
 The initial implementation failed the macOS native repaint gate. The renderer now
 applies mark opacity to its single visible path/text element instead of creating a
-wrapper opacity group. Native tests compare its pixels against the previous
+wrapper opacity group. For fill-only or stroke-only marks it applies alpha directly
+to that paint; marks with both paints retain combined element opacity. Native tests
+exercise style changes between these modes and compare pixels against the previous
 filled-and-stroked compositing behavior. The updated local normal repaint measured
-13.74 ms median and 17.88 ms p95; cross-platform CI retains the same 100 ms gate.
+9.88 ms median and 14.81 ms p95; cross-platform CI retains the same 100 ms gate.
