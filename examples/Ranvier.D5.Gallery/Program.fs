@@ -203,6 +203,16 @@ let capture kind path =
             host.Click(48,118) |> ignore
             if graph.Run(fun () -> selected.Value<>Some 0) then failwith "Native nearest-site picking failed."
             owner :> IDisposable
+        elif kind="geographic-kernels" then
+            let phase=graph.Run(fun () -> Api.createSignal 0.)
+            let scene=graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) GeoKernelsGallery.scene)
+            let mounted=mount host graph (fun () -> scene.Value)
+            host.Cycle()
+            let before=graph.Run(fun () -> scene.Value)
+            graph.Run(fun () -> phase.Value<-0.7)
+            let after=graph.Run(fun () -> scene.Value)
+            if Object.ReferenceEquals(before,after) then failwith "Geographic signal did not update the scene."
+            {new IDisposable with member _.Dispose()=mounted.Dispose()}
         elif kind="linked" then
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
@@ -240,6 +250,16 @@ let capture kind path =
 let main args =
     if args.Length = 2 && args[0] = "--capture" then
         capture "foundation" args[1]
+    elif args.Length=2 && args[0]="--capture-geographic-kernels" then
+        capture "geographic-kernels" args[1]
+    elif Array.contains "--geographic-kernels" args then
+        use window=Window.Create("Ranvier.D5 spherical geometry",820,590)
+        let phase=window.Graph.Run(fun () -> Api.createSignal 0.)
+        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) GeoKernelsGallery.scene)
+        let mounted=mount window.Host window.Graph (fun () -> scene.Value)
+        let timer=Stopwatch.StartNew()
+        while window.Step() do window.Graph.Run(fun () -> phase.Value<-timer.Elapsed.TotalSeconds)
+        mounted.Dispose()
     elif args.Length=2 && args[0]="--capture-linked" then
         capture "linked" args[1]
     elif args.Length=2 && args[0]="--capture-hierarchy" then

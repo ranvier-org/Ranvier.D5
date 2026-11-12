@@ -99,9 +99,21 @@ module GeoJson =
     let private readPolygon context value =
         asArray value |> List.map(fun ring -> asArray ring |> List.map(readPoint context) |> validateRing |> List.rev)
 
+    let private validateBbox (values:Map<string,GeoValue>) =
+        match values.TryFind "bbox" with
+        | None -> ()
+        | Some(GeoValue.Array [west;south;east;north]) ->
+            coordinateNumber west |> ignore
+            coordinateNumber east |> ignore
+            let lower,upper=coordinateNumber south,coordinateNumber north
+            if lower < -90. || upper>90. || lower>upper then
+                reject "Bounding box latitudes must be ordered within [-90,90]."
+        | _ -> reject "Two-dimensional GeoJSON bounding boxes require four finite numbers."
+
     let rec private readGeometry (context:Context) depth value =
         context.Visit depth
         let values=asObject value
+        validateBbox values
         let coordinates()=required "coordinates" values
         match kind values with
         | "Point" ->
@@ -123,6 +135,7 @@ module GeoJson =
     let private readFeature (context:Context) depth value =
         context.Feature()
         let values=asObject value
+        validateBbox values
         if kind values<>"Feature" then reject "Feature collections require Feature objects."
         let id=
             match values.TryFind "id" with
@@ -143,6 +156,7 @@ module GeoJson =
 
     let private readDocument context value =
         let values=asObject value
+        validateBbox values
         match kind values with
         | "Feature" -> GeoDocument.Feature(readFeature context 1 value)
         | "FeatureCollection" ->
@@ -204,10 +218,12 @@ module GeoJson =
             objectValue "GeometryCollection" "geometries" (geometries |> List.map(writeGeometry context (depth+1)) |> GeoValue.Array)
         | GeoGeometry.Sphere -> reject "Sphere has no RFC 7946 representation."
 
-    let private mergeForeign reserved required foreign =
-        if foreign |> Map.exists(fun key _ -> Set.contains key reserved) then
-            reject "Foreign members cannot replace reserved GeoJSON fields."
-        Map.fold(fun values key value -> Map.add key value values) required foreign |> GeoValue.Object
+    let private mergeForeign (context:Context) depth reserved required foreign =
+        validateBbox foreign
+        Map.fold(fun values key value ->
+            context.Visit depth
+            if Set.contains key reserved then reject "Foreign members cannot replace reserved GeoJSON fields."
+            Map.add key value values) required foreign |> GeoValue.Object
 
     let private writeFeature (context:Context) depth (feature:GeoFeature) =
         context.Feature()
@@ -220,7 +236,7 @@ module GeoJson =
             | None -> fields
             | Some(GeoId.Text value) -> fields.Add("id",GeoValue.String value)
             | Some(GeoId.Number value) -> fields.Add("id",GeoValue.Number value)
-        mergeForeign featureReserved fields feature.ForeignMembers
+        mergeForeign context depth featureReserved fields feature.ForeignMembers
 
     let private writeDocument context = function
         | GeoDocument.Geometry geometry -> writeGeometry context 1 geometry
@@ -229,7 +245,7 @@ module GeoJson =
             let fields=Map.ofList [
                 "type",GeoValue.String "FeatureCollection"
                 "features",features |> List.map(writeFeature context 2) |> GeoValue.Array ]
-            mergeForeign collectionReserved fields foreign
+            mergeForeign context 1 collectionReserved fields foreign
 
     let rec private emitValue (context:Context) config depth (writer:Utf8JsonWriter) value =
         context.Visit depth

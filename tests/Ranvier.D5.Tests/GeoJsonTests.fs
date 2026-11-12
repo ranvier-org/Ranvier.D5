@@ -12,6 +12,25 @@ let private roundtrip source = source |> GeoJson.serialize |> ok |> parse
 let private feature = """{"type":"Feature","id":1234567890123456789012345678901234567890,"geometry":null,"properties":{"nested":[true,null,{"value":1e400}],"missing":null},"vendor":{"revision":2}}"""
 
 let tests = testList "GeoJSON interchange" [
+    testCase "foreign metadata conversion stops at a small work budget" <| fun _ ->
+        let metadata=Map.ofList[for i in 0..9999 -> string i,GeoValue.Null]
+        let document=GeoDocument.Feature {Id=None;Geometry=None;Properties=None;ForeignMembers=metadata}
+        let before=GC.GetAllocatedBytesForCurrentThread()
+        let result=GeoJson.serializeWithCancellation {GeoJsonConfig.defaultValue with MaxWork=1L} CancellationToken.None document
+        let allocated=GC.GetAllocatedBytesForCurrentThread()-before
+        Expect.isError result "Work budget"
+        Expect.isLessThan allocated 65536L "Do not copy a large foreign map before checking its budget"
+
+    testCase "validates two dimensional bounding boxes without rejecting dateline wrapping" <| fun _ ->
+        for bbox in ["null";"[]";"[0,0,1]";"[0,0,0,1,1,1]";"[0,20,10,10]";"[0,-91,10,10]";"[0,0,1e400,10]";"[0,0,\"10\",10]"] do
+            for body in [ "\"type\":\"Point\",\"coordinates\":[0,0]"; "\"type\":\"Feature\",\"geometry\":null,\"properties\":null"; "\"type\":\"FeatureCollection\",\"features\":[]"] do
+                Expect.isError (GeoJson.parse ("{"+body+",\"bbox\":"+bbox+"}")) ("Invalid bbox "+bbox)
+        let source="""{"type":"Feature","geometry":null,"properties":null,"bbox":[170,-10,-170,10]}"""
+        let value=parse source
+        Expect.equal (roundtrip value) value "Valid wrapped metadata survives"
+        let bad=GeoDocument.Feature {Id=None;Geometry=None;Properties=None;ForeignMembers=Map.ofList["bbox",GeoValue.Array[GeoValue.Number "0"]]}
+        Expect.isError (GeoJson.serialize bad) "Manual metadata is validated on output"
+
     testCase "retains exact numeric IDs nulls nested properties and foreign members" <| fun _ ->
         let value = parse feature
         match value with

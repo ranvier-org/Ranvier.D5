@@ -57,6 +57,7 @@ jobs:
           if [[ "$RUNNER_OS" == Linux ]]; then prefix=(xvfb-run -a); fi
           "${prefix[@]}" dotnet run --project tests/Ranvier.D5.Native.Tests -c Release -p:RanvierTrace=${{ matrix.traced }}
           "${prefix[@]}" dotnet run --project benchmarks/Ranvier.D5.Benchmarks -c Release -p:RanvierTrace=${{ matrix.traced }} -- artifacts/benchmarks.json
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-geographic-kernels artifacts/geographic-kernels.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture artifacts/gallery.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-linked artifacts/linked.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-hierarchy artifacts/hierarchy.bmp
@@ -89,11 +90,14 @@ jobs:
           prefix=()
           if [[ "$RUNNER_OS" == Linux ]]; then prefix=(xvfb-run -a); fi
           "${prefix[@]}" python tools/compare-benchmarks.py --traced ${{ matrix.traced }}
+      - name: Geographic kernel performance
+        run: dotnet run --project benchmarks/Ranvier.D5.Geo.Benchmarks -c Release -p:RanvierTrace=${{ matrix.traced }} -- artifacts/geography-benchmarks.json
       - name: Pack
         run: |
           dotnet pack src/Ranvier.D5 -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
           dotnet pack src/Ranvier.D5.View -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
           dotnet pack src/Ranvier.D5.Charts -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+          dotnet pack src/Ranvier.D5.Geo -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
       - name: Consume packed View and core
         shell: bash
         run: |
@@ -101,7 +105,7 @@ jobs:
           if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
           mkdir -p artifacts/consumer
           cat > artifacts/consumer/Consumer.fsproj <<EOF
-          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.0-alpha.6]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.0-alpha.6]" /></ItemGroup></Project>
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.0-alpha.7]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.0-alpha.7]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.1.0-alpha.7]" /></ItemGroup></Project>
           EOF
           cat > artifacts/consumer/Program.fs <<'EOF'
           open Ranvier
@@ -150,6 +154,12 @@ jobs:
           Ranvier.D5.Charts.ViolinChart.build (Ranvier.D5.Charts.ViolinSpec.create flowSpec.Frame (-1.,3.) 0.5) [{Ranvier.D5.Charts.ViolinGroup.Id="group";Observations=[{Id="sample";Value=Some 1.}]}] |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
           Ranvier.D5.View.ForceChunk.defaultValue |> ignore
           Ranvier.D5.View.Renderer.passive |> ignore
+          let geo = Ranvier.D5.Geo.GeoJson.parse """{"type":"Point","coordinates":[20,30]}""" |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          match geo with
+          | Ranvier.D5.Geo.GeoDocument.Geometry geometry ->
+              let bounds = Ranvier.D5.Geo.GeoMeasure.bounds Ranvier.D5.Geo.GeoStreamConfig.defaultValue geometry |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> Option.get
+              if bounds.West <> 20. || bounds.North <> 30. then failwith "Packed geographic bounds failed"
+          | _ -> failwith "Packed GeoJSON failed"
           graph.Dispose()
           EOF
           cat > artifacts/consumer/NuGet.Config <<'EOF'

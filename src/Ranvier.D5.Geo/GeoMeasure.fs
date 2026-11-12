@@ -223,6 +223,8 @@ module GeoMeasure =
         let mutable first=ValueNone
         let mutable previous=ValueNone
         let mutable seamWinding=0
+        let mutable poleEntry=ValueNone
+        let mutable firstPoleExit=ValueNone
         let mutable northBoundary=false
         let mutable southBoundary=false
         let mutable areaState={Total=0.;TotalCorrection=0.;HalfPolygon=0.;PolygonCorrection=0.;First=ValueNone;Previous=ValueNone;InPolygon=false}
@@ -236,9 +238,23 @@ module GeoMeasure =
             latitude position.Latitude
             if abs position.Latitude<90. && not allLongitudes then
                 ranges.Add(struct(position.Longitude,position.Longitude))
+        let poleTurn pole incoming outgoing =
+            if inPolygon && not allLongitudes then
+                let west,east=if pole>0. then incoming,outgoing else outgoing,incoming
+                if west<=east then ranges.Add(struct(west,east))
+                else
+                    ranges.Add(struct(west,180.))
+                    ranges.Add(struct(-180.,east))
         let edge (from:GeoPosition) (destination:GeoPosition) =
             if from.Latitude = -destination.Latitude && (abs(from.Longitude-destination.Longitude)=180. || abs from.Latitude=90.) then
                 raise(AmbiguousArc "Spherical bounds require an explicit intermediate point on antipodal edges.")
+            if inPolygon then
+                if abs from.Latitude<90. && abs destination.Latitude=90. then
+                    poleEntry <- ValueSome from.Longitude
+                elif abs from.Latitude=90. && abs destination.Latitude<90. then
+                    match poleEntry with
+                    | ValueSome incoming -> poleTurn from.Latitude incoming destination.Longitude;poleEntry <- ValueNone
+                    | ValueNone -> firstPoleExit <- ValueSome(struct(from.Latitude,destination.Longitude))
             let delta=destination.Longitude-from.Longitude
             if inPolygon then
                 if delta>180. then seamWinding <- seamWinding+1
@@ -252,8 +268,12 @@ module GeoMeasure =
                 let maximum=if peak<0. then peak+2.*Math.PI else peak
                 let minimum=if maximum>=Math.PI then maximum-Math.PI else maximum+Math.PI
                 let extreme=Math.Atan2(Double.Hypot(sin0,tangentZ),abs(cos0*(east/magnitude)))*180./Math.PI
-                if maximum>0. && maximum<angle then latitude extreme
-                if minimum>0. && minimum<angle then latitude (-extreme)
+                if maximum>0. && maximum<angle then
+                    latitude extreme
+                    if extreme=90. then poleTurn 90. from.Longitude destination.Longitude
+                if minimum>0. && minimum<angle then
+                    latitude (-extreme)
+                    if extreme=90. then poleTurn -90. from.Longitude destination.Longitude
             if not allLongitudes && abs from.Latitude<90. && abs destination.Latitude<90. && abs delta<>180. then
                 let low,high=min from.Longitude destination.Longitude,max from.Longitude destination.Longitude
                 if abs delta<180. then ranges.Add(struct(low,high))
@@ -274,7 +294,9 @@ module GeoMeasure =
                 if southInside && not southBoundary then south <- -90.;allLongitudes <- true
                 if northInside && not northBoundary then north <- 90.;allLongitudes <- true
                 inPolygon <- false
-            | GeoStreamEvent.LineStart -> inLine <- true;first <- ValueNone;previous <- ValueNone
+            | GeoStreamEvent.LineStart ->
+                inLine <- true;first <- ValueNone;previous <- ValueNone
+                poleEntry <- ValueNone;firstPoleExit <- ValueNone
             | GeoStreamEvent.Point source ->
                 let position=GeoPosition.normalize source
                 point position
@@ -287,6 +309,9 @@ module GeoMeasure =
                 if inPolygon then
                     match previous,first with
                     | ValueSome prior,ValueSome start -> edge prior start
+                    | _ -> ()
+                    match poleEntry,firstPoleExit with
+                    | ValueSome incoming,ValueSome(struct(pole,outgoing)) -> poleTurn pole incoming outgoing
                     | _ -> ()
                 inLine <- false;first <- ValueNone;previous <- ValueNone
             | GeoStreamEvent.Sphere -> south <- -90.;north <- 90.;allLongitudes <- true

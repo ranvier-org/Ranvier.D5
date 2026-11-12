@@ -152,3 +152,11 @@ Run `--distribution violin`, `minmax` or `lttb`. Arrows and Enter select; `+` / 
 ![Native violin distributions](../../docs/images/violin-recipe.png)
 
 [All three native snapshots and contracts](../../docs/distribution-series.md) · [source](DistributionRecipesGallery.fs)
+
+## Spherical geometry foundations
+
+Run `--geographic-kernels` for a signal-driven great-circle arc and analytical latitude bound. Capture with `--capture-geographic-kernels artifacts/geographic-kernels.bmp`.
+
+![Native spherical geometry](../../docs/images/geographic-kernels.png)
+
+[Coordinate, winding and budget contracts](../../docs/geographic-kernels.md) · [source](GeoKernelsGallery.fs)

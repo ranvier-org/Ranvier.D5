@@ -6,9 +6,11 @@ Functional-first visualization foundations for native F# applications. Compose i
 
 - **Ranvier.D5**: data summaries, bins, keyed joins, numeric/categorical/UTC scales, axes, affine transforms, paths, lines/areas/arcs/symbols, pie/stack/tree/treemap layouts, spatial queries, reactive values, animation, zoom and brush.
 - **Ranvier.D5.View**: keyed SVG scene components and native mark events.
-- Both have a **.Traced** variant. Use one variant throughout the dependency graph.
+- **Ranvier.D5.Charts**: typed pure chart recipes and composition.
+- **Ranvier.D5.Geo**: optional [geographic geometry, interchange and spherical kernels](docs/geographic-kernels.md); full projection and map-chart pipelines are still in development.
+- All packages have a **.Traced** variant. Use one variant throughout the dependency graph.
 
-Target: .NET 10. Version: **0.1.0-alpha.1**. APIs may change during alpha. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
+Target: .NET 10. Version: **0.1.0-alpha.7**. APIs may change during alpha. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
 
 ## A reactive scene
 

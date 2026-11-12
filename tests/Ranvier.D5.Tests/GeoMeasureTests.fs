@@ -35,6 +35,34 @@ let private centroidNear geometry expected =
     | None -> failtest "Expected a defined centroid"
 
 let tests = testList "GeoMeasure" [
+    testCase "bounds preserve the interior longitude of wide pole to pole lunes" <| fun _ ->
+        let ring=[p 0. 90.;p 0. 0.;p 0. -90.;p 90. 0.;p 0. 90.]
+        near (GeoMeasure.area GeoStreamConfig.defaultValue (GeoGeometry.Polygon[ring]) |> ok) (3.*Math.PI) 1e-12
+        let openRing=List.take 4 ring
+        for offset in 0..3 do
+            let rotated=List.skip offset openRing @ List.take offset openRing
+            let closed=rotated @ [rotated.Head]
+            let value=GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.Polygon[closed]) |> ok |> Option.get
+            Expect.equal (value.West,value.East) (90.,0.) "Ring start does not change the pole interior"
+        let aliases=[p 0. 90.;p -150. 90.;p 0. 0.;p 0. -90.;p 140. -90.;p 90. 0.;p 0. 90.]
+        let aliasBounds=GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.Polygon[aliases]) |> ok |> Option.get
+        Expect.equal (aliasBounds.West,aliasBounds.East) (90.,0.) "Repeated equivalent poles preserve the wedge"
+        let throughPoles=[p 0. 30.;p 180. 30.;p 180. -30.;p 0. -30.;p 0. 30.]
+        let transitBounds=GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.Polygon[throughPoles]) |> ok |> Option.get
+        Expect.equal (transitBounds.West,transitBounds.East) (0.,-180.) "Pole transit without an explicit vertex preserves the interior"
+        for shift in [0.;120.;-160.] do
+            let rotate=GeoRotation.create shift 0. 0. |> ok |> GeoRotation.apply
+            let wide=ring |> List.map rotate
+            let expectedWest=(p (90.+shift) 0. |> GeoPosition.normalize).Longitude
+            let expectedEast=(p shift 0. |> GeoPosition.normalize).Longitude
+            let bounds=GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.Polygon[wide]) |> ok |> Option.get
+            near bounds.West expectedWest 1e-10
+            near bounds.East expectedEast 1e-10
+            Expect.equal (bounds.South,bounds.North) (-90.,90.) "Both poles lie on the boundary"
+            let reversed=GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.Polygon[List.rev wide]) |> ok |> Option.get
+            near reversed.West expectedEast 1e-10
+            near reversed.East expectedWest 1e-10
+
     testCase "bounds agree with references except the independently corrected north cap" <| fun _ ->
         use fixture=JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"fixtures","spherical.json")))
         for item in fixture.RootElement.GetProperty("geometries").EnumerateArray() do
