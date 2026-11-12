@@ -5,6 +5,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="Contracts.fs" />
     <Compile Include="Data.fs" />
     <Compile Include="Scale.fs" />
     <Compile Include="Geometry.fs" />
