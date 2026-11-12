@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><PackageId>Ranvier.D5.Geo$(RanvierPackageSuffix)</PackageId><Description>Functional geographic geometry and map projections for Ranvier.D5.</Description><IsAotCompatible>true</IsAotCompatible></PropertyGroup>
+  <ItemGroup><Compile Include="Coordinates.fs" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj" />
+    <None Include="../../tools/reference-fixtures/licenses/d3-geo.txt" Pack="true" PackagePath="licenses/" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>
