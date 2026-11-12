@@ -52,7 +52,13 @@ let main args =
     let clippedPointGeometry=GeoGeometry.MultiPoint(List.replicate 1000 (p 0. 0.))
     let clippedPointOptions={GeoPathOptions.defaultValue with PointRadius=2.;Precision=0.01;ClipExtent=Some(Ranvier.D5.Bounds.create 0. -3. 3. 6.)}
     let seamLine=GeoGeometry.LineString[for index in 0..99999 -> p (if index%2=0 then 170. else -170.) 10.]
+    let hemisphereProjection=Projection.create (ProjectionConfig.defaultValue ProjectionKind.Orthographic) |> ok
+    let hemisphereLine=GeoGeometry.LineString[for index in 0..9999 -> p (if index%2=0 then 0. else 120.) 0.]
     let results=[|
+        measure "geo-hemisphere-path-10000" 100. 6000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue hemisphereProjection hemisphereLine |> ok
+            let commands=paths |> List.sumBy(fun path -> Ranvier.D5.Path.commands path |> List.length)
+            if paths.Length<>5000 || commands<>44996 then failwithf "Hemisphere output: %d paths, %d commands" paths.Length commands)
         measure "geo-seam-path-100000" 250. 40000000L (fun () ->
             let paths=GeoPath.project GeoPathOptions.defaultValue pointProjection seamLine |> ok
             if paths.Length<>100000 || (paths |> List.sumBy(fun path -> Ranvier.D5.Path.commands path |> List.length))<>299998 then failwith "Seam fragment count")

@@ -186,6 +186,50 @@ let tests = testList "geographic paths" [
         let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Rotation=rotation} |> ok
         let paths=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString[p -10. 10.;p 10. 10.]) |> ok
         Expect.equal paths.Length 2 "rotation moves the arc across the seam"
+    testCase "clips orthographic line entry and exit at the exact limb" <| fun _ ->
+        let projected=projection ProjectionKind.Orthographic
+        for positions,expectedFirst,expectedLast in [
+            [p 0. 0.;p 120. 0.],{X=0.;Y=0.},{X=1.;Y=0.}
+            [p 120. 0.;p 0. 0.],{X=1.;Y=0.},{X=0.;Y=0.}
+        ] do
+            let paths=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString positions) |> ok
+            Expect.equal paths.Length 1 "one visible fragment"
+            let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+            Expect.isLessThan (Point.distanceSquared vertices.Head expectedFirst) 1e-24 "first endpoint"
+            Expect.isLessThan (Point.distanceSquared (List.last vertices) expectedLast) 1e-24 "last endpoint"
+            Expect.isTrue (vertices |> List.forall(fun point -> Double.Hypot(point.X,point.Y)<=1.+1e-14)) "inside the projected globe"
+    testCase "hidden orthographic arcs and boundary-only touches produce no fragment" <| fun _ ->
+        let projected=projection ProjectionKind.Orthographic
+        for positions in [[p 120. 0.;p 170. 20.];[p 90. 0.;p 100. 0.];[p 100. 0.;p 90. 0.]] do
+            Expect.equal (GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString positions) |> ok) [] "no visible line extent"
+    testCase "orthographic reentry separates visible fragments without a connector" <| fun _ ->
+        let paths=GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Orthographic) (GeoGeometry.LineString[p -20. 0.;p 120. 0.;p 160. 20.;p 20. 20.]) |> ok
+        Expect.equal paths.Length 2 "two visible runs"
+        for path in paths do
+            let vertices=Path.commands path |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+            Expect.isTrue (vertices |> List.forall(fun point -> Double.Hypot(point.X,point.Y)<=1.+1e-14)) "hidden segments omitted"
+    testCase "orthographic clipping respects rotation and keeps pole vertices connected" <| fun _ ->
+        let rotation=GeoRotation.create 180. 0. 0. |> ok
+        let rotated=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Orthographic with Rotation=rotation} |> ok
+        Expect.equal (GeoPath.project GeoPathOptions.defaultValue rotated (GeoGeometry.LineString[p 0. 0.;p 60. 0.]) |> ok) [] "rotated hidden hemisphere"
+        let paths=GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Orthographic) (GeoGeometry.LineString[p -90. 60.;p 0. 90.;p 90. 60.]) |> ok
+        Expect.equal paths.Length 1 "pole aliases do not split a continuous visible arc"
+    testCase "orthographic near-limb and oblique crossings remain bounded" <| fun _ ->
+        let projected=projection ProjectionKind.Orthographic
+        for start,finish in [
+            p (90.-1e-10) 20.,p (90.+1e-10) 20.
+            p -30. -40.,p 120. 60.
+            p 30. 40.,p -120. -60.
+        ] do
+            for first,last in [start,finish;finish,start] do
+                let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=0.001} projected (GeoGeometry.LineString[first;last]) |> ok
+                Expect.equal paths.Length 1 "one visible portion"
+                let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+                Expect.isTrue (vertices |> List.forall(fun point -> Double.IsFinite point.X && Double.IsFinite point.Y && Double.Hypot(point.X,point.Y)<=1.+1e-14)) "finite inside-disk vertices"
+                let boundary=if first= start then List.last vertices else vertices.Head
+                Expect.isLessThan (abs(Double.Hypot(boundary.X,boundary.Y)-1.)) 1e-12 "intersection on limb"
+    testCase "orthographic clipping rejects an ambiguous antipodal route" <| fun _ ->
+        Expect.isError (GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Orthographic) (GeoGeometry.LineString[p 0. 0.;p 180. 0.])) "route needs a waypoint"
     testCase "rejects point-radius overflow instead of emitting nonfinite path commands" <| fun _ ->
         let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Translate={X=Double.MaxValue;Y=0.}} |> ok
         Expect.isError (GeoPath.project {GeoPathOptions.defaultValue with PointRadius=Double.MaxValue} projected (GeoGeometry.Point(Some(p 0. 0.)))) "overflow is explicit"

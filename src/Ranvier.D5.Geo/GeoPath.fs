@@ -252,10 +252,33 @@ module GeoPath =
                         let edge (source:GeoPosition) (destination:GeoPosition) =
                             let first=if abs source.Latitude=90. then position destination.Longitude source.Latitude else source
                             let last=if abs destination.Latitude=90. then position first.Longitude destination.Latitude else destination
-                            if abs source.Latitude=90. then flush()
+                            if cylindrical && abs source.Latitude=90. then flush()
                             let delta=abs(first.Longitude-last.Longitude)
                             let side longitude=if longitude>0. then 180. else -180.
-                            if cylindrical && abs first.Longitude=180. && abs last.Longitude=180. then
+                            if not cylindrical then
+                                let struct(x0,_,_)=GeoMath.vector first
+                                let struct(x1,_,_)=GeoMath.vector last
+                                if x0>=0. && x1>=0. then
+                                    ensureStart first
+                                    segment 0 first last (tailPoint()) (screen last)
+                                elif x0<=0. && x1<=0. then flush()
+                                else
+                                    let arc=arcBetween first last
+                                    let root=atan2 (-arc.X) arc.TangentX
+                                    let root=if root<0. then root+Math.PI else root
+                                    if root>arc.Angle+1e-12 then
+                                        raise(Rejected(InvalidObservation "Hemisphere intersection lies outside its great-circle arc."))
+                                    let sine,cosine=sin root,cos root
+                                    let boundary=GeoMath.position(struct(0.,arc.Y*cosine+arc.TangentY*sine,arc.Z*cosine+arc.TangentZ*sine))
+                                    if x0>0. then
+                                        ensureStart first
+                                        segment 0 first boundary (tailPoint()) (screen boundary)
+                                        flush()
+                                    else
+                                        flush()
+                                        startFragment(screen boundary)
+                                        segment 0 boundary last (tailPoint()) (screen last)
+                            elif abs first.Longitude=180. && abs last.Longitude=180. then
                                 let positive=position 180. first.Latitude
                                 let longitude =
                                     match tail with
