@@ -149,11 +149,94 @@ module GeoPath =
                                 ArcTo(radius,radius,0.,false,true,{X=left;Y=point.Y})
                                 ArcTo(radius,radius,0.,false,true,start)
                                 Close])
+                let lineInput=ResizeArray<GeoPosition>()
+                let lineCommands=ResizeArray<PathCommand>()
+                let mutable inLine=false
+                let finishLine () =
+                    if lineInput.Count>0 then
+                        if options.ClipExtent.IsSome then
+                            raise(Rejected(InvalidObservation "Rectangular line clipping is not yet implemented."))
+                        lineCommands.Clear()
+                        let add command =
+                            reserve 1
+                            if lineCommands.Count>=options.MaxBufferedPoints then
+                                raise(Rejected(BudgetExceeded "Projected line exceeds its buffer budget."))
+                            lineCommands.Add command
+                        let screen position =
+                            match Projection.projectValue projection position with
+                            | ValueSome value -> value
+                            | ValueNone -> raise(Rejected(InvalidObservation "This line requires spherical preclipping before projection."))
+                        let rec segment depth (first:GeoPosition) (last:GeoPosition) (a:Point) (b:Point) =
+                            spend 1L
+                            let start,finish=GeoPosition.normalize first,GeoPosition.normalize last
+                            if abs(start.Longitude-finish.Longitude)>=180. then
+                                raise(Rejected(InvalidObservation "Antimeridian and pole-crossing line preclipping is not yet implemented."))
+                            let arc =
+                                match GeoArc.create first last with
+                                | Ok value -> value
+                                | Error errors -> raise(Rejected errors.Head)
+                            let interpolate amount = GeoArc.atFraction amount arc
+                            let midpoint=interpolate 0.5
+                            let middle=screen midpoint
+                            let dx,dy=b.X-a.X,b.Y-a.Y
+                            let mx,my=middle.X-a.X,middle.Y-a.Y
+                            let length=Double.Hypot(dx,dy)
+                            if not(Double.IsFinite length && Double.IsFinite mx && Double.IsFinite my) then
+                                raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
+                            let error,parameter =
+                                if length=0. then Double.Hypot(mx,my),0.5
+                                else
+                                    let ux,uy=dx/length,dy/length
+                                    abs(ux*my-uy*mx),(ux*mx+uy*my)/length
+                            let mutable subdivide=error>options.Precision || abs(parameter-0.5)>0.3 || arc.Angle>Math.PI/6.
+                            if not subdivide then
+                                let quarterExceeds amount =
+                                    spend 1L
+                                    let sample=interpolate amount |> screen
+                                    let qx,qy=sample.X-a.X,sample.Y-a.Y
+                                    if not(Double.IsFinite qx && Double.IsFinite qy) then
+                                        raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
+                                    if length=0. then Double.Hypot(qx,qy)>options.Precision
+                                    else
+                                        let ux,uy=dx/length,dy/length
+                                        abs(ux*qy-uy*qx)>options.Precision || abs((ux*qx+uy*qy)/length-amount)>0.3
+                                subdivide<-quarterExceeds 0.25 || quarterExceeds 0.75
+                            if subdivide then
+                                if depth>=options.MaxSubdivisionDepth then
+                                    raise(Rejected(BudgetExceeded "Projected line cannot meet precision within its subdivision depth."))
+                                segment (depth+1) first midpoint a middle
+                                segment (depth+1) midpoint last middle b
+                            else add(LineTo b)
+                        let mutable previous=lineInput[0]
+                        let mutable previousScreen=screen previous
+                        add(MoveTo previousScreen)
+                        for index=1 to lineInput.Count-1 do
+                            spend 1L
+                            let current=lineInput[index]
+                            let currentScreen=screen current
+                            segment 0 previous current previousScreen currentScreen
+                            previous<-current
+                            previousScreen<-currentScreen
+                        let mutable commands=[]
+                        for index=lineCommands.Count-1 downto 0 do
+                            spend 1L
+                            commands<-lineCommands[index]::commands
+                        paths.Add(Path.ofCommands commands)
                 let folder () event =
                     spend 1L
                     match event with
-                    | GeoStreamEvent.Point position -> Projection.project projection position |> Option.iter circle
-                    | _ -> raise(Rejected(InvalidObservation "Geographic line and polygon path projection is not yet implemented."))
+                    | GeoStreamEvent.Point position ->
+                        if inLine then
+                            if lineInput.Count>=options.MaxBufferedPoints then
+                                raise(Rejected(BudgetExceeded "Input line exceeds its projection buffer budget."))
+                            lineInput.Add position
+                        else
+                            match Projection.projectValue projection position with
+                            | ValueSome point -> circle point
+                            | ValueNone -> ()
+                    | GeoStreamEvent.LineStart -> lineInput.Clear(); inLine<-true
+                    | GeoStreamEvent.LineEnd -> finishLine(); inLine<-false
+                    | _ -> raise(Rejected(InvalidObservation "Geographic polygon path projection is not yet implemented."))
                 match GeoStream.foldWithCancellation options.InputLimits token folder () geometry with
                 | Error errors -> Error errors
                 | Ok () ->

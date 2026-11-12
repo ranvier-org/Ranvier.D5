@@ -67,6 +67,59 @@ let tests = testList "geographic paths" [
             match GeoPath.project limited (projection ProjectionKind.Equirectangular) (GeoGeometry.Point(Some(p 0. 0.))) with
             | Error [BudgetExceeded _] -> ()
             | result -> failtestf "Expected bounded tessellation failure, got %A" result
+    testCase "projects a continuous equatorial line without point symbols" <| fun _ ->
+        let paths=GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Equirectangular) (GeoGeometry.LineString[p 0. 0.;p 10. 0.]) |> ok
+        Expect.equal paths.Length 1 "one connected line"
+        match Path.commands paths.Head with
+        | [MoveTo first;LineTo last] ->
+            Expect.equal first {X=0.;Y=0.} "first endpoint"
+            Expect.isLessThan (abs(last.X-Math.PI/18.)) 1e-12 "last endpoint"
+            Expect.equal last.Y 0. "equator"
+        | commands -> failtestf "Expected a line, got %A" commands
+    testCase "resamples projected great-circle curvature in screen units" <| fun _ ->
+        let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Scale=100.} |> ok
+        let geometry=GeoGeometry.LineString[p -45. 60.;p 45. 60.]
+        let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=0.1} projected geometry |> ok
+        let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+        Expect.isGreaterThan vertices.Length 2 "curved arc is subdivided"
+        let north=atan(tan(Math.PI/3.)/cos(Math.PI/4.))
+        Expect.isLessThan (abs((vertices |> List.minBy(fun point -> point.Y)).Y + 100.*north)) 1e-10 "great-circle midpoint"
+        Expect.isFalse (Path.commands paths.Head |> List.contains Close) "line remains open"
+    testCase "resampling detects symmetric curvature that a midpoint misses" <| fun _ ->
+        let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Scale=10000.} |> ok
+        let first,last=p -5. -5.,p 5. 5.
+        let options={GeoPathOptions.defaultValue with Precision=0.01}
+        let paths=GeoPath.project options projected (GeoGeometry.LineString[first;last]) |> ok
+        let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+        Expect.isGreaterThan vertices.Length 2 "symmetric arc still has curvature"
+        let segments=List.pairwise vertices
+        let distance (point:Point) (a:Point,b:Point) =
+            let dx,dy=b.X-a.X,b.Y-a.Y
+            let parameter=Math.Clamp(((point.X-a.X)*dx+(point.Y-a.Y)*dy)/(dx*dx+dy*dy),0.,1.)
+            Double.Hypot(point.X-(a.X+parameter*dx),point.Y-(a.Y+parameter*dy))
+        for index=0 to 100 do
+            let point=Geodesic.interpolate (float index/100.) first last |> ok |> Projection.project projected |> Option.get
+            Expect.isLessThan (segments |> List.map(distance point) |> List.min) 0.0101 "dense reference samples meet screen tolerance"
+    testCase "line resampling preserves tiny and nearly antipodal unique arcs" <| fun _ ->
+        let projected=projection ProjectionKind.Equirectangular
+        let options={GeoPathOptions.defaultValue with Precision=1e-5;MaxOutputPoints=10000}
+        let paths=GeoPath.project options projected (GeoGeometry.LineString[p 0. 0.;p 179.999 0.001]) |> ok
+        let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+        Expect.isGreaterThan vertices.Length 2 "nearly antipodal arc is unique and subdivided"
+        Expect.isTrue (vertices |> List.forall(fun point -> Double.IsFinite point.X && Double.IsFinite point.Y)) "finite output"
+        Expect.equal vertices.Head (Projection.project projected (p 0. 0.) |> Option.get) "first endpoint"
+        Expect.equal (List.last vertices) (Projection.project projected (p 179.999 0.001) |> Option.get) "last endpoint"
+        let tiny=GeoPath.project GeoPathOptions.defaultValue projected (GeoGeometry.LineString[p 0. 0.;p 1e-200 1e-200]) |> ok
+        match Path.commands tiny.Head with
+        | [MoveTo _;LineTo point] -> Expect.isTrue (point.X>0. && point.Y<0.) "tiny endpoint survives"
+        | commands -> failtestf "Unexpected tiny arc %A" commands
+    testCase "resampling rejects unmet precision and exhausted output or buffer budgets" <| fun _ ->
+        let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Scale=100.} |> ok
+        let geometry=GeoGeometry.LineString[p -45. 60.;p 45. 60.]
+        for options in [{GeoPathOptions.defaultValue with Precision=1e-10;MaxSubdivisionDepth=1};{GeoPathOptions.defaultValue with MaxOutputPoints=2};{GeoPathOptions.defaultValue with MaxBufferedPoints=2}] do
+            match GeoPath.project options projected geometry with
+            | Error [BudgetExceeded _] -> ()
+            | result -> failtestf "Expected bounded resampling failure, got %A" result
     testCase "rejects point-radius overflow instead of emitting nonfinite path commands" <| fun _ ->
         let projected=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Equirectangular with Translate={X=Double.MaxValue;Y=0.}} |> ok
         Expect.isError (GeoPath.project {GeoPathOptions.defaultValue with PointRadius=Double.MaxValue} projected (GeoGeometry.Point(Some(p 0. 0.)))) "overflow is explicit"

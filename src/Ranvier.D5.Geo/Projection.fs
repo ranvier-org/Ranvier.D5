@@ -68,7 +68,7 @@ module Projection =
             | ValueSome struct(x,y) -> Ok {Config=config;CenterX=x;CenterY=y}
 
     /// <summary>Maps a position to screen coordinates, or None at a singularity, behind the orthographic limb, or on overflow.</summary>
-    let project projection position =
+    let internal projectValue projection position =
         let config=projection.Config
         let rotated=GeoRotation.apply config.Rotation position
         let visible =
@@ -78,15 +78,18 @@ module Projection =
                 let struct(_,cosLatitude)=GeoMath.sinCosDegrees rotated.Latitude
                 cosLongitude*cosLatitude >= 0.
             | _ -> true
-        if not visible then None
+        if not visible then ValueNone
         else
             match raw config.Kind rotated with
-            | ValueNone -> None
+            | ValueNone -> ValueNone
             | ValueSome struct(x,y) ->
                 let screenX=config.Translate.X + config.Scale*(x-projection.CenterX)
                 let screenY=config.Translate.Y - config.Scale*(y-projection.CenterY)
-                if Double.IsFinite screenX && Double.IsFinite screenY then Some {X=screenX;Y=screenY}
-                else None
+                if Double.IsFinite screenX && Double.IsFinite screenY then ValueSome {X=screenX;Y=screenY}
+                else ValueNone
+
+    /// <summary>Maps a position to screen coordinates, or None at a singularity, behind the orthographic limb, or on overflow.</summary>
+    let project projection position = projectValue projection position |> ValueOption.toOption
 
     /// <summary>Inverts a finite screen point within the raw mapping domain, then undoes rotation.</summary>
     /// <remarks>Rejects points outside the canonical cylindrical world or orthographic disk, and Mercator latitudes that round to a singular pole. Orthographic inversion admits eight unit-roundoff steps beyond the limb to absorb screen-transform rounding.</remarks>

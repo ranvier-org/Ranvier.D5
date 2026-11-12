@@ -52,6 +52,9 @@ let main args =
     let clippedPointGeometry=GeoGeometry.MultiPoint(List.replicate 1000 (p 0. 0.))
     let clippedPointOptions={GeoPathOptions.defaultValue with PointRadius=2.;Precision=0.01;ClipExtent=Some(Ranvier.D5.Bounds.create 0. -3. 3. 6.)}
     let results=[|
+        measure "geo-line-path-100000" 100. 16000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue pointProjection line |> ok
+            if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100000 then failwith "Line path count")
         measure "geo-clipped-point-paths-1000" 50. 4000000L (fun () ->
             let paths=GeoPath.project clippedPointOptions pointProjection clippedPointGeometry |> ok
             if paths.Length<>1000 then failwith "Clipped point path count")
