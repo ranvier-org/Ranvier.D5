@@ -17,10 +17,16 @@ let mount (host: WebCoreHost) graph read =
     Mounting.mount graph None (fun errors -> raise (AggregateException errors)) container None
         (fun context -> Program.run (Component.render Renderer.passive read) context.Backend)
 
-let capture path =
+let capture linked path =
     use host = WebCoreHost.Create(820, 590)
     use graph = new Graph()
-    let mounted = mount host graph (fun () -> Scenes.scene 0.)
+    let mounted:IDisposable =
+        if linked then
+            let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
+            owner :> IDisposable
+        else
+            let mounted=mount host graph (fun () -> Scenes.scene 0.)
+            {new IDisposable with member _.Dispose()=mounted.Dispose()}
     host.Cycle()
     host.Frame()
     let struct(width, height) = host.PaintSize
@@ -51,7 +57,14 @@ let capture path =
 [<EntryPoint>]
 let main args =
     if args.Length = 2 && args[0] = "--capture" then
-        capture args[1]
+        capture false args[1]
+    elif args.Length=2 && args[0]="--capture-linked" then
+        capture true args[1]
+    elif Array.contains "--linked" args then
+        use window = Window.Create("Ranvier.D5 linked selection",820,590)
+        let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount window.Host window.Graph
+        while window.Step() do ()
+        owner.Dispose()
     elif Array.contains "--chart" args then
         use window = Window.Create("Ranvier.D5 reactive chart",820,590)
         let source,scene=window.Graph.Run ReactiveChart.create

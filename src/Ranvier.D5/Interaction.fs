@@ -7,18 +7,18 @@ type GestureMode = Pan | Drag | Rectangle | Lasso
 type GestureConfig = {Mode:GestureMode;MinZoom:float;MaxZoom:float;WheelSensitivity:float;MaxLassoPoints:int}
 [<RequireQualifiedAccess>]
 type InputEvent =
-    | Down of pointer:int * position:Point * target:string option
+    | Down of pointer:int * position:Point * target:string list option
     | Move of pointer:int * position:Point
     | Up of pointer:int * position:Point
     | Wheel of anchor:Point * delta:float
     | Key of string
-    | Cancel | FocusLost | Leave | Resize | NodeExit of string
+    | Cancel | FocusLost | Leave | Resize | NodeExit of string list
 [<RequireQualifiedAccess>]
 type GestureCommand =
-    | Capture of int | Release of int | ZoomChanged of Zoom | DragBy of string option * Point
+    | Capture of int | Release of int | ZoomChanged of Zoom | DragBy of string list option * Point
     | SelectRectangle of Bounds | SelectLasso of Point list | Hover of Point option
     | MoveFocus of int | SelectFocused | ClearSelection
-type GestureState = {Zoom:Zoom;Pointers:Map<int,Point>;Start:Point option;Target:string option;Lasso:Point list}
+type GestureState = {Zoom:Zoom;Pointers:Map<int,Point>;Start:Point option;Target:string list option;Lasso:Point list}
 
 [<RequireQualifiedAccess>]
 module Gesture =

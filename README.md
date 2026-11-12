@@ -48,6 +48,12 @@ dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --capture gallery
 
 It renders a signal-driven line, donut, treemap and bars using the same scene primitives.
 
+## Expansion packages and examples
+
+`Ranvier.D5.Charts` adds typed, pure chart recipes. See [alpha.2 scope and validation](docs/release-alpha.2.md), [owned interaction](docs/interaction.md), [keyed transitions](docs/transitions.md), [background layouts](docs/background-layout.md), and [palettes](docs/chromatic.md).
+
+Run `dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --linked` for signal-linked scatter/brush/line views. Use `--chart` for the reactive Cartesian recipe demo.
+
 ## Build and verify
 
 ```sh
@@ -68,7 +74,7 @@ Append `-p:RanvierTrace=true` for Traced. Native acceptance requires WebCore's p
 python tools/snapshot-kit.py ../snapshots
 ```
 
-Snapshots are reference material; builds use a compatible published cohort: Ranvier preview.2, Anime rc.1, CSS alpha.2, View 0.1.49-rc.2 and WebCore backend rc.6 / native rc.7. Newer independent core/CSS packages are deliberately not substituted because Anime/View pin this cohort. See [design](docs/design.md).
+Snapshots are reference material; builds use a compatible published cohort: Ranvier preview.2, Anime rc.2, CSS alpha.2, View 0.1.49-rc.2 and WebCore backend rc.6 / native rc.7. Newer independent core/CSS packages are deliberately not substituted because Anime/View pin this cohort. See [design](docs/design.md).
 
 D5 provides reusable foundations, not every D3 algorithm. Geographic clipping/projections, contours, force simulation and specialized graph layouts remain extensions. Large scenes need aggregation/windowing; SVG does not promise million-mark frame rates.
 

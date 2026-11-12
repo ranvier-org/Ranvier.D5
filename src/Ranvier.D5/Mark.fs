@@ -48,7 +48,7 @@ module Mark =
     let style mark = mark.Style
     let transform mark = mark.Matrix
     let label mark = mark.Label
-    let withFill fill mark = { mark with Style={mark.Style with Fill=fill} }
+    let withFill fill mark = { mark with Style={mark.Style with Fill=fill};FillDefinition=None }
     /// <summary>Sets stroke paint and a nonnegative width in scene units.</summary>
     let withStroke stroke width mark =
         Check.finite "width" width

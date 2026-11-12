@@ -6,6 +6,12 @@ open Expecto
 open Ranvier.D5
 
 let tests = testList "Scale and time expansion" [
+    testCase "narrow logarithmic ticks preserve sign and direction" <| fun _ ->
+        for a,b in [3.1,3.2;3.2,3.1;-3.1,-3.2;-3.2,-3.1] do
+            let values=Scale.logTicks 10. 5 (Scale.log 10. (a,b) (0.,1.))
+            Expect.isGreaterThan values.Length 1 "narrow domain ticks"
+            Expect.isTrue (values |> List.forall(fun value -> value>=min a b && value<=max a b)) "within domain"
+            Expect.equal values (if a>b then List.sortDescending values else List.sort values) "direction"
     testCase "piecewise mapping and inversion retain knots and direction" <| fun _ ->
         let s=Scale.piecewise [0.;5.;10.] [0.;20.;100.]
         DataScaleTests.near 60. (Scale.piecewiseMap s 7.5)

@@ -99,7 +99,7 @@ module internal Radial =
             let marks,semantics,hits=List.unzip3 entries
             let axes=List.zip spec.Dimensions scales |> List.mapi (fun i (dimension,scale) ->
                 Axis.values (Recipe.key ["dimension";string i;dimension.Label]) AxisOrientation.Left (position i) (Bounds.y bounds,Bounds.y bounds+Bounds.height bounds)
-                    (Scale.ticks 4 scale |> List.map (fun value -> Recipe.number value,Scale.map scale value,Recipe.number value))) |> List.concat
+                    (Scale.ticks 4 scale |> List.map (fun value -> value.ToString("R",Globalization.CultureInfo.InvariantCulture),Scale.map scale value,Recipe.number value))) |> List.concat
             Recipe.output spec.Frame bounds marks semantics (List.concat hits) axes)
 
     let calendar (spec:CalendarSpec<'T>) data =

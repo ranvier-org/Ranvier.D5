@@ -39,7 +39,7 @@ module Facet =
                     | HitBounds b -> HitBounds(Bounds.create (Bounds.x b+x) (Bounds.y b+y) (Bounds.width b) (Bounds.height b))
                     | HitSector(center,inner,outer,start,finish) -> HitSector(translate center,inner,outer,start,finish)
                 let semantic (s:SemanticMark)={s with MarkPath=scope::s.MarkPath}
-                let hit (h:HitTarget)={h with MarkPath=scope::h.MarkPath;Geometry=geometry h.Geometry}
+                let hit (h:HitTarget)={h with MarkPath=scope::h.MarkPath;Geometry=geometry h.Geometry;Clip=h.Clip |> Option.map(fun b -> Bounds.create (Bounds.x b+x) (Bounds.y b+y) (Bounds.width b) (Bounds.height b))}
                 Group({GroupSpec.create scope with Transform=Transform.translate x y},Scene.nodes output.Scene |> List.map node),
                 (Scene.definitions output.Scene |> List.map definition),(List.map semantic output.Semantics),(List.map hit output.HitTargets))
             let scene=Scene.compose spec.Frame.Viewport spec.Frame.Title (cells |> List.collect (fun (_,d,_,_) -> d)) (cells |> List.map (fun (n,_,_,_) -> n))

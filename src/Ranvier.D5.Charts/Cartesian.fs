@@ -40,7 +40,7 @@ module internal Cartesian =
                     Recipe.rectangle markId description (spec.Color s) box,Recipe.semantic markId [id] description,Recipe.hit markId [id] (HitBounds box)) |> List.unzip3
             let ticks=categories |> List.map (fun c -> c,(Scale.bandPosition bands c |> Option.get)+Scale.bandwidth bands/2.,c)
             let axes=Axis.values "category" (if vertical then AxisOrientation.Bottom else AxisOrientation.Left) (if vertical then Bounds.y bounds+Bounds.height bounds else Bounds.x bounds) categoryRange ticks
-            let valueTicks=Scale.ticks 5 scale |> List.map (fun v -> Recipe.number v,Scale.map scale v,Recipe.number v)
+            let valueTicks=Scale.ticks 5 scale |> List.map (fun v -> v.ToString("R",Globalization.CultureInfo.InvariantCulture),Scale.map scale v,Recipe.number v)
             let valueAxis=Axis.values "value" (if vertical then AxisOrientation.Left else AxisOrientation.Bottom) (if vertical then Bounds.x bounds else Bounds.y bounds+Bounds.height bounds) valueRange valueTicks
             Recipe.output spec.Frame bounds marks semantics hits (axes@valueAxis))
 
@@ -77,7 +77,8 @@ module internal Cartesian =
                     | LineKind.Area baseline,_ -> points |> List.map (Option.map (fun p -> Point.create p.X (Scale.map y baseline),p)) |> Curves.area spec.Curve
                     | _,Some(xs,layers) ->
                         let layer=layers |> List.find (fun l -> l.Key=series)
-                        List.map2 (fun xv (a,b) -> Some(Point.create (Scale.map x xv) (Scale.map y a),Point.create (Scale.map x xv) (Scale.map y b))) xs layer.Values |> Curves.area spec.Curve
+                        let observed=rows |> List.choose(fun (_,_,x,y) -> match x,y with Some x,Some _ -> Some x | _ -> None) |> Set.ofList
+                        List.map2 (fun xv (a,b) -> if Set.contains xv observed then Some(Point.create (Scale.map x xv) (Scale.map y a),Point.create (Scale.map x xv) (Scale.map y b)) else None) xs layer.Values |> Curves.area spec.Curve
                     | _ -> invalidOp "Missing stacked layout."
                 let mark=Mark.path markId geometry |> Mark.withStroke (spec.Color series) 1.5 |> Mark.withFill (if spec.Kind=LineKind.Line then Paint.none else spec.Color series) |> Mark.withLabel(Some series)
                 mark,Recipe.semantic markId (rows |> List.choose (point >> Option.map fst)) series) |> List.unzip

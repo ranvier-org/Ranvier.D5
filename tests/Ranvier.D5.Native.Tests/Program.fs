@@ -95,12 +95,15 @@ let acceptance () =
             let stops = [{Offset=0.;Color=Paint.rgb 255 0 0;Opacity=1.};{Offset=1.;Color=Paint.rgb 0 0 255;Opacity=1.}]
             let rect = Shape.rectangle(Bounds.create 0. 0. 80. 80.) |> Mark.path "same" |> Mark.withFillDefinition "paint"
             Scene.compose {Width=300.;Height=180.} "Composed"
-                [clip;LinearGradient("paint",Point.create 0. 0.,Point.create 30. 0.,stops)]
+                [clip;RectClip(string(char 0xD800),Bounds.create 0. 0. 1. 1.);RectClip(string(char 0xD801),Bounds.create 0. 0. 1. 1.);LinearGradient("paint",Point.create 0. 0.,Point.create 30. 0.,stops)]
                 [Group({GroupSpec.create "plot" with Clip=Some "plot";Transform=Transform.translate 10. 10.},[Leaf rect])]
         graph.Run(fun () -> source.Value <- composed())
         host.Cycle()
         host.Frame()
         let group = container.querySelector "[data-d5-group='plot']"
+        let clipPaths=container.querySelectorAll "clipPath"
+        let clipIds=[for i in 0u..clipPaths.length-1u -> (clipPaths.item i :?> Ranvier.Dom.Element).getAttribute "id"]
+        Expect.equal (Set.ofList clipIds).Count 3 "all UTF-16 definition keys have unique DOM IDs"
         let clipId = (container.querySelector "clipPath").getAttribute "id"
         Expect.equal (group.getAttribute "clip-path") ("url(#"+clipId+")") "clip reference scoped to mount"
         let clipped = Array.zeroCreate<byte> before.Length
@@ -126,6 +129,26 @@ let acceptance () =
         graph.Run(fun () -> source.Value <- make [box "after-dispose" 10. (Paint.rgb 0 0 0)])
         host.Cycle()
         Expect.isNull (container.querySelector "svg") "disposed mount cannot resurrect scene"
+        let linkedOwner,selected,readScatter,readLine,interaction=Ranvier.D5.Examples.LinkedCharts.mount host graph
+        host.Cycle()
+        let chart=graph.Run readScatter
+        let point=match chart.HitTargets[10].Geometry with Ranvier.D5.Charts.HitPoint(point,_) -> point | _ -> failwith "scatter target"
+        graph.Run(fun () ->
+            interaction.Send(InputEvent.Down(1,Point.create (point.X-2.) (point.Y-2.),None))
+            interaction.Send(InputEvent.Up(1,Point.create (point.X+2.) (point.Y+2.))))
+        Expect.equal (graph.Run(fun () -> selected.Value)) (set ["10"]) "brush updates shared signal"
+        Expect.equal (graph.Run(fun () -> (readLine()).HitTargets.Length)) 1 "linked line follows selection"
+        let scopedChart=graph.Run(fun () -> Api.createSignal {chart with Semantics=[{chart.Semantics.Head with MarkPath=["A";"p"]};{chart.Semantics.Head with MarkPath=["B";"p"]}]})
+        let scopedOwner,scopedInput=graph.Run(fun () -> Api.createRoot(fun owner ->
+            let svg=host.Document.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
+            owner,ChartInteraction.attach svg (fun () -> {config with Mode=GestureMode.Drag}) (fun () -> scopedChart.Value) ignore))
+        scopedInput.Send(InputEvent.Down(1,point,Some ["A";"p"]))
+        graph.Run(fun () -> scopedChart.Value<-{scopedChart.Value with Semantics=[scopedChart.Value.Semantics[1]]})
+        Expect.isEmpty (graph.Run(fun () -> scopedInput.Gesture.Pointers)) "removed scoped target cancels despite identical sibling leaf"
+        scopedOwner.Dispose()
+        linkedOwner.Dispose()
+        host.Cycle()
+        Expect.equal (host.Document.querySelectorAll("svg").length) 0u "linked owner removes both views"
 
 [<EntryPoint>]
 let main _ =

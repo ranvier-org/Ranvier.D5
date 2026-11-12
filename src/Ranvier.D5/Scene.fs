@@ -52,6 +52,11 @@ type AxisOrientation = Bottom | Top | Left | Right
 [<RequireQualifiedAccess>]
 module Axis =
     /// <summary>Builds explicitly bounded axes with caller-supplied semantic tick keys.</summary>
+    let private labelStyle orientation mark =
+        let style=Mark.textStyle mark
+        let anchor=match orientation with AxisOrientation.Left -> "end" | AxisOrientation.Right -> "start" | _ -> "middle"
+        Mark.withTextStyle {style with Anchor=anchor;Baseline=(if orientation=AxisOrientation.Left || orientation=AxisOrientation.Right then "middle" else "alphabetic")} mark
+
     let values prefix orientation origin (start,finish) (positions:(string * float * string) list) =
         Check.finite "origin" origin
         Check.finite "start" start
@@ -65,7 +70,7 @@ module Axis =
         domain :: (positions |> List.collect (fun (id,position,label) ->
             let key = prefix+"/value/"+string id.Length+":"+id
             [Mark.path (key+"/tick") (Path.ofCommands [MoveTo(point position origin);LineTo(point position (origin+direction*6.))]) |> stroke
-             Mark.text (key+"/label") (point position (origin+direction*18.)) label]))
+             Mark.text (key+"/label") (point position (origin+direction*(if horizontal then 18. else 9.))) label |> labelStyle orientation]))
 
     let private build prefix orientation origin positions =
         Check.finite "origin" origin
@@ -83,7 +88,7 @@ module Axis =
         domain @ (positions |> List.mapi (fun i (position,label) ->
             let key = prefix+"/"+string i
             [Mark.path (key+"/tick") (Path.ofCommands [MoveTo(point position origin);LineTo(point position (origin+direction*6.))]) |> stroke
-             Mark.text (key+"/label") (point position (origin+direction*18.)) label]) |> List.concat)
+             Mark.text (key+"/label") (point position (origin+direction*(if horizontal then 18. else 9.))) label |> labelStyle orientation]) |> List.concat)
     /// <summary>Builds composable numeric tick and label marks using a caller-supplied formatter.</summary>
     let numeric prefix orientation origin count scale format =
         Scale.ticks count scale |> List.map (fun value -> Scale.map scale value,format value) |> build prefix orientation origin
