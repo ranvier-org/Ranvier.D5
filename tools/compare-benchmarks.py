@@ -2,6 +2,7 @@
 import argparse
 import io
 import json
+import os
 import pathlib
 import platform
 import statistics
@@ -34,9 +35,15 @@ program.write_text(text, encoding="utf-8")
 project = "benchmarks/Ranvier.D5.Benchmarks"
 variant = "-p:RanvierTrace=" + args.traced
 
-def run(command, cwd, log):
+# Pin the same optimization stage in both subprocesses. Three warmup calls do
+# not guarantee that asynchronous tier promotion has completed on either side.
+benchmark_settings = {"DOTNET_TieredCompilation": "0", "COMPlus_TieredCompilation": "0"}
+benchmark_environment = dict(os.environ, **benchmark_settings)
+
+
+def run(command, cwd, log, environment=None):
     with log.open("w", encoding="utf-8") as stream:
-        result = subprocess.run(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT, timeout=300)
+        result = subprocess.run(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT, timeout=300, env=environment)
     if result.returncode:
         print(log.read_text(encoding="utf-8"))
         raise SystemExit(result.returncode)
@@ -53,7 +60,7 @@ for pair in range(3):
     for label, directory in ordering:
         target = out / (label + "-" + str(pair) + ".json")
         run(["dotnet", "run", "--project", project, "-c", "Release", variant, "--no-build", "--", str(target)],
-            directory, out / (label + "-" + str(pair) + ".log"))
+            directory, out / (label + "-" + str(pair) + ".log"), benchmark_environment)
         samples[label].append({item["Name"]: item for item in json.loads(target.read_text())})
 
 rows = []
@@ -69,6 +76,8 @@ for name in samples["baseline"][0]:
                      currentBytes=current, timeRegression=time_fail, allocationRegression=allocation_fail))
     print(f"{name}: {before:.3f} -> {after:.3f} ms; {allocated} -> {current} bytes")
 report = dict(baseline=revision, current=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
-              platform=platform.platform(), traced=args.traced, pairs=3, samplesPerProcess=60, passed=not failed, results=rows)
+              platform=platform.platform(), traced=args.traced, pairs=3, samplesPerProcess=60,
+              runtimeSettings=benchmark_settings, optimizationMode="fully-optimized-without-tiering",
+              passed=not failed, results=rows)
 (out / "comparison.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 raise SystemExit(1 if failed else 0)

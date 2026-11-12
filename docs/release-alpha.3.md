@@ -44,6 +44,26 @@ and 89.23 ms for the full chart. Final absolute gates are respectively
 20/60/75/150/180 ms, with allocation limits of 4/12/20/15/48 MB. These leave
 runner-noise headroom while catching substantial regressions.
 
+The final candidate exposed a paired-harness defect on Linux: unchanged scale
+mapping compared roughly 0.90 ms baseline with 5.33 ms current. Three warmup calls
+could leave the two processes at different asynchronous JIT tiers. The paired
+harness now pins `DOTNET_TieredCompilation=0` (and its legacy alias) identically in
+both benchmark subprocesses, recording those settings in comparison.json.
+A local controlled run measured 1.630 ms baseline and 1.638 ms current for scale
+mapping. The original baseline revision, three alternating process pairs, 60
+samples and regression thresholds remain unchanged. Default-runtime absolute
+benchmarks still run separately in every CI job. This isolates steady optimized
+throughput; it does not measure application startup or dynamic PGO benefits.
+See [.NET compilation settings](https://learn.microsoft.com/en-us/dotnet/core/runtime-config/compilation).
+
+The controlled gate also exposed avoidable native attribute work. Renderer rows
+now retain one owner-scoped appearance memo: geometry-only updates keep existing
+style strings, while fill, stroke, opacity, font, transform and definition changes
+invalidate it. Native tests verify that style, font and transform fields still update.
+Measured 500-mark update/paint allocation fell from 1,902,456 to 1,538,456 bytes
+in the controlled runtime mode, below the baseline's 1,740,608 bytes. The matched
+three-pair gate passes with the original thresholds.
+
 Packing uses a conservative enclosing circle, not D3's minimum-circle output;
 fitted padding is approximate. Cancellation occurs around the pure hierarchy
 kernel; kernels do not poll a token during traversal. Tasks 6–11 remain open;
