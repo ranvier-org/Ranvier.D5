@@ -122,11 +122,27 @@ module MapChart =
                 exteriors |> List.map(fun exterior ->
                     {Outer=exterior;Holes=holes |> List.filter(fun hole -> Polygon.contains hole.Head exterior)}))
 
+    /// An interior point for selection and labels: the midpoint of the widest inside span on several scanlines,
+    /// so concave slivers at a limb or seam still anchor inside their fill rather than on an edge.
     let private anchor (polygons:HitPolygon list) =
-        let largest=polygons |> List.maxBy(fun polygon -> abs(Polygon.area polygon.Outer))
-        match Polygon.centroid largest.Outer with
-        | Some point when Polygon.contains point largest.Outer -> point
-        | _ -> largest.Outer.Head
+        let candidates=polygons |> List.collect(fun polygon ->
+            let rings=polygon.Outer::polygon.Holes
+            let ys=polygon.Outer |> List.map(fun point -> point.Y)
+            let top,bottom=List.min ys,List.max ys
+            [for step in 1..7 do
+                let y=top+(bottom-top)*float step/8.
+                let crossings=
+                    rings |> List.collect(fun ring ->
+                        (ring@[ring.Head]) |> List.pairwise |> List.choose(fun (a,b) ->
+                            if (a.Y<=y)<>(b.Y<=y) then Some(a.X+(y-a.Y)*(b.X-a.X)/(b.Y-a.Y)) else None))
+                    |> List.sort
+                for pair in crossings |> List.chunkBySize 2 do
+                    match pair with
+                    | [left;right] when right>left -> yield right-left,Point.create ((left+right)/2.) y
+                    | _ -> ()])
+        match candidates with
+        | [] -> (polygons |> List.maxBy(fun polygon -> abs(Polygon.area polygon.Outer))).Outer.Head
+        | _ -> candidates |> List.maxBy fst |> snd
 
     let private run (map:MapFrame) build =
         match ChartLayout.plot map.Frame with

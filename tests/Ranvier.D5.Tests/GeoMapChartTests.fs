@@ -41,6 +41,13 @@ let tests = testList "map charts" [
         Expect.isEmpty (pick -25. 0.) "inside Alpha's hole"
         Expect.equal (pick 55. 35.) ["c"] "second member of a multipolygon"
         Expect.isEmpty (pick 0. 0.) "between features"
+    testCase "region anchors lie inside concave fills, away from holes" <| fun _ ->
+        let crescent={Id="crescent";Name="Crescent";Geometry=GeoGeometry.Polygon[[p -40. -30.;p -40. 30.;p 40. 30.;p 40. 20.;p -30. 20.;p -30. -20.;p 40. -20.;p 40. -30.;p -40. -30.]]}
+        for feature in crescent::features do
+            let output=MapChart.choropleth (spec(map ProjectionKind.Equirectangular)) [feature] [] |> ok
+            match output.HitTargets.Head.Geometry with
+            | HitRegion(_,_,anchor) -> Expect.equal (HitTest.at anchor output |> List.collect(fun hit -> hit.DataIds)) [feature.Id] (feature.Id+" anchor picks its own fill")
+            | other -> failtestf "Unexpected geometry %A" other
     testCase "semantic IDs stay stable when data is reordered" <| fun _ ->
         let chart rows=MapChart.choropleth (spec(map ProjectionKind.Equirectangular)) features rows |> ok
         let rows=[{Id="a";Value=Some 1.};{Id="b";Value=Some 3.}]
