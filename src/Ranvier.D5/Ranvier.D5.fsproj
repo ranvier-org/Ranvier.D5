@@ -9,6 +9,8 @@
     <Compile Include="Data.fs" />
     <Compile Include="Statistics.fs" />
     <Compile Include="Scale.fs" />
+    <Compile Include="TimeTicks.fs" />
+    <Compile Include="Format.fs" />
     <Compile Include="Geometry.fs" />
     <Compile Include="Mark.fs" />
     <Compile Include="SceneDefinitions.fs" />

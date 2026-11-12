@@ -13,6 +13,8 @@ type Continuous = private {
 }
 
 /// <summary>Immutable category positions and positive band width.</summary>
+type Piecewise = private { Knots:float array; Outputs:float array }
+
 type Band<'Key when 'Key: comparison> = private { Positions: Map<'Key,float>; Width: float }
 
 /// <summary>UTC calendar units used to align ticks.</summary>
@@ -81,6 +83,39 @@ module Scale =
         let signedPow power x = if x < 0. then -Math.Pow(-x,power) else Math.Pow(x,power)
         create (signedPow exponent) (signedPow (1./exponent)) (fun _ -> true) domain range
 
+    let sqrt domain range = power 0.5 domain range
+
+    /// <summary>Creates a reversible piecewise scale with strictly monotone domains and ranges.</summary>
+    let piecewise domain range =
+        let check name values =
+            let a=List.toArray values
+            if a.Length<2 then invalidArg name "At least two knots required."
+            a |> Array.iter (Check.finite name)
+            let ascending=a[1]>a[0]
+            for i in 1..a.Length-1 do
+                if (if ascending then a[i]<=a[i-1] else a[i]>=a[i-1]) then invalidArg name "Knots must be strictly monotone."
+                Check.interval name (a[i-1],a[i])
+            a
+        let d,r=check "domain" domain,check "range" range
+        if d.Length<>r.Length then invalidArg "range" "Knot counts differ."
+        {Knots=d;Outputs=r}
+
+    let private piecewiseValue (domain:float array) (range:float array) value =
+        Check.finite "value" value
+        let ascending=domain[1]>domain[0]
+        let mutable lo=0
+        let mutable hi=domain.Length
+        while lo<hi do
+            let mid=lo+(hi-lo)/2
+            if (if ascending then domain[mid]<=value else domain[mid]>=value) then lo<-mid+1 else hi<-mid
+        let i=max 0 (min (domain.Length-2) (lo-1))
+        let result=Check.lerp range[i] range[i+1] ((value-domain[i])/(domain[i+1]-domain[i]))
+        Check.finite "value" result
+        result
+
+    let piecewiseMap scale value = piecewiseValue scale.Knots scale.Outputs value
+    let piecewiseInvert scale value = piecewiseValue scale.Outputs scale.Knots value
+
     /// <summary>Creates a symmetric logarithmic scale with a positive linear-region constant.</summary>
     let symlog constant domain range =
         Check.positive "constant" constant
@@ -102,7 +137,7 @@ module Scale =
                 else
                     let unit = Math.Pow(10.,floor (Math.Log10 raw))
                     let error = raw/unit
-                    let factor = if error >= sqrt 50. then 10. elif error >= sqrt 10. then 5. elif error >= sqrt 2. then 2. else 1.
+                    let factor = if error >= Math.Sqrt 50. then 10. elif error >= Math.Sqrt 10. then 5. elif error >= Math.Sqrt 2. then 2. else 1.
                     let step = factor*unit
                     Check.positive "domain" step
                     let first,last = ceil (lo/step), floor (hi/step)
@@ -110,6 +145,28 @@ module Scale =
                     if not (Double.IsFinite number) || number > 10000. then invalidArg "domain" "Tick range exceeds the bounded capacity."
                     let values = [for i in 0..int number -> (first+float i)*step]
                     if a>b then List.rev values else values
+
+    /// <summary>Logarithmic ticks, including integer-base minor ticks for short spans; bounded to 10,001 values.</summary>
+    let logTicks basis count scale =
+        Check.positive "basis" basis
+        if basis<=1. then invalidArg "basis" "Tick base must exceed one."
+        if count<=0 then [] else
+        if count>10000 then invalidArg "count" "Tick count exceeds capacity."
+        let a,b=scale.Domain
+        if a=0. || b=0. || Math.Sign a<>Math.Sign b then invalidArg "scale" "Log ticks require one nonzero sign."
+        let lo,hi=min (abs a) (abs b),max (abs a) (abs b)
+        let start,finish=Math.Log(lo,basis),Math.Log(hi,basis)
+        let values =
+            if basis=floor basis && basis<=100. && finish-start<float count then
+                [for exponent in int(floor start)..int(ceil finish) do
+                    let power=Math.Pow(basis,float exponent)
+                    for k in 1..int basis-1 do
+                        let v=float k*power
+                        if v>=lo && v<=hi && Double.IsFinite v then yield v]
+            else ticks count (linear (start,finish) (0.,1.)) |> List.map (fun exponent -> Math.Pow(basis,exponent))
+        if values.Length>10001 then invalidArg "scale" "Tick capacity exceeded."
+        let values=values |> List.map (fun v -> if a<0. then -v else v) |> List.sort
+        if a>b then List.rev values else values
 
     /// <summary>Expands a numeric domain to nice tick boundaries while preserving direction.</summary>
     let nice count scale =
@@ -175,6 +232,13 @@ module Scale =
         for i in 1..edges.Length-1 do
             if edges[i]<=edges[i-1] then invalidArg "boundaries" "Thresholds must increase strictly."
         fun value -> if Double.IsFinite value then Some values[Data.bisectRight edges value] else None
+
+    /// <summary>Returns every interval mapped to an output; None denotes an unbounded endpoint.</summary>
+    let invertExtent boundaries range output =
+        threshold boundaries range |> ignore
+        let edges=List.toArray boundaries
+        range |> List.indexed |> List.choose (fun (i,value) ->
+            if value=output then Some((if i=0 then None else Some edges[i-1]),(if i=edges.Length then None else Some edges[i])) else None)
 
     /// <summary>Divides an ascending domain into equal intervals; finite outliers clamp to the first or last output.</summary>
     let quantize (a,b) range =
