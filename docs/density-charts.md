@@ -105,6 +105,5 @@ membership; arrows and Enter select; `+`/`-` changes bandwidth or hexagon radius
 
 ![Native disjoint isobands](images/isobands-recipe.png)
 
-The remaining task-9 compositions are violin and reduced time-series recipes.
-The existing KDE and min/max/LTTB kernels are available, but these chart recipes
-are not claimed complete here.
+[Violin and reduced time-series recipes](distribution-series.md) reuse the same
+KDE, sampling, interaction and owned-worker foundations.

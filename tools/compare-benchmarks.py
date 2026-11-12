@@ -5,7 +5,7 @@ import json
 import os
 import pathlib
 import platform
-import statistics
+from benchmark_comparison import compare_samples
 import subprocess
 import zipfile
 
@@ -64,24 +64,17 @@ for pair in range(3):
         samples[label].append({item["Name"]: item for item in json.loads(target.read_text())})
 
 expected_names = set(samples["baseline"][0])
-if any(set(sample) != expected_names for runs in samples.values() for sample in runs):
-    raise ValueError("Paired runs must contain exactly the same workloads")
-
-rows = []
-failed = False
-for name in samples["baseline"][0]:
-    med = lambda side, field: statistics.median(sample[name][field] for sample in samples[side])
-    before, after = med("baseline", "MedianMs"), med("current", "MedianMs")
-    allocated, current = med("baseline", "MedianBytes"), med("current", "MedianBytes")
-    time_fail = after > before * 1.2 and after - before > 2
-    allocation_fail = current > allocated * 1.1 and current - allocated > 65536
-    failed |= time_fail or allocation_fail
-    rows.append(dict(name=name, baselineMs=before, currentMs=after, baselineBytes=allocated,
-                     currentBytes=current, timeRegression=time_fail, allocationRegression=allocation_fail))
-    print(f"{name}: {before:.3f} -> {after:.3f} ms; {allocated} -> {current} bytes")
+rows = compare_samples(samples)
+failed = any(row["timeRegression"] or row["allocationRegression"] for row in rows)
+for row in rows:
+    print(f"{row['name']}: paired change {row['pairedTimeDeltaMs']:.3f} ms, ratio {row['pairedTimeRatio']}; "
+          f"allocation change {row['pairedAllocationDeltaBytes']} bytes; "
+          f"median levels {row['baselineMs']:.3f} -> {row['currentMs']:.3f} ms")
 report = dict(baseline=revision, current=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
               platform=platform.platform(), traced=args.traced, pairs=3, samplesPerProcess=60,
               runtimeSettings=benchmark_settings, optimizationMode="fully-optimized-without-tiering",
+              comparisonEstimator="median-within-pair-changes",
+              thresholds=dict(timeRatio=1.2, timeDeltaMs=2, allocationRatio=1.1, allocationDeltaBytes=65536),
               workloads=sorted(expected_names),
               passed=not failed, results=rows)
 (out / "comparison.json").write_text(json.dumps(report, indent=2), encoding="utf-8")

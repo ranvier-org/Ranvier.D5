@@ -135,6 +135,26 @@ let main args =
             results.Add(measure ("sampling-"+label+"-100000-to-1000") limit bytes (fun () ->
                 let output=reduce (SamplingConfig.create 1000) series |> Result.defaultWith(fun errors -> failwithf "%A" errors)
                 if output.Length>1000 || output.Head.Id<>"0" || (List.last output).Id<>"99999" then failwith "Reduction lost endpoints or exceeded its budget."))
+        let distributionFrame=Ranvier.D5.Charts.ChartFrame.create 800. 600. "Distribution"
+        let violinData : Ranvier.D5.Charts.ViolinGroup list =
+            [for group in 0..9 -> {Id=string group;Observations=[for i in 0..999 -> {Id=string group+":"+string i;Value=Some(sin(float i*0.03)+float group*0.1)}]}]
+        let violinSpec=Ranvier.D5.Charts.ViolinSpec.create distributionFrame (-4.,4.) 0.25
+        results.Add(measure "violin-10-groups-10000-observations" 100. 8000000L (fun () ->
+            let output=Ranvier.D5.Charts.ViolinChart.build violinSpec violinData |> Result.defaultWith(fun e -> failwithf "%A" e)
+            if output.Summaries |> Map.toSeq |> Seq.sumBy(fun (_,summary) -> summary.Count) <> 10000 then failwith "Violin summary lost original observations."))
+        for label,reduction in ["minmax",Ranvier.D5.Charts.SeriesReduction.MinMax;"lttb",Ranvier.D5.Charts.SeriesReduction.Lttb] do
+            let spec={Ranvier.D5.Charts.ReducedSeriesSpec.create distributionFrame 1000 with Reduction=reduction}
+            let bytes=if label="minmax" then 40000000L else 48000000L
+            results.Add(measure ("reduced-series-"+label+"-100000-to-1000") 150. bytes (fun () ->
+                let output=Ranvier.D5.Charts.ReducedSeriesChart.build spec series |> Result.defaultWith(fun e -> failwithf "%A" e)
+                if output.Summary.Count<>100000 || output.Visible.Length>1000 then failwith "Series summary used reduced observations or output exceeded budget."))
+        let sourceIds=series |> List.map(fun sample -> sample.Id) |> Set.ofList
+        let visibleIds=[for i in 0..999 -> string(i*100)]
+        let selectedIds=set ["1";"99999"]
+        let selection={Ranvier.D5.Charts.Selection.empty with Selected=selectedIds}
+        results.Add(measure "selection-reconcile-100000-source-1000-visible" 10. 1000000L (fun () ->
+            let output=Ranvier.D5.Charts.Selection.reconcile sourceIds visibleIds selection
+            if output.Selected<>selectedIds || output.Available.Length<>1000 then failwith "Source selection was lost or visible interaction expanded."))
         let kdeSamples=[for i in 0..999 -> float i,1.]
         let kdeQueries=[for i in 0..511 -> float i*2.]
         results.Add(measure "density-kde-1000-by-512" 30. 1000000L (fun () -> Density.kde1d 10. kdeSamples kdeQueries |> Result.defaultWith(fun errors -> failwithf "%A" errors) |> ignore))
@@ -186,11 +206,23 @@ let main args =
     host.Cycle()
     let pixels = Array.zeroCreate<byte> (800*600*4)
     let mutable offset = 0.
+    let retainedStages=ResizeArray<float array>(63)
+    let networkStages=ResizeArray<float array>(63)
     results.Add(measure "native-retained-500-paint" 150. 32000000L (fun () ->
         offset <- 1. - offset
-        graph.Run(fun () -> source.Value <- make offset)
+        let gc0,gc1,gc2=GC.CollectionCount 0,GC.CollectionCount 1,GC.CollectionCount 2
+        let started=Stopwatch.GetTimestamp()
+        let next=make offset
+        let built=Stopwatch.GetTimestamp()
+        graph.Run(fun () -> source.Value <- next)
+        let updated=Stopwatch.GetTimestamp()
         host.Cycle()
-        host.Paint pixels))
+        let cycled=Stopwatch.GetTimestamp()
+        host.Paint pixels
+        let painted=Stopwatch.GetTimestamp()
+        let elapsed a b=Stopwatch.GetElapsedTime(a,b).TotalMilliseconds
+        retainedStages.Add [|elapsed started built;elapsed built updated;elapsed updated cycled;elapsed cycled painted;
+                            float(GC.CollectionCount 0-gc0);float(GC.CollectionCount 1-gc1);float(GC.CollectionCount 2-gc2)|]))
     mounted.Dispose()
     if not baselineOnly then
         let topology=GraphData.create
@@ -209,9 +241,19 @@ let main args =
         let mutable index=0
         results.Add(measure "native-network-1000-nodes-2000-edges-paint" 100. 32000000L (fun () ->
             index<-1-index
-            graph.Run(fun () -> scene.Value<-(build snapshots[index]).Scene)
+            let gc0,gc1,gc2=GC.CollectionCount 0,GC.CollectionCount 1,GC.CollectionCount 2
+            let started=Stopwatch.GetTimestamp()
+            let next=(build snapshots[index]).Scene
+            let built=Stopwatch.GetTimestamp()
+            graph.Run(fun () -> scene.Value<-next)
+            let updated=Stopwatch.GetTimestamp()
             host.Cycle()
-            host.Paint pixels))
+            let cycled=Stopwatch.GetTimestamp()
+            host.Paint pixels
+            let painted=Stopwatch.GetTimestamp()
+            let elapsed a b=Stopwatch.GetElapsedTime(a,b).TotalMilliseconds
+            networkStages.Add [|elapsed started built;elapsed built updated;elapsed updated cycled;elapsed cycled painted;
+                               float(GC.CollectionCount 0-gc0);float(GC.CollectionCount 1-gc1);float(GC.CollectionCount 2-gc2)|]))
         networkMount.Dispose()
         let flowTopology=FlowGraph.create ("source"::[for i in 0..199 -> string i])
                             [for i in 0..399 -> {FlowLink.Id=string i;Source="source";Target=string(i%200);Value=1.}]
@@ -244,6 +286,8 @@ let main args =
     let directory = Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore
     File.WriteAllText(output, JsonSerializer.Serialize(results, JsonSerializerOptions(WriteIndented=true)))
+    let stages={| WarmupSamples=3; Columns=[|"BuildMs";"SignalUpdateMs";"HostCycleMs";"PaintMs";"Gen0";"Gen1";"Gen2"|]; Samples=retainedStages.ToArray(); NetworkSamples=networkStages.ToArray() |}
+    File.WriteAllText(Path.ChangeExtension(output,"stages.json"),JsonSerializer.Serialize(stages,JsonSerializerOptions(WriteIndented=true)))
     let failures=results |> Seq.filter(fun r -> r.P95Ms > r.LimitMs || r.MedianBytes > r.LimitBytes) |> Seq.toArray
     for result in failures do
         eprintfn "FAIL %s: p95 %.3f ms (limit %.3f); allocation %d bytes (limit %d)" result.Name result.P95Ms result.LimitMs result.MedianBytes result.LimitBytes

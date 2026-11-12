@@ -27,7 +27,7 @@ module ChartInteraction =
                 if (a.Y>point.Y)<>(b.Y>point.Y) && point.X<(b.X-a.X)*(point.Y-a.Y)/(b.Y-a.Y)+a.X then inside<-not inside
         inside
     /// <summary>Owns linked selection and gesture signals. Brush/lasso select hit-target centers; tooltip clients read Hovered and semantic descriptions.</summary>
-    let private attachCore dispose element readConfig readChart onCommand =
+    let private attachCore dispose element readConfig readChart readDomain onCommand =
         let gesture=Api.createSignal Gesture.empty
         let selection=Api.createSignal Selection.empty
         let select message=
@@ -54,8 +54,14 @@ module ChartInteraction =
         Api.createEffect(fun () ->
             let chart=readChart()
             let ids=chart.Semantics |> List.collect (fun item -> item.DataIds) |> List.distinct
+            let domain=readDomain |> Option.map(fun read -> read())
             Api.untrack(fun () -> Api.batch(fun () ->
-                select(SelectionMessage.Available ids)
+                match domain with
+                | None -> select(SelectionMessage.Available ids)
+                | Some sourceIds ->
+                    let current=selection.Value
+                    let next=Selection.reconcile sourceIds ids current
+                    if next<>current then selection.Value<-next
                 if previousBounds.IsSome && previousBounds.Value<>chart.PlotBounds then input.Send InputEvent.Resize
                 previousBounds<-Some chart.PlotBounds
                 gesture.Value.Target |> Option.iter (fun target ->
@@ -64,4 +70,8 @@ module ChartInteraction =
 
     /// <summary>Creates an independently disposable interaction scope owned by the current signal owner.</summary>
     let attach element readConfig readChart onCommand =
-        Api.createRoot(fun owner -> attachCore (fun () -> owner.Dispose()) element readConfig readChart onCommand)
+        Api.createRoot(fun owner -> attachCore (fun () -> owner.Dispose()) element readConfig readChart None onCommand)
+
+    /// Retains source selection across visible reductions while keeping hover and focus visible.
+    let attachWithSelectionDomain element readConfig readChart (readDomain:unit -> Set<string>) onCommand =
+        Api.createRoot(fun owner -> attachCore (fun () -> owner.Dispose()) element readConfig readChart (Some readDomain) onCommand)

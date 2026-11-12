@@ -30,3 +30,9 @@ module Selection =
             {state with Focused=Some state.Available[next]}
         | SelectionMessage.SelectFocused -> {state with Selected=state.Focused |> Option.toList |> Set.ofList}
         | SelectionMessage.Clear -> {state with Selected=Set.empty;Hovered=None}
+
+    /// Reconciles visible interaction targets against the full selectable source domain.
+    let reconcile (sourceIds:Set<string>) visibleIds state =
+        let visible=visibleIds |> List.filter sourceIds.Contains
+        let next=update (SelectionMessage.Available visible) state
+        {next with Selected=state.Selected |> Set.filter sourceIds.Contains}
