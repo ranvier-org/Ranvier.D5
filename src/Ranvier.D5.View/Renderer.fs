@@ -15,7 +15,7 @@ module Renderer =
     type private RenderNode = { Node:SceneNode; Namespace:string; Path:string list }
     let private definitionId prefix (key:string) = prefix + Convert.ToHexString(Encoding.UTF8.GetBytes key)
 
-    let private row (dispatch: string -> string -> Ranvier.Dom.Event -> unit) =
+    let private row (dispatch: string list -> string -> Ranvier.Dom.Event -> unit) =
         Component.define (fun _ (read: unit -> RenderMark) -> read) (fun t ->
             let attribute name read = t.Attrs.attribute(name, fun (mark: unit -> RenderMark) -> Some(read (mark ()).Mark))
             let path =
@@ -47,7 +47,7 @@ module Renderer =
                 attribute "dominant-baseline" (Mark.textStyle >> fun style -> style.Baseline)
                 t.Attrs.attribute("aria-label", fun read -> Mark.label (read ()).Mark)
                 for event in ["click"; "pointerdown"; "pointermove"; "pointerup"; "pointercancel"; "wheel"; "keydown"] do
-                    t.Events.on(event, fun read payload -> dispatch (Mark.key (read ()).Mark) event payload)
+                    t.Events.on(event, fun read payload -> dispatch (read()).Path event payload)
             |]) [| path; text |])
 
     let private definitionRow =
@@ -91,7 +91,7 @@ module Renderer =
                 | RadialGradient _ -> t.arm radial value))
 
     /// <summary>Creates retained keyed scenes with mount-local definitions and scoped group identities.</summary>
-    let create dispatch =
+    let createScoped dispatch =
         let marks = row dispatch
         let mutable groupDefinition : Component<unit -> RenderNode> option = None
         let leaf =
@@ -124,7 +124,7 @@ module Renderer =
             Component.define (fun _ (read:unit -> string * Scene) -> read) (fun t ->
                 t.each (fun item -> Mark.key item.Mark) (fun read ->
                     let ns,scene=read()
-                    Scene.marks scene |> List.map (fun mark -> {Mark=mark;Namespace=ns;Path=[]}) |> List.toArray) marks)
+                    Scene.marks scene |> List.map (fun mark -> {Mark=mark;Namespace=ns;Path=[Mark.key mark]}) |> List.toArray) marks)
         let composed =
             Component.define (fun _ (read:unit -> string * Scene) -> read) (fun t ->
                 t.each (fun item -> SceneNode.key item.Node) (fun read ->
@@ -145,4 +145,6 @@ module Renderer =
                     then t.arm composed value else t.arm flat value)|])
 
     /// <summary>A reusable scene component without event handlers.</summary>
+    let create dispatch = createScoped (fun path name event -> dispatch (List.last path) name event)
+
     let passive = create (fun _ _ _ -> ())

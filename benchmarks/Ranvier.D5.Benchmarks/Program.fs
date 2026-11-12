@@ -16,7 +16,7 @@ type Measurement = { Name: string; MedianMs: float; P95Ms: float; MedianBytes: i
 let measure name limit bytes action =
     for _ in 1..3 do action()
     let samples =
-        Array.init 15 (fun _ ->
+        Array.init 60 (fun _ ->
             let allocated = GC.GetAllocatedBytesForCurrentThread()
             let watch = Stopwatch.StartNew()
             action()
@@ -24,7 +24,7 @@ let measure name limit bytes action =
             watch.Elapsed.TotalMilliseconds, GC.GetAllocatedBytesForCurrentThread() - allocated)
     let times = samples |> Array.map fst |> Array.sort
     let allocations = samples |> Array.map snd |> Array.sort
-    let result = { Name=name; MedianMs=times[7]; P95Ms=times[14]; MedianBytes=allocations[7]; LimitMs=limit; LimitBytes=bytes }
+    let result = { Name=name; MedianMs=(times[29]+times[30])/2.; P95Ms=times[56]; MedianBytes=allocations[30]; LimitMs=limit; LimitBytes=bytes }
     printfn "%s: median %.3f ms, p95 %.3f ms, %d bytes" name result.MedianMs result.P95Ms result.MedianBytes
     result
 

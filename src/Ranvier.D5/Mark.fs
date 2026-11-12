@@ -32,9 +32,10 @@ type Mark = private { Identity:string; Geometry:Geometry; Style:MarkStyle; Matri
 [<RequireQualifiedAccess>]
 module Mark =
     let private defaults = { Fill=Paint.currentColor; Stroke=Paint.none; StrokeWidth=1.; Opacity=1.; FontSize=12. }
+    let private defaultText = {Family="sans-serif";Weight=400;Anchor="start";Baseline="alphabetic"}
     let private create key geometry =
         if String.IsNullOrEmpty key then invalidArg "key" "A mark requires a nonempty key."
-        { Identity=key;Geometry=geometry;Style=defaults;Matrix=Transform.identity;Label=None;TextStyle={Family="sans-serif";Weight=400;Anchor="start";Baseline="alphabetic"};FillDefinition=None }
+        { Identity=key;Geometry=geometry;Style=defaults;Matrix=Transform.identity;Label=None;TextStyle=defaultText;FillDefinition=None }
     let path key geometry = create key (PathGeometry geometry)
     /// <summary>Creates a text mark at a finite scene coordinate.</summary>
     let text key point value =

@@ -13,6 +13,18 @@ open Ranvier.View.WebCore
 let acceptance () =
         use host = WebCoreHost.Create(320, 200)
         use graph = new Graph()
+        use canvasService = Canvas.forHost host
+        let canvas = unbox<Ranvier.Dom.HTMLCanvasElement>(host.Document.createElement "canvas")
+        let context =
+            match canvasService.GetContext(canvas,Ranvier.Dom.CanvasContextType.TwoD,Ranvier.Dom.Canvas2DSettings.Default) with
+            | Ranvier.Dom.CanvasContextOutcome.Context value -> value
+            | _ -> failwith "Native 2D measurement context unavailable."
+        use textCache = TextMeasurement.native 32 context
+        let textRequest = {TextMeasureRequest.Text="Measured label";FontFamily="sans-serif";FontWeight=400;FontSize=12.;DeviceScale=1.;FontGeneration=0L}
+        let measured = textCache.Measure textRequest
+        Expect.isGreaterThan measured.Width 0. "native width"
+        Expect.isGreaterThan (textCache.Measure {textRequest with FontSize=24.}).Width measured.Width "native font size changes"
+        Expect.equal context.font "10px sans-serif" "measurement restores host font"
         let container = host.Document.createElement "div"
         host.Document.body.appendChild container |> ignore
         let box key x color =
