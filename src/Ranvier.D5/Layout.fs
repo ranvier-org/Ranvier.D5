@@ -59,6 +59,63 @@ module Hierarchy =
         Check.finite "weight" weight
         if weight<0. then invalidArg "weight" "Hierarchy weight must be nonnegative."
         {Identity=id;Weight=weight;Children=children}
+    let id node = node.Identity
+    let weight node = node.Weight
+    let children node = node.Children
+    let private build virtualRoot key parent weightOf data =
+        let rows=List.toArray data
+        let ids=Array.map key rows
+        let parents=Array.map parent rows
+        let lookup=Dictionary<string,int>(StringComparer.Ordinal)
+        let errors=ResizeArray<LayoutError>()
+        for i in 0..ids.Length-1 do
+            if String.IsNullOrEmpty ids[i] then errors.Add(InvalidObservation "Hierarchy IDs must be nonempty.")
+            elif not(lookup.TryAdd(ids[i],i)) then errors.Add(DuplicateId ids[i])
+        virtualRoot |> Option.iter(fun key ->
+            if String.IsNullOrEmpty key then errors.Add(InvalidObservation "Virtual root ID must be nonempty.")
+            elif lookup.ContainsKey key then errors.Add(DuplicateId key))
+        let children=Array.init rows.Length (fun _ -> ResizeArray<int>())
+        let parentIndex=Array.create rows.Length -1
+        let roots=ResizeArray<int>()
+        for i in 0..rows.Length-1 do
+            match parents[i] with
+            | None -> roots.Add i
+            | Some key when String.IsNullOrEmpty key -> errors.Add(InvalidObservation "Parent IDs must be nonempty; use None for roots.")
+            | Some key ->
+                match lookup.TryGetValue key with
+                | true,index -> parentIndex[i]<-index;children[index].Add i
+                | _ -> errors.Add(MissingEndpoint key)
+        if virtualRoot.IsNone && roots.Count<>1 then errors.Add(InvalidTopology "A hierarchy requires exactly one root; use forest for multiple roots.")
+        if errors.Count>0 then Error(List.ofSeq errors) else
+        let remaining=children |> Array.map(fun xs -> xs.Count)
+        let ready=Queue<int>()
+        for i in 0..remaining.Length-1 do if remaining[i]=0 then ready.Enqueue i
+        let built=Array.zeroCreate<HierarchyNode<string>> rows.Length
+        let mutable count=0
+        while ready.Count>0 do
+            let i=ready.Dequeue()
+            let childNodes=children[i] |> Seq.map(fun index -> built[index]) |> Seq.toList
+            let ownWeight=weightOf rows[i] childNodes.IsEmpty
+            if not(Double.IsFinite ownWeight) || ownWeight<0. then errors.Add(InvalidObservation("Invalid hierarchy weight: "+ids[i]))
+            else built[i]<-node ids[i] ownWeight childNodes
+            count<-count+1
+            let p=parentIndex[i]
+            if p>=0 then
+                remaining[p]<-remaining[p]-1
+                if remaining[p]=0 then ready.Enqueue p
+        if count<>rows.Length then errors.Add(InvalidTopology "Hierarchy contains a cycle.")
+        if errors.Count>0 then Error(List.ofSeq errors) else
+        match virtualRoot with
+        | Some key -> Ok(node key 0. (roots |> Seq.map(fun i -> built[i]) |> Seq.toList))
+        | None -> Ok built[roots[0]]
+
+    /// <summary>Builds an ordered hierarchy from a parent table. Leaves have unit weight; branches have zero own weight. Rejects duplicate IDs, missing parents, cycles and multiple roots.</summary>
+    let stratify key parent data = build None key parent (fun _ leaf -> if leaf then 1. else 0.) data
+    /// <summary>Builds a hierarchy with explicit nonnegative own weights, retaining source sibling order.</summary>
+    let stratifyWeighted key parent weight data = build None key parent (fun item _ -> weight item) data
+    /// <summary>Joins parentless roots beneath an explicit, collision-checked virtual root. An empty forest is valid.</summary>
+    let forest virtualRoot key parent data = build (Some virtualRoot) key parent (fun _ leaf -> if leaf then 1. else 0.) data
+
     let private flatten root =
         let result = ResizeArray<_>()
         let pending = Stack<_>()

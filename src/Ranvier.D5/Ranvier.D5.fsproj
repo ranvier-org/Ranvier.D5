@@ -18,6 +18,9 @@
     <Compile Include="SceneNode.fs" />
     <Compile Include="Scene.fs" />
     <Compile Include="Layout.fs" />
+    <Compile Include="HierarchyIndex.fs" />
+    <Compile Include="Tree.fs" />
+    <Compile Include="Partition.fs" />
     <Compile Include="Curves.fs" />
     <Compile Include="ShapeExtensions.fs" />
     <Compile Include="Stack.fs" />
@@ -32,6 +35,7 @@
     <PackageReference Include="Ranvier.Css$(RanvierPackageSuffix)" Version="[0.1.1-alpha.2]" />
     <None Include="../../tools/reference-fixtures/licenses/d3-shape.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-scale-chromatic.txt" Pack="true" PackagePath="licenses/" />
+    <None Include="../../tools/reference-fixtures/licenses/d3-hierarchy.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>
