@@ -168,6 +168,22 @@ let acceptance () =
         graph.Run(fun () -> source.Value <- composed())
         host.Cycle()
         Expect.isTrue (Object.ReferenceEquals(retainedGroup,container.querySelector "[data-d5-group='plot']")) "group retained"
+        let retainedLeaf=container.querySelector "[data-d5-key='same']"
+        let nested mark=Scene.compose {Width=300.;Height=180.} "Nested update" [] [Group(GroupSpec.create "plot",[Leaf mark])]
+        let nestedText=Mark.text "same" (Point.create 20. 30.) "First" |> Mark.withFill(Paint.rgb 10 20 30)
+        graph.Run(fun () -> source.Value<-nested nestedText)
+        host.Cycle()
+        Expect.isTrue (Object.ReferenceEquals(retainedLeaf,container.querySelector "[data-d5-key='same']")) "composed leaf retains its DOM identity across geometry kinds"
+        Expect.equal (retainedLeaf.getAttribute "fill") "#0a141e" "composed leaf replaces a scoped definition with solid paint"
+        Expect.equal ((retainedLeaf.querySelector "text").textContent) "First" "composed text remains reactive"
+        let moved=nestedText |> Mark.withTransform(Transform.translate 5. 6.)
+        graph.Run(fun () -> source.Value<-nested moved)
+        host.Cycle()
+        Expect.equal (retainedLeaf.getAttribute "transform") (Transform.toSvg(Transform.translate 5. 6.)) "composed movement is independent of style"
+        graph.Run(fun () -> source.Value<-nested (moved |> Mark.withFill(Paint.rgb 30 40 50) |> Mark.withFontSize 19.))
+        host.Cycle()
+        Expect.equal (retainedLeaf.getAttribute "fill") "#1e2832" "composed style invalidates the appearance memo"
+        Expect.equal (retainedLeaf.getAttribute "font-size") "19" "composed typography remains reactive"
         second.Dispose()
         graph.Run(fun () -> source.Value <- make [])
         host.Cycle()

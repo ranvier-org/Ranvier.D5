@@ -226,7 +226,7 @@ let main args =
           Runtime.JitInfo.GetCompilationTime(false).TotalMilliseconds-jit;
           Runtime.JitInfo.GetCompilationTime(true).TotalMilliseconds-currentJit;
           float(GC.GetTotalMemory false);traceEvents|]
-    results.Add(measure "native-retained-500-paint" 150. 32000000L (fun () ->
+    results.Add(measure "native-retained-500-paint" 150. 2000000L (fun () ->
         offset <- 1. - offset
         let runtime=runtimeStart()
         let gc0,gc1,gc2=GC.CollectionCount 0,GC.CollectionCount 1,GC.CollectionCount 2
