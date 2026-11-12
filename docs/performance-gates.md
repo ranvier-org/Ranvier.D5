@@ -148,3 +148,13 @@ small gen0 budget made p95 tails rotate between unrelated gates (for example
 treemap at a 22.6 ms median and 89.4 ms p95), motivated the change. A local
 paired run after it measured join 0.848 to 0.848 ms and line 2.081 to 2.047 ms.
 Gates and workloads are unchanged.
+
+Traced builds retain every trace event in a per-graph log that grows by doubling.
+Every native workload used to share one graph, so the network workload inherited
+about 750,000 events from earlier workloads and its samples straddled the 2^20
+and 2^21 buffer doublings. On macOS Traced runners the worst network samples
+(121–332 ms) landed exactly at those crossings, with heap growth from 140 to
+380 MB, while GC and JIT time did not explain them. The network and flow paint
+workloads now run in their own graphs, as an application would; their log
+starts at the mount's 140,000 events. The local Traced network p95 measured
+36.9 ms. Gates, workloads and normal builds are unchanged.

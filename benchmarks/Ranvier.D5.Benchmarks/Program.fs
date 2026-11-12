@@ -224,8 +224,8 @@ let main args =
         struct(GC.GetTotalPauseDuration().TotalMilliseconds,
                Runtime.JitInfo.GetCompilationTime(false).TotalMilliseconds,
                Runtime.JitInfo.GetCompilationTime(true).TotalMilliseconds)
-    let runtimeSample struct(pause,jit,currentJit) =
-        let traceEvents=traceClock |> Option.map(fun method -> float(unbox<int>(method.Invoke(null,[|box graph|])))) |> Option.defaultValue 0.
+    let runtimeSample (owner:Graph) struct(pause,jit,currentJit) =
+        let traceEvents=traceClock |> Option.map(fun method -> float(unbox<int>(method.Invoke(null,[|box owner|])))) |> Option.defaultValue 0.
         [|GC.GetTotalPauseDuration().TotalMilliseconds-pause;
           Runtime.JitInfo.GetCompilationTime(false).TotalMilliseconds-jit;
           Runtime.JitInfo.GetCompilationTime(true).TotalMilliseconds-currentJit;
@@ -246,7 +246,7 @@ let main args =
         let elapsed a b=Stopwatch.GetElapsedTime(a,b).TotalMilliseconds
         retainedStages.Add [|elapsed started built;elapsed built updated;elapsed updated cycled;elapsed cycled painted;
                             float(GC.CollectionCount 0-gc0);float(GC.CollectionCount 1-gc1);float(GC.CollectionCount 2-gc2)|]
-        retainedRuntime.Add(runtimeSample runtime)))
+        retainedRuntime.Add(runtimeSample graph runtime)))
     mounted.Dispose()
     if not baselineOnly then
         let topology=GraphData.create
@@ -258,8 +258,11 @@ let main args =
         let spec={Ranvier.D5.Charts.NetworkSpec.create(Ranvier.D5.Charts.ChartFrame.create 800. 600. "Network benchmark") with AggregateLinks=true}
         let build snapshot=Ranvier.D5.Charts.NetworkChart.network spec topology snapshot |> Result.defaultWith(fun errors -> failwithf "%A" errors)
         results.Add(measure "network-chart-1000-nodes-2000-edges" 50. 16000000L (fun () -> build snapshots[0] |> ignore))
-        let scene=graph.Run(fun () -> Api.createSignal((build snapshots[0]).Scene))
-        let networkMount=Mounting.mount graph None (fun errors -> raise(AggregateException errors)) container None
+        // Traced builds retain every trace event per graph; a fresh graph keeps earlier workloads' log growth
+        // (and its buffer doublings) out of this measurement, as an application would have its own graph.
+        use networkGraph=new Graph()
+        let scene=networkGraph.Run(fun () -> Api.createSignal((build snapshots[0]).Scene))
+        let networkMount=Mounting.mount networkGraph None (fun errors -> raise(AggregateException errors)) container None
                             (fun context -> Program.run (Component.render Renderer.passive (fun () -> scene.Value)) context.Backend)
         host.Cycle()
         let mutable index=0
@@ -270,7 +273,7 @@ let main args =
             let started=Stopwatch.GetTimestamp()
             let next=(build snapshots[index]).Scene
             let built=Stopwatch.GetTimestamp()
-            graph.Run(fun () -> scene.Value<-next)
+            networkGraph.Run(fun () -> scene.Value<-next)
             let updated=Stopwatch.GetTimestamp()
             host.Cycle()
             let cycled=Stopwatch.GetTimestamp()
@@ -279,7 +282,7 @@ let main args =
             let elapsed a b=Stopwatch.GetElapsedTime(a,b).TotalMilliseconds
             networkStages.Add [|elapsed started built;elapsed built updated;elapsed updated cycled;elapsed cycled painted;
                                float(GC.CollectionCount 0-gc0);float(GC.CollectionCount 1-gc1);float(GC.CollectionCount 2-gc2)|]
-            networkRuntime.Add(runtimeSample runtime)))
+            networkRuntime.Add(runtimeSample networkGraph runtime)))
         networkMount.Dispose()
         let flowTopology=FlowGraph.create ("source"::[for i in 0..199 -> string i])
                             [for i in 0..399 -> {FlowLink.Id=string i;Source="source";Target=string(i%200);Value=1.}]
@@ -297,14 +300,15 @@ let main args =
         let buildFlow layout=Ranvier.D5.Charts.FlowChart.sankey flowSpec layout |> Result.defaultWith(fun errors -> failwithf "%A" errors)
         results.Add(measure "flow-chart-201-nodes-400-links" 10. 8000000L (fun () -> buildFlow initialFlow |> ignore))
         let layouts=[|initialFlow;movedFlow|]
-        let flowScene=graph.Run(fun () -> Api.createSignal((buildFlow initialFlow).Scene))
-        let flowMount=Mounting.mount graph None (fun errors -> raise(AggregateException errors)) container None
+        use flowGraph=new Graph()
+        let flowScene=flowGraph.Run(fun () -> Api.createSignal((buildFlow initialFlow).Scene))
+        let flowMount=Mounting.mount flowGraph None (fun errors -> raise(AggregateException errors)) container None
                           (fun context -> Program.run (Component.render Renderer.passive (fun () -> flowScene.Value)) context.Backend)
         host.Cycle()
         let mutable flowIndex=0
         results.Add(measure "native-flow-201-nodes-400-links-paint" 100. 32000000L (fun () ->
             flowIndex<-1-flowIndex
-            graph.Run(fun () -> flowScene.Value<-(buildFlow layouts[flowIndex]).Scene)
+            flowGraph.Run(fun () -> flowScene.Value<-(buildFlow layouts[flowIndex]).Scene)
             host.Cycle()
             host.Paint pixels))
         flowMount.Dispose()
