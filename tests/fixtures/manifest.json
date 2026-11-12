@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "seed": 42,
+  "source": {
+    "d3-array": "3.2.4",
+    "d3-shape": "3.2.0",
+    "d3-scale": "4.0.2",
+    "d3-time": "3.1.0",
+    "d3-time-format": "4.1.0",
+    "d3-format": "3.1.0",
+    "d3-color": "3.1.0",
+    "d3-interpolate": "3.0.1",
+    "d3-scale-chromatic": "3.1.0"
+  },
+  "coordinates": "SVG x-right y-down; arc angles radians clockwise from -Y; UTC milliseconds for time",
+  "tolerance": 1e-9,
+  "files": [
+    "statistics.json",
+    "curves.json",
+    "stacks.json",
+    "scales.json"
+  ]
+}

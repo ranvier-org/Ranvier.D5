@@ -4,3 +4,5 @@ artifacts/
 .serena/
 .superpowers/
 *.user
+
+**/node_modules/
