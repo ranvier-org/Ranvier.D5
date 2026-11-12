@@ -112,6 +112,15 @@ let main args =
         results.Add(measure "contour-fragments-2048" 100. 32000000L (fun () ->
             let polygons=Contour.compute (ContourConfig.create [0.]) fragmented |> Result.defaultWith(fun errors -> failwithf "%A" errors)
             if polygons.Length<>2048 then failwith "Fragment benchmark lost disconnected saddle components."))
+        let hexConfig=HexbinConfig.create (Bounds.create 0. 0. 1024. 1024.) 8.
+        results.Add(measure "hexbin-100000" 150. 40000000L (fun () ->
+            let bins=Hexbin.aggregate hexConfig densityPoints |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+            if (bins |> List.sumBy(fun bin -> bin.Members.Length))<>100000 then failwith "Hexbin lost source identities."))
+        let series=[for i in 0..99999 -> {SeriesSample.Id=string i;X=float i;Y=Some(sin(float i*0.01)+(if i%997=0 then 3. else 0.))}]
+        for label,reduce,limit,bytes in ["minmax",Sampling.minMax,50.,16000000L;"lttb",Sampling.lttb,75.,24000000L] do
+            results.Add(measure ("sampling-"+label+"-100000-to-1000") limit bytes (fun () ->
+                let output=reduce (SamplingConfig.create 1000) series |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+                if output.Length>1000 || output.Head.Id<>"0" || (List.last output).Id<>"99999" then failwith "Reduction lost endpoints or exceeded its budget."))
         let kdeSamples=[for i in 0..999 -> float i,1.]
         let kdeQueries=[for i in 0..511 -> float i*2.]
         results.Add(measure "density-kde-1000-by-512" 30. 1000000L (fun () -> Density.kde1d 10. kdeSamples kdeQueries |> Result.defaultWith(fun errors -> failwithf "%A" errors) |> ignore))

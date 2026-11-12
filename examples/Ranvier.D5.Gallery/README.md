@@ -130,3 +130,9 @@ Run --density; Left/Right adjusts bandwidth. Capture with --capture-density arti
 ![Native contour view](../../docs/images/contour.png)
 
 Run --contour; Left/Right adjusts levels. Capture with --capture-contour artifacts/contour.bmp. Density and topology run through the owned worker. [Source](ContourGallery.fs) and [topology contracts](../../docs/contours.md).
+
+## Hexbin and line reduction
+
+![Native reduction view](../../docs/images/reduction.png)
+
+Run --reduction; Left/Right adjusts the visible sample budget. Capture with --capture-reduction artifacts/reduction.bmp. [Source](ReductionGallery.fs) and [membership, gap and sampling contracts](../../docs/reduction.md).
