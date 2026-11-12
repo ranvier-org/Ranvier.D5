@@ -52,7 +52,12 @@ both benchmark subprocesses, recording those settings in comparison.json.
 A local controlled run measured 1.630 ms baseline and 1.638 ms current for scale
 mapping. The original baseline revision, three alternating process pairs, 60
 samples and regression thresholds remain unchanged. Default-runtime absolute
-benchmarks still run separately in every CI job. This isolates steady optimized
+benchmarks still run separately in every CI job. Paired subprocesses use
+`--baseline-only` to run exactly the same five workloads; the harness rejects
+mismatched workload sets. This avoids candidate-only layout/worker workloads
+changing GC pressure or being rerun under a different optimization mode. The
+full default-runtime suite still applies every new-workload absolute gate.
+This isolates steady optimized
 throughput; it does not measure application startup or dynamic PGO benefits.
 See [.NET compilation settings](https://learn.microsoft.com/en-us/dotnet/core/runtime-config/compilation).
 

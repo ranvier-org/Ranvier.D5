@@ -59,9 +59,13 @@ for pair in range(3):
         ordering.reverse()
     for label, directory in ordering:
         target = out / (label + "-" + str(pair) + ".json")
-        run(["dotnet", "run", "--project", project, "-c", "Release", variant, "--no-build", "--", str(target)],
+        run(["dotnet", "run", "--project", project, "-c", "Release", variant, "--no-build", "--", str(target), "--baseline-only"],
             directory, out / (label + "-" + str(pair) + ".log"), benchmark_environment)
         samples[label].append({item["Name"]: item for item in json.loads(target.read_text())})
+
+expected_names = set(samples["baseline"][0])
+if any(set(sample) != expected_names for runs in samples.values() for sample in runs):
+    raise ValueError("Paired runs must contain exactly the same workloads")
 
 rows = []
 failed = False
@@ -78,6 +82,7 @@ for name in samples["baseline"][0]:
 report = dict(baseline=revision, current=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
               platform=platform.platform(), traced=args.traced, pairs=3, samplesPerProcess=60,
               runtimeSettings=benchmark_settings, optimizationMode="fully-optimized-without-tiering",
+              workloads=sorted(expected_names),
               passed=not failed, results=rows)
 (out / "comparison.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 raise SystemExit(1 if failed else 0)
