@@ -63,6 +63,11 @@ let main args =
         results.Add(measure "delaunay-build-100000" 1000. 300000000L (fun () -> Delaunay.build (Array.toList quadPoints) |> ignore))
         let mesh=Delaunay.build (Array.toList points)
         results.Add(measure "voronoi-clip-10000" 500. 150000000L (fun () -> Voronoi.clip (Bounds.create 0. 0. 100. 100.) mesh |> ignore))
+        let forceGraph=GraphData.create [for i in 0..999 -> GraphNode.create(string i)]
+                            [for i in 0..999 do for jump in [1;7] -> GraphLink.create (string i+"/"+string jump) (string i) (string((i+jump)%1000))]
+                       |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        let force=Force.initialize (ForceConfig.create(Point.create 0. 0.)) (Seed.create 42u) forceGraph |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        results.Add(measure "force-links-1000-nodes-2000-edges-10-steps" 8. 3000000L (fun () -> Force.step 10 force |> ignore))
         let curvePoints=points |> Array.map Some |> Array.toList
         results.Add(measure "natural-10000" 100. 16000000L (fun () -> Curves.line CurveSpec.Natural curvePoints |> ignore))
         let chartData=[0..999]

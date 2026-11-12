@@ -43,6 +43,14 @@ Brush the upper scatter plot and the lower line updates through a shared Ranvier
 signal. Arrow keys and Enter select, Escape clears.
 [Source](../Shared/LinkedCharts.fs).
 
+## Immutable force state
+
+![Native initial and evolved force snapshots](../../docs/images/force.png)
+
+Run `--force` to advance immutable solver state through a Ranvier signal.
+Capture with `--capture-force artifacts/force.bmp`.
+[Source](ForceGallery.fs) and [solver contracts](../../docs/force.md).
+
 ## Delaunay and Voronoi picking
 
 ![Native mesh and Voronoi picking](../../docs/images/spatial.png)
