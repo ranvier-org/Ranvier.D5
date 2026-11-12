@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><PackageId>Ranvier.D5.Charts$(RanvierPackageSuffix)</PackageId><Description>Pure functional chart compositions for Ranvier.D5.</Description></PropertyGroup>
-  <ItemGroup><Compile Include="ChartTypes.fs" /><Compile Include="Encoding.fs" /><Compile Include="ChartLayout.fs" /><Compile Include="RecipeTypes.fs" /><Compile Include="Recipe.fs" /><Compile Include="Cartesian.fs" /><Compile Include="Distribution.fs" /><Compile Include="Chart.fs" /></ItemGroup>
+  <ItemGroup><Compile Include="ChartTypes.fs" /><Compile Include="Encoding.fs" /><Compile Include="ChartLayout.fs" /><Compile Include="RecipeTypes.fs" /><Compile Include="Recipe.fs" /><Compile Include="Cartesian.fs" /><Compile Include="Distribution.fs" /><Compile Include="Radial.fs" /><Compile Include="Facet.fs" /><Compile Include="Legend.fs" /><Compile Include="Chart.fs" /></ItemGroup>
   <ItemGroup><ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" /><None Include="../../README.md" Pack="true" PackagePath="/" /></ItemGroup>
 </Project>
