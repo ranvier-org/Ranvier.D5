@@ -167,6 +167,12 @@ jobs:
           if Ranvier.D5.Geo.IdentityProjection.project planar planarPoint <> Some planarPoint then failwith "Packed planar identity units failed"
           let planarPaths = Ranvier.D5.Geo.PlanarPath.project Ranvier.D5.Geo.GeoPathOptions.defaultValue planar (Ranvier.D5.Geo.PlanarGeometry.LineString [Point.create 0. 0.;planarPoint]) |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           if planarPaths.Length <> 1 then failwith "Packed planar path failed"
+          let conic = Ranvier.D5.Geo.ProjectionConfig.defaultValue (Ranvier.D5.Geo.ProjectionKind.ConicEqualArea(29.5,45.5))
+          let fitted = Ranvier.D5.Geo.ProjectionFit.size Ranvier.D5.Geo.GeoPathOptions.defaultValue 960. 500. Ranvier.D5.Geo.GeoGeometry.Sphere conic |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if not ((Ranvier.D5.Geo.Projection.config fitted).Scale > 0.) then failwith "Packed projection fit failed"
+          let usa = Ranvier.D5.Geo.CompositeProjection.albersUsa 1070. (Point.create 480. 250.) |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          let denver = Ranvier.D5.Geo.GeoPosition.create -104.99 39.74 |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if (Ranvier.D5.Geo.CompositeProjection.project usa denver).IsNone then failwith "Packed Albers USA failed"
           graph.Dispose()
           EOF
           cat > artifacts/consumer/NuGet.Config <<'EOF'
