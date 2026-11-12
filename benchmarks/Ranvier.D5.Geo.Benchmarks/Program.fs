@@ -73,7 +73,14 @@ let main args =
     let mercatorProjection=Projection.create {ProjectionConfig.defaultValue ProjectionKind.Mercator with Scale=100.} |> ok
     let polarRing=[p -30. 80.;p -30. 89.;p 30. 89.;p 30. 80.;p -30. 80.]
     let polarLine=GeoGeometry.LineString[for index in 0..9999 -> p 25. (if index%2=0 then -89. else 89.)]
+    let familyProjection kind=Projection.create {ProjectionConfig.defaultValue kind with Scale=100.} |> ok
+    let wideRing=[p -75. -35.;p -75. 45.;p 75. 45.;p 75. -35.;p -75. -35.]
+    let equatorialPoleRing=[p 80. -5.;p 80. 5.;p 100. 5.;p 100. -5.;p 80. -5.]
     let polygonCases=[
+        "geo-azimuthal-equal-area-seam-holes-1000",550.,58000000L,familyProjection ProjectionKind.AzimuthalEqualArea,GeoGeometry.MultiPolygon(List.replicate 1000 [seamOuter;seamHole])
+        "geo-gnomonic-cap-polygons-1000",60.,21000000L,familyProjection ProjectionKind.Gnomonic,GeoGeometry.MultiPolygon(List.replicate 1000 [wideRing])
+        "geo-conic-seam-holes-1000",50.,11000000L,familyProjection(ProjectionKind.ConicEqualArea(29.5,45.5)),GeoGeometry.MultiPolygon(List.replicate 1000 [seamOuter;seamHole])
+        "geo-transverse-mercator-pole-polygons-1000",250.,36000000L,familyProjection ProjectionKind.TransverseMercator,GeoGeometry.MultiPolygon(List.replicate 1000 [equatorialPoleRing])
         "geo-mercator-polar-polygons-1000",75.,12000000L,mercatorProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [polarRing])
         "geo-polygons-holes-1000",50.,5000000L,polygonProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [outer;hole])
         "geo-polygons-seam-holes-1000",75.,9000000L,polygonProjection,GeoGeometry.MultiPolygon(List.replicate 1000 [seamOuter;seamHole])
@@ -97,7 +104,18 @@ let main args =
     let planarLine=PlanarGeometry.LineString[for index in 0..99999 -> Ranvier.D5.Point.create (float index) (float(index%2))]
     let planarPolygon=PlanarGeometry.Polygon[denseRing |> List.map(fun point -> Ranvier.D5.Point.create (point.Longitude*10.) (point.Latitude*10.))]
     let planarPoints=PlanarGeometry.MultiPoint(List.replicate 1000 (Ranvier.D5.Point.create 0. 0.))
+    let states=GeoGeometry.MultiPolygon[for index in 0..999 ->
+                                            let longitude,latitude=(if index%3=0 then -150.+float(index%7),62. elif index%3=1 then -157.+float(index%5)*0.3,20. else -120.+float(index%50),30.+float(index%15))
+                                            [[p longitude latitude;p longitude (latitude+0.5);p (longitude+0.5) (latitude+0.5);p (longitude+0.5) latitude;p longitude latitude]]]
+    let usa=CompositeProjection.albersUsa 1070. (Ranvier.D5.Point.create 480. 250.) |> ok
+    let fitConfig=ProjectionConfig.defaultValue(ProjectionKind.ConicConformal(20.,50.))
     let results=[|
+        measure "albers-usa-paths-1000" 50. 13000000L (fun () ->
+            let paths=CompositeProjection.paths polygonOptions usa states |> ok
+            if paths.Length<>1000 then failwith "Albers USA inset ownership")
+        measure "projection-fit-sphere-conic" 25. 2000000L (fun () ->
+            let fitted=ProjectionFit.size polygonOptions 960. 500. GeoGeometry.Sphere fitConfig |> ok
+            if not(Double.IsFinite (Projection.config fitted).Scale) then failwith "Fitted scale")
         measure "identity-line-100000" 50. 12000000L (fun () ->
             let paths=PlanarPath.project GeoPathOptions.defaultValue planarProjection planarLine |> ok
             if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100000 then failwith "Identity line output")
