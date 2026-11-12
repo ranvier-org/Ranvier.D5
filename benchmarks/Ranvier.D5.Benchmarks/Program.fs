@@ -40,6 +40,8 @@ let main args =
     results.Add(measure "scale-100000" 50. 12000000L (fun () -> for i in 0..99999 do Scale.map scale (float i) |> ignore))
     results.Add(measure "nearest-1000-in-10000" 30. 12000000L (fun () -> for i in 0..999 do Spatial.nearest points[i] infinity spatial |> ignore))
     results.Add(measure "line-10000" 60. 16000000L (fun () -> Shape.line Curve.Linear (points |> Array.map Some |> Array.toList) |> Path.toSvg |> ignore))
+    let observations = Array.init 100000 (fun i -> float(i % 1000))
+    results.Add(measure "statistics-100000" 100. 16000000L (fun () -> Statistics.variance observations |> ignore; Statistics.histogram BinRule.FreedmanDiaconis observations |> ignore))
     use host = WebCoreHost.Create(800, 600)
     use graph = new Graph()
     let container = host.Document.createElement "div"
