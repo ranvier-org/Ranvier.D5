@@ -62,6 +62,19 @@ let main args =
         for i in 1..10000 do state<-Gesture.update gestureConfig (InputEvent.Move(1,Point.create (float i) (float(i%100)))) state |> fst))
     use host = WebCoreHost.Create(800, 600)
     use graph = new Graph()
+    use releaseWorker=new System.Threading.ManualResetEventSlim(false)
+    let workerInput=graph.Run(fun () -> Api.createSignal 0)
+    use worker=graph.Run(fun () -> ReactiveLayout.create (Ranvier.D5.Examples.HostDispatcher.forHost host) (fun () -> workerInput.Value) (fun _ value -> releaseWorker.Wait();Ok value))
+    let mutable requestId=0
+    results.Add(measure "worker-request-burst-1000" 100. 16000000L (fun () ->
+        graph.Run(fun () -> for _ in 1..1000 do requestId<-requestId+1;workerInput.Value<-requestId)))
+    releaseWorker.Set()
+    let workerTimeout=Stopwatch.StartNew()
+    while graph.Run(fun () -> worker.LastGood<>Some requestId) && workerTimeout.Elapsed.TotalSeconds<5. do
+        host.Cycle()
+        host.Frame()
+        System.Threading.Thread.Yield() |> ignore
+    if graph.Run(fun () -> worker.LastGood<>Some requestId) then failwith "Worker failed to publish latest request."
     let container = host.Document.createElement "div"
     host.Document.body.appendChild container |> ignore
     let make offset =
