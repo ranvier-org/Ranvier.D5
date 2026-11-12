@@ -63,6 +63,36 @@ let capture kind path =
             input.Send(InputEvent.Key "Enter")
             if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Flow keyboard selection failed."
             owner :> IDisposable
+        elif kind.StartsWith("distribution-") then
+            let recipe=kind.Substring("distribution-".Length)
+            let owner,parameter,worker,input=DistributionRecipesGallery.mount recipe host graph
+            let target=if recipe="violin" then 0.3 else 600.
+            graph.Run(fun () -> parameter.Value<-target)
+            let timer=Stopwatch.StartNew()
+            let ready()=graph.Run(fun () -> worker.LastGood |> Option.exists(fun output -> output.Parameter=target && not output.Chart.HitTargets.IsEmpty))
+            while not(ready()) && timer.Elapsed.TotalSeconds<15. do
+                host.Cycle()
+                host.Frame()
+                System.Threading.Thread.Yield() |> ignore
+            if not(ready()) then failwith "Distribution worker failed to publish the latest result."
+            host.Cycle()
+            let struct(w,h)=host.PaintSize
+            host.Paint(Array.zeroCreate<byte>(w*h*4))
+            let output=graph.Run(fun () -> worker.LastGood.Value)
+            if recipe="violin" then
+                if output.MeasuredCount<>3000 || output.VisibleCount<>3 then failwith "Violin lost original observations."
+            elif output.SourceCount<>100000 || output.MeasuredCount<>95000 || output.VisibleCount>600 || output.GapCount<>5 then
+                failwith "Reduced series lost source statistics, gaps or visible bounds."
+            let point=
+                match output.Chart.HitTargets.Head.Geometry with
+                | Ranvier.D5.Charts.HitPoint(point,_) | Ranvier.D5.Charts.HitRegion(_,_,point) -> point
+                | _ -> failwith "Unexpected distribution picking geometry."
+            host.Mouse(0,int(Math.Round point.X)+8,int(Math.Round point.Y)+8,0,0,0) |> ignore
+            if graph.Run(fun () -> input.Selection.Hovered.IsNone) then failwith "Distribution native hover failed."
+            input.Send(InputEvent.Key "ArrowRight")
+            input.Send(InputEvent.Key "Enter")
+            if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Distribution keyboard selection failed."
+            owner :> IDisposable
         elif kind.StartsWith("density-recipe-") then
             let recipe=kind.Substring("density-recipe-".Length)
             let owner,bandwidth,worker,input=DensityRecipesGallery.mount recipe host graph
@@ -243,6 +273,13 @@ let main args =
         let kind=args |> Array.find(fun arg -> arg.StartsWith "--flow-") |> fun arg -> arg.Substring 7
         use window=Window.Create("Ranvier.D5 interactive flow recipes",820,590)
         let owner,_,_=FlowGallery.mount kind window.Host window.Graph
+        while window.Step() do ()
+        owner.Dispose()
+    elif args.Length=3 && args[0]="--capture-distribution" then
+        capture ("distribution-"+args[1]) args[2]
+    elif args.Length=2 && args[0]="--distribution" then
+        use window=Window.Create("Ranvier.D5 distribution recipes",820,590)
+        let owner,_,_,_=DistributionRecipesGallery.mount args[1] window.Host window.Graph
         while window.Step() do ()
         owner.Dispose()
     elif args.Length=3 && args[0]="--capture-density-recipe" then

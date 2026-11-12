@@ -144,3 +144,11 @@ Run `--density-recipe heatmap`, `hexbin`, `contours` or `isobands`. Hover shows 
 ![Native isobands with selection](../../docs/images/isobands-recipe.png)
 
 [All four native snapshots and contracts](../../docs/density-charts.md) · [source](DensityRecipesGallery.fs)
+
+## Violin and reduced-series recipes
+
+Run `--distribution violin`, `minmax` or `lttb`. Arrows and Enter select; `+` / `-` changes bandwidth or visible budget through the owned worker. Capture with `--capture-distribution violin artifacts/violin.bmp`.
+
+![Native violin distributions](../../docs/images/violin-recipe.png)
+
+[All three native snapshots and contracts](../../docs/distribution-series.md) · [source](DistributionRecipesGallery.fs)

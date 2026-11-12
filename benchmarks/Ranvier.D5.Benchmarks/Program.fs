@@ -135,6 +135,19 @@ let main args =
             results.Add(measure ("sampling-"+label+"-100000-to-1000") limit bytes (fun () ->
                 let output=reduce (SamplingConfig.create 1000) series |> Result.defaultWith(fun errors -> failwithf "%A" errors)
                 if output.Length>1000 || output.Head.Id<>"0" || (List.last output).Id<>"99999" then failwith "Reduction lost endpoints or exceeded its budget."))
+        let distributionFrame=Ranvier.D5.Charts.ChartFrame.create 800. 600. "Distribution"
+        let violinData : Ranvier.D5.Charts.ViolinGroup list =
+            [for group in 0..9 -> {Id=string group;Observations=[for i in 0..999 -> {Id=string group+":"+string i;Value=Some(sin(float i*0.03)+float group*0.1)}]}]
+        let violinSpec=Ranvier.D5.Charts.ViolinSpec.create distributionFrame (-4.,4.) 0.25
+        results.Add(measure "violin-10-groups-10000-observations" 100. 8000000L (fun () ->
+            let output=Ranvier.D5.Charts.ViolinChart.build violinSpec violinData |> Result.defaultWith(fun e -> failwithf "%A" e)
+            if output.Summaries |> Map.toSeq |> Seq.sumBy(fun (_,summary) -> summary.Count) <> 10000 then failwith "Violin summary lost original observations."))
+        for label,reduction in ["minmax",Ranvier.D5.Charts.SeriesReduction.MinMax;"lttb",Ranvier.D5.Charts.SeriesReduction.Lttb] do
+            let spec={Ranvier.D5.Charts.ReducedSeriesSpec.create distributionFrame 1000 with Reduction=reduction}
+            let bytes=if label="minmax" then 40000000L else 48000000L
+            results.Add(measure ("reduced-series-"+label+"-100000-to-1000") 150. bytes (fun () ->
+                let output=Ranvier.D5.Charts.ReducedSeriesChart.build spec series |> Result.defaultWith(fun e -> failwithf "%A" e)
+                if output.Summary.Count<>100000 || output.Visible.Length>1000 then failwith "Series summary used reduced observations or output exceeded budget."))
         let kdeSamples=[for i in 0..999 -> float i,1.]
         let kdeQueries=[for i in 0..511 -> float i*2.]
         results.Add(measure "density-kde-1000-by-512" 30. 1000000L (fun () -> Density.kde1d 10. kdeSamples kdeQueries |> Result.defaultWith(fun errors -> failwithf "%A" errors) |> ignore))

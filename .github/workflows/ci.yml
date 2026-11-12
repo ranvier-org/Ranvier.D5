@@ -78,6 +78,9 @@ jobs:
           for recipe in heatmap hexbin contours isobands; do
             "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-density-recipe "$recipe" "artifacts/$recipe-recipe.bmp"
           done
+          for recipe in violin minmax lttb; do
+            "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-distribution "$recipe" "artifacts/$recipe-distribution.bmp"
+          done
       - name: Paired performance regression gate
         shell: bash
         run: |
@@ -141,6 +144,8 @@ jobs:
           let samples = [for i in 0..9 -> {SeriesSample.Id=string i;X=float i;Y=Some(float(i%3))}]
           Sampling.minMax (SamplingConfig.create 4) samples |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
           Sampling.lttb (SamplingConfig.create 4) samples |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
+          Ranvier.D5.Charts.ReducedSeriesChart.build (Ranvier.D5.Charts.ReducedSeriesSpec.create flowSpec.Frame 4) samples |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
+          Ranvier.D5.Charts.ViolinChart.build (Ranvier.D5.Charts.ViolinSpec.create flowSpec.Frame (-1.,3.) 0.5) [{Ranvier.D5.Charts.ViolinGroup.Id="group";Observations=[{Id="sample";Value=Some 1.}]}] |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
           Ranvier.D5.View.ForceChunk.defaultValue |> ignore
           Ranvier.D5.View.Renderer.passive |> ignore
           graph.Dispose()
