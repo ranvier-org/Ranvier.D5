@@ -207,6 +207,7 @@ let main args =
     let pixels = Array.zeroCreate<byte> (800*600*4)
     let mutable offset = 0.
     let retainedStages=ResizeArray<float array>(63)
+    let networkStages=ResizeArray<float array>(63)
     results.Add(measure "native-retained-500-paint" 150. 32000000L (fun () ->
         offset <- 1. - offset
         let gc0,gc1,gc2=GC.CollectionCount 0,GC.CollectionCount 1,GC.CollectionCount 2
@@ -240,9 +241,19 @@ let main args =
         let mutable index=0
         results.Add(measure "native-network-1000-nodes-2000-edges-paint" 100. 32000000L (fun () ->
             index<-1-index
-            graph.Run(fun () -> scene.Value<-(build snapshots[index]).Scene)
+            let gc0,gc1,gc2=GC.CollectionCount 0,GC.CollectionCount 1,GC.CollectionCount 2
+            let started=Stopwatch.GetTimestamp()
+            let next=(build snapshots[index]).Scene
+            let built=Stopwatch.GetTimestamp()
+            graph.Run(fun () -> scene.Value<-next)
+            let updated=Stopwatch.GetTimestamp()
             host.Cycle()
-            host.Paint pixels))
+            let cycled=Stopwatch.GetTimestamp()
+            host.Paint pixels
+            let painted=Stopwatch.GetTimestamp()
+            let elapsed a b=Stopwatch.GetElapsedTime(a,b).TotalMilliseconds
+            networkStages.Add [|elapsed started built;elapsed built updated;elapsed updated cycled;elapsed cycled painted;
+                               float(GC.CollectionCount 0-gc0);float(GC.CollectionCount 1-gc1);float(GC.CollectionCount 2-gc2)|]))
         networkMount.Dispose()
         let flowTopology=FlowGraph.create ("source"::[for i in 0..199 -> string i])
                             [for i in 0..399 -> {FlowLink.Id=string i;Source="source";Target=string(i%200);Value=1.}]
@@ -275,7 +286,7 @@ let main args =
     let directory = Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore
     File.WriteAllText(output, JsonSerializer.Serialize(results, JsonSerializerOptions(WriteIndented=true)))
-    let stages={| WarmupSamples=3; Columns=[|"BuildMs";"SignalUpdateMs";"HostCycleMs";"PaintMs";"Gen0";"Gen1";"Gen2"|]; Samples=retainedStages.ToArray() |}
+    let stages={| WarmupSamples=3; Columns=[|"BuildMs";"SignalUpdateMs";"HostCycleMs";"PaintMs";"Gen0";"Gen1";"Gen2"|]; Samples=retainedStages.ToArray(); NetworkSamples=networkStages.ToArray() |}
     File.WriteAllText(Path.ChangeExtension(output,"stages.json"),JsonSerializer.Serialize(stages,JsonSerializerOptions(WriteIndented=true)))
     let failures=results |> Seq.filter(fun r -> r.P95Ms > r.LimitMs || r.MedianBytes > r.LimitBytes) |> Seq.toArray
     for result in failures do

@@ -68,6 +68,8 @@ dotnet pack src/Ranvier.D5 -c Release -o artifacts/packages
 dotnet pack src/Ranvier.D5.View -c Release -o artifacts/packages
 ```
 
+See [performance gates and evidence](docs/performance-gates.md) for the paired comparison method and rendering phase diagnostics.
+
 Append `-p:RanvierTrace=true` for Traced. Native acceptance requires WebCore's platform libraries; [CI](.github/workflows/ci.yml) lists Ubuntu dependencies. Windows, Linux and macOS run normal and Traced tests, native rendering, performance gates, gallery capture and packing.
 
 ## Kit snapshot and compatibility

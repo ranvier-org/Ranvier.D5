@@ -45,6 +45,8 @@ jobs:
           EOF
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -q
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends xvfb xauth dbus-x11 fonts-dejavu-core libgl1-mesa-dri libglib2.0-0t64 libharfbuzz0b libharfbuzz-icu0 libicu74 libjpeg-turbo8 libepoxy0 libgcrypt20 libsoup-3.0-0 libtasn1-6 libxkbcommon0 libxml2 libpng16-16t64 libsqlite3-0 libwebp7 libwebpdemux2 libwebpmux3 libatomic1 libfreetype6 libfontconfig1 libwoff1 libdrm2 libegl1 libgles2
+      - name: Performance comparison contracts
+        run: python -m unittest discover -s tools -p test_benchmark_comparison.py
       - name: Core contracts
         run: dotnet run --project tests/Ranvier.D5.Tests -c Release -p:RanvierTrace=${{ matrix.traced }}
       - name: Native contracts and performance
