@@ -202,8 +202,8 @@ Create matching Traced package variants only where dependency identities require
 
 **Interfaces:** `Chord.layout : ChordConfig -> float list list -> Result<ChordLayout, LayoutError list>`; `Ribbon.path : RibbonSpec -> Path`; `Sankey.layout : SankeyConfig -> FlowGraph -> Result<SankeyLayout, LayoutError list>`.
 
-- [ ] H1: square-matrix chord/directed-chord/transposed modes, group/subgroup ordering, padding, ribbon and arrow-ribbon geometry. Cover asymmetric matrices, zeros, nonnegative validation, angular conservation and stable source/target IDs.
-- [ ] H2: DAG Sankey validation, node layers/alignment, iterative relaxation, node padding and link stacking. Detect cycles and return typed errors; do not silently break edges. Flow imbalance is represented explicitly; node size follows documented max(inflow,outflow) policy rather than inventing conservation.
+- [x] H1: square-matrix chord/directed-chord/transposed modes, group/subgroup ordering, padding, ribbon and arrow-ribbon geometry. Cover asymmetric matrices, zeros, nonnegative validation, angular conservation and stable source/target IDs.
+- [x] H2: DAG Sankey validation, node layers/alignment, iterative relaxation, node padding and link stacking. Detect cycles and return typed errors; do not silently break edges. Flow imbalance is represented explicitly; node size follows documented max(inflow,outflow) policy rather than inventing conservation.
 - [ ] H3: chord, Sankey and staged alluvial compositions; drag repositions nodes and recomputes incident links without restarting unrelated layout. Stable edge IDs distinguish parallel links.
 
 **Acceptance:** Ribbon/link widths and ordering are deterministic; feasible nodes do not overlap; infeasible viewport/padding is reported. Circular Sankey is a separate extension, not part of this DAG implementation.

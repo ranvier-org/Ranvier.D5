@@ -69,6 +69,9 @@ jobs:
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-bubbles artifacts/bubbles.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-chord artifacts/chord.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-sankey artifacts/sankey.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-flow-sankey artifacts/flow-sankey.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-flow-alluvial artifacts/flow-alluvial.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-flow-chord artifacts/flow-chord.bmp
       - name: Paired performance regression gate
         shell: bash
         run: |
@@ -113,6 +116,10 @@ jobs:
           let flowGraph = FlowGraph.create ["a";"b"] [{FlowLink.Id="ab";Source="a";Target="b";Value=1.}] |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           let flow = Sankey.layout (SankeyConfig.create(Bounds.create 0. 0. 300. 200.)) flowGraph |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           if flow.Links.Length <> 1 then failwith "Packed Sankey failed"
+          let flowSpec = Ranvier.D5.Charts.FlowSpec.create(Ranvier.D5.Charts.ChartFrame.create 300. 200. "Packed flow")
+          Ranvier.D5.Charts.FlowChart.sankey flowSpec flow |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
+          Ranvier.D5.Charts.FlowChart.alluvial flowSpec (SankeyConfig.create(Bounds.create 0. 0. 300. 200.)) (Map.ofList ["a",0;"b",1]) flowGraph |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
+          Ranvier.D5.Charts.FlowChart.chord (Ranvier.D5.Charts.ChordSpec.create flowSpec.Frame) ["a"] [[1.]] |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
           Ranvier.D5.View.ForceChunk.defaultValue |> ignore
           Ranvier.D5.View.Renderer.passive |> ignore
           graph.Dispose()

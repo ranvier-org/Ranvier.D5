@@ -201,6 +201,58 @@ let acceptance () =
         networkInput.Send(InputEvent.Down(1,Point.create 130. 110.,target))
         forceOwner.Dispose()
         host.Cycle()
+        let flowOwner,flowState,flowInput,flowSvg=graph.Run(fun () -> Api.createRoot(fun owner ->
+            let frame=Ranvier.D5.Charts.ChartFrame.create 300. 180. "Flow drag"
+            let bounds=Ranvier.D5.Charts.ChartLayout.plot frame |> Result.defaultWith(fun e -> failwithf "%A" e)
+            let config={SankeyConfig.create bounds with NodeWidth=18.;NodePadding=Bounds.height bounds/2.;Iterations=0}
+            let topology=FlowGraph.create ["a";"b";"spacer"] [{FlowLink.Id="ab";Source="a";Target="b";Value=1.}]
+                         |> Result.defaultWith(fun e -> failwithf "%A" e)
+            let initial=Sankey.layout config topology |> Result.defaultWith(fun e -> failwithf "%A" e)
+            let state=Api.createSignal initial
+            let spec={Ranvier.D5.Charts.FlowSpec.create frame with ShowLabels=false}
+            let chart=Reactive.derive (fun () -> state.Value) (fun layout -> Ranvier.D5.Charts.FlowChart.sankey spec layout |> Result.defaultWith(fun e -> failwithf "%A" e))
+            let mounted=Mounting.mount graph None (fun errors -> raise(AggregateException errors)) container None
+                            (fun context -> Program.run (Component.render Renderer.passive (fun () -> chart.Value.Scene)) context.Backend)
+            Api.onCleanup(fun () -> mounted.Dispose())
+            host.Cycle()
+            let svg=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
+            let input=FlowInteraction.attach svg (fun () -> chart.Value) (fun () -> config) (fun () -> state.Value)
+                          (fun next -> state.Value<-next) (fun errors -> failwithf "%A" errors)
+            owner,state,input,svg))
+        host.Cycle()
+        host.Frame()
+        host.Paint before
+        let initialFlow=graph.Run(fun () -> flowState.Value)
+        let flowBox=(flowSvg.querySelector "[data-d5-key='4:node1:a']").getBoundingClientRect()
+        let fx,fy=int(flowBox.x+flowBox.width/2.),int(flowBox.y+flowBox.height/2.)
+        host.Mouse(1,fx,fy,0,1,0) |> ignore
+        Expect.isTrue (flowSvg.hasPointerCapture 1) "flow captures pointer"
+        host.Mouse(0,fx,fy+5,0,0,0) |> ignore
+        host.Mouse(2,fx,fy+10,0,1,0) |> ignore
+        let movedFlow=graph.Run(fun () -> flowState.Value)
+        Expect.floatClose Accuracy.high (Bounds.y movedFlow.Nodes.Head.Bounds) (Bounds.y initialFlow.Nodes.Head.Bounds+10.) "native final-up flow delta"
+        Expect.equal movedFlow.Nodes.Tail initialFlow.Nodes.Tail "drag leaves unrelated nodes"
+        Expect.floatClose Accuracy.high movedFlow.Links.Head.Start.Y (initialFlow.Links.Head.Start.Y+10.) "incident source endpoint moves"
+        Expect.equal movedFlow.Links.Head.Finish initialFlow.Links.Head.Finish "nonincident endpoint fixed"
+        Expect.isFalse (flowSvg.hasPointerCapture 1) "flow releases pointer"
+        let flowTarget=Some ["plot";"4:node1:a"]
+        for ending in [InputEvent.Cancel;InputEvent.FocusLost] do
+            flowInput.Send(InputEvent.Down(1,Point.create 50. 50.,flowTarget))
+            flowInput.Send ending
+            flowInput.Send(InputEvent.Move(1,Point.create 50. 80.))
+            Expect.equal (graph.Run(fun () -> flowState.Value)) movedFlow "cancel/focus loss prevents late movement"
+        flowInput.Send(InputEvent.Key "ArrowRight")
+        flowInput.Send(InputEvent.Key "Enter")
+        Expect.equal (graph.Run(fun () -> flowInput.Selection.Selected)) (set ["a"]) "flow keyboard selects domain"
+        flowInput.Send(InputEvent.Down(1,Point.create 50. 50.,flowTarget))
+        graph.Run(fun () -> flowState.Value<-{Nodes=[];Links=[]})
+        Expect.isEmpty (graph.Run(fun () -> flowInput.Gesture.Pointers)) "exiting flow node cancels drag"
+        graph.Run(fun () -> flowState.Value<-movedFlow)
+        flowInput.Send(InputEvent.Down(1,Point.create 50. 50.,flowTarget))
+        flowOwner.Dispose()
+        flowInput.Send(InputEvent.Move(1,Point.create 50. 80.))
+        Expect.equal (graph.Run(fun () -> flowState.Value)) movedFlow "disposed flow input does not publish"
+        host.Cycle()
 
 [<EntryPoint>]
 let main _ =

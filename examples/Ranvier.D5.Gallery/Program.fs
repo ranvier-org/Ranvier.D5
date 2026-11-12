@@ -45,6 +45,24 @@ let capture kind path =
             input.Send(InputEvent.Key "Enter")
             if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Network keyboard selection failed."
             owner :> IDisposable
+        elif kind="flow-sankey" || kind="flow-alluvial" || kind="flow-chord" then
+            let owner,state,input=FlowGallery.mount (kind.Substring 5) host graph
+            host.Cycle()
+            host.Frame()
+            let struct(w,h)=host.PaintSize
+            host.Paint(Array.zeroCreate<byte>(w*h*4))
+            if kind<>"flow-chord" then
+                let node=graph.Run(fun () -> state.Value.Nodes |> List.find(fun node -> node.Id="Grid"))
+                let x,y=int(Bounds.x node.Bounds+Bounds.width node.Bounds/2.)+8,int(Bounds.y node.Bounds+Bounds.height node.Bounds/2.)+8
+                host.Mouse(1,x,y,0,1,0) |> ignore
+                host.Mouse(0,x,y+5,0,0,0) |> ignore
+                host.Mouse(2,x,y+10,0,1,0) |> ignore
+                let after=graph.Run(fun () -> state.Value.Nodes |> List.find(fun node -> node.Id="Grid"))
+                if abs(Bounds.y after.Bounds-Bounds.y node.Bounds-10.)>0.01 then failwith "Native flow drag did not apply the final movement."
+            input.Send(InputEvent.Key "ArrowRight")
+            input.Send(InputEvent.Key "Enter")
+            if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Flow keyboard selection failed."
+            owner :> IDisposable
         elif kind="hierarchy-explorer" then
             let owner,tick,state,worker=HierarchyExplorer.mount host graph
             graph.Run(fun () -> state.Value<-{state.Value with Collapsed=set ["Signals"];Selected=set ["Scene"]})
@@ -138,6 +156,14 @@ let main args =
     elif Array.contains "--network" args || Array.contains "--bubbles" args then
         use window=Window.Create("Ranvier.D5 interactive network",820,590)
         let owner,_,_=NetworkGallery.mount (Array.contains "--bubbles" args) window.Host window.Graph
+        while window.Step() do ()
+        owner.Dispose()
+    elif args.Length=2 && (args[0]="--capture-flow-sankey" || args[0]="--capture-flow-alluvial" || args[0]="--capture-flow-chord") then
+        capture (args[0].Substring 10) args[1]
+    elif args |> Array.exists(fun arg -> arg="--flow-sankey" || arg="--flow-alluvial" || arg="--flow-chord") then
+        let kind=args |> Array.find(fun arg -> arg.StartsWith "--flow-") |> fun arg -> arg.Substring 7
+        use window=Window.Create("Ranvier.D5 interactive flow recipes",820,590)
+        let owner,_,_=FlowGallery.mount kind window.Host window.Graph
         while window.Step() do ()
         owner.Dispose()
     elif args.Length=2 && args[0]="--capture-sankey" then
