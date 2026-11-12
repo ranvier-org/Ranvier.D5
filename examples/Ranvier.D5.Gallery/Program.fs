@@ -52,6 +52,14 @@ let capture path =
 let main args =
     if args.Length = 2 && args[0] = "--capture" then
         capture args[1]
+    elif Array.contains "--chart" args then
+        use window = Window.Create("Ranvier.D5 reactive chart",820,590)
+        let source,scene=window.Graph.Run ReactiveChart.create
+        let mounted=mount window.Host window.Graph (fun () -> scene.Value)
+        let clock=Stopwatch.StartNew()
+        while window.Step() do
+            window.Graph.Run(fun () -> source.Value <- source.Value |> List.map (fun point -> {point with Y=Some(sin(point.X+clock.Elapsed.TotalSeconds))}))
+        mounted.Dispose()
     else
         use window = Window.Create("Ranvier.D5 — native F# visualization", 820, 590)
         let clock = Stopwatch.StartNew()
