@@ -42,8 +42,9 @@ module Voronoi =
         let points=Delaunay.sites mesh
         let x,y=Bounds.x bounds,Bounds.y bounds
         let right,bottom=x+Bounds.width bounds,y+Bounds.height bounds
+        let viewport=[Point.create x y;Point.create right y;Point.create right bottom;Point.create x bottom] |> List.distinct
         [for i in 0..points.Length-1 ->
-            let mutable polygon=[Point.create x y;Point.create right y;Point.create right bottom;Point.create x bottom]
+            let mutable polygon=viewport
             for neighbor in Delaunay.neighbors i mesh do
                 if not polygon.IsEmpty then
                     let output=ResizeArray<Point>()
@@ -57,4 +58,3 @@ module Voronoi =
                         previous<-current;previousSign<-currentSign;previousValue<-currentValue
                     polygon<-output |> Seq.distinct |> Seq.toList
             {Site=i;InputIndices=Delaunay.inputIndices i mesh |> Array.toList;Vertices=polygon}]
-

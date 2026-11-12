@@ -28,6 +28,12 @@ let tests=testList "Voronoi" [
         let cells=Delaunay.build [p 2. 5.;p 8. 5.] |> Voronoi.clip bounds
         Expect.equal (cells |> List.map(fun cell -> Polygon.area cell.Vertices)) [50.;50.] "bisector at x=5"
         Expect.isTrue (cells[0].Vertices |> List.forall(fun point -> point.X<=5.)) "left cell"
+    testCase "singleton degenerate viewports contain distinct open-ring vertices" <| fun _ ->
+        let mesh=Delaunay.build [p 5. 5.]
+        for bounds,expected in [Bounds.create 2. 3. 0. 0.,[p 2. 3.];
+                                Bounds.create 2. 3. 0. 8.,[p 2. 3.;p 2. 11.];
+                                Bounds.create 2. 3. 8. 0.,[p 2. 3.;p 10. 3.]] do
+            Expect.equal (Voronoi.clip bounds mesh).Head.Vertices expected "collapsed viewport does not repeat closing corner"
     testCase "cells partition viewport and satisfy all nearest-site constraints" <| fun _ ->
         let points=[p 1. 1.;p 9. 1.;p 5. 4.;p 2. 8.;p 9. 9.;p -50. 20.]
         let bounds=Bounds.create 0. 0. 10. 10.

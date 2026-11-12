@@ -131,6 +131,27 @@ let main args =
         host.Cycle()
         host.Paint pixels))
     mounted.Dispose()
+    if not baselineOnly then
+        let topology=GraphData.create
+                        [for i in 0..999 -> {GraphNode.create(string i) with Position=Some(Point.create (60.+float(i%40)*17.) (60.+float(i/40)*17.));Radius=2.5}]
+                        [for i in 0..999 do for jump in [1;40] -> GraphLink.create (string i+"/"+string jump) (string i) (string((i+jump)%1000))]
+                     |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        let state=Force.initialize (ForceConfig.create(Point.create 400. 280.)) (Seed.create 42u) topology |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        let snapshots=[|Force.snapshot state;Force.step 1 state |> Force.snapshot|]
+        let spec={Ranvier.D5.Charts.NetworkSpec.create(Ranvier.D5.Charts.ChartFrame.create 800. 600. "Network benchmark") with AggregateLinks=true}
+        let build snapshot=Ranvier.D5.Charts.NetworkChart.network spec topology snapshot |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        results.Add(measure "network-chart-1000-nodes-2000-edges" 50. 16000000L (fun () -> build snapshots[0] |> ignore))
+        let scene=graph.Run(fun () -> Api.createSignal((build snapshots[0]).Scene))
+        let networkMount=Mounting.mount graph None (fun errors -> raise(AggregateException errors)) container None
+                            (fun context -> Program.run (Component.render Renderer.passive (fun () -> scene.Value)) context.Backend)
+        host.Cycle()
+        let mutable index=0
+        results.Add(measure "native-network-1000-nodes-2000-edges-paint" 100. 32000000L (fun () ->
+            index<-1-index
+            graph.Run(fun () -> scene.Value<-(build snapshots[index]).Scene)
+            host.Cycle()
+            host.Paint pixels))
+        networkMount.Dispose()
     let output = if args.Length > 0 then args[0] else "artifacts/benchmarks.json"
     let directory = Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore

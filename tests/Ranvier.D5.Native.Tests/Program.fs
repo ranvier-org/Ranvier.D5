@@ -161,6 +161,46 @@ let acceptance () =
         linkedOwner.Dispose()
         host.Cycle()
         Expect.equal (host.Document.querySelectorAll("svg").length) 0u "linked owner removes both views"
+        let forceOwner,force,networkInput,networkSvg=graph.Run(fun () -> Api.createRoot(fun owner ->
+            let topology=GraphData.create [{GraphNode.create "node" with Position=Some(Point.create 100. 100.);Radius=12.}] [] |> Result.defaultWith(fun e -> failwithf "%A" e)
+            let initial=Force.initialize {ForceConfig.create(Point.create 100. 100.) with MaxSteps=1} (Seed.create 1u) topology |> Result.defaultWith(fun e -> failwithf "%A" e) |> Force.step 1
+            let force=ReactiveForce.create (Ranvier.D5.Examples.HostDispatcher.forHost host) ForceChunk.defaultValue initial
+            let spec=Ranvier.D5.Charts.NetworkSpec.create(Ranvier.D5.Charts.ChartFrame.create 300. 180. "Drag")
+            let chart=Reactive.derive (fun () -> force.Snapshot) (fun snapshot -> Ranvier.D5.Charts.NetworkChart.network spec topology snapshot |> Result.defaultWith(fun e -> failwithf "%A" e))
+            let mounted=Mounting.mount graph None (fun errors -> raise(AggregateException errors)) container None
+                            (fun context -> Program.run (Component.render Renderer.passive (fun () -> chart.Value.Scene)) context.Backend)
+            Api.onCleanup(fun () -> mounted.Dispose())
+            host.Cycle()
+            let svg=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
+            owner,force,NetworkInteraction.attach svg (fun () -> chart.Value) force,svg))
+        host.Cycle()
+        host.Frame()
+        host.Paint before
+        let nodeBounds=(networkSvg.querySelector "[data-d5-key='4:node4:node']").getBoundingClientRect()
+        Expect.floatClose Accuracy.medium nodeBounds.width 24. "shared circle geometry preserves native radius"
+        Expect.floatClose Accuracy.medium nodeBounds.height 24. "shared circle geometry preserves native height"
+        host.Mouse(1,108,108,0,1,0) |> ignore
+        Expect.equal (graph.Run(fun () -> force.Snapshot.Nodes.Head.Pinned)) (Some(Point.create 100. 100.)) "native drag starts pin"
+        Expect.isTrue (networkSvg.hasPointerCapture 1) "network captures pointer"
+        host.Mouse(0,128,118,0,0,0) |> ignore
+        Expect.equal (graph.Run(fun () -> force.Snapshot.Nodes.Head.Position)) (Point.create 120. 110.) "native drag delta maps into plot"
+        host.Mouse(2,138,118,0,1,0) |> ignore
+        Expect.equal (graph.Run(fun () -> force.Snapshot.Nodes.Head.Position)) (Point.create 130. 110.) "release applies final movement"
+        Expect.equal (graph.Run(fun () -> force.Snapshot.Nodes.Head.Pinned)) None "release unpins after final movement"
+        Expect.isFalse (networkSvg.hasPointerCapture 1) "network releases capture"
+        let target=Some ["plot";"4:node4:node"]
+        networkInput.Send(InputEvent.Down(1,Point.create 130. 110.,target))
+        networkInput.Send InputEvent.Cancel
+        Expect.equal (graph.Run(fun () -> force.Snapshot.Nodes.Head.Pinned)) None "cancel unpins"
+        networkInput.Send(InputEvent.Down(1,Point.create 130. 110.,target))
+        networkInput.Send InputEvent.FocusLost
+        Expect.equal (graph.Run(fun () -> force.Snapshot.Nodes.Head.Pinned)) None "focus loss unpins"
+        networkInput.Send(InputEvent.Key "ArrowRight")
+        networkInput.Send(InputEvent.Key "Enter")
+        Expect.equal (graph.Run(fun () -> networkInput.Selection.Selected)) (set ["node"]) "keyboard selects semantic node"
+        networkInput.Send(InputEvent.Down(1,Point.create 130. 110.,target))
+        forceOwner.Dispose()
+        host.Cycle()
 
 [<EntryPoint>]
 let main _ =
