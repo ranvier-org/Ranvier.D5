@@ -20,7 +20,7 @@ module Renderer =
     let private row (dispatch: string list -> string -> Ranvier.Dom.Event -> unit) =
         Component.define (fun _ (read: unit -> RenderMark) ->
             let mutable cached=ValueNone
-            let appearance=Ranvier.Api.createMemo(fun _ ->
+            let appearance () =
                 let item=read()
                 let value=
                     match cached with
@@ -32,8 +32,8 @@ module Renderer =
                          Stroke=Paint.toCss style.Stroke;StrokeWidth=number style.StrokeWidth;Opacity=number style.Opacity;FontSize=number style.FontSize
                          Family=text.Family;Weight=string text.Weight;Anchor=text.Anchor;Baseline=text.Baseline}
                 cached<-ValueSome struct(item.Mark,item.Namespace,value)
-                value)
-            {Read=read;Appearance=fun () -> appearance.Value}) (fun t ->
+                value
+            {Read=read;Appearance=appearance}) (fun t ->
             let attribute name read = t.Attrs.attribute(name, fun (row:RenderRow) -> Some(read (row.Read()).Mark))
             let appearance name read = t.Attrs.attribute(name,fun (row:RenderRow) -> Some(read(row.Appearance())))
             let path =

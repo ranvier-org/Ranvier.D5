@@ -62,12 +62,14 @@ throughput; it does not measure application startup or dynamic PGO benefits.
 See [.NET compilation settings](https://learn.microsoft.com/en-us/dotnet/core/runtime-config/compilation).
 
 The controlled gate also exposed avoidable native attribute work. Renderer rows
-now retain one owner-scoped appearance memo: geometry-only updates keep existing
+retain an owner-local appearance cache: geometry-only updates reuse serialized
 style strings, while fill, stroke, opacity, font, transform and definition changes
-invalidate it. Native tests verify that style, font and transform fields still update.
-Measured 500-mark update/paint allocation fell from 1,902,456 to 1,538,456 bytes
-in the controlled runtime mode, below the baseline's 1,740,608 bytes. The matched
-three-pair gate passes with the original thresholds.
+invalidate it. Native tests verify style, font and transform updates. The cache
+is read inside the existing attribute bindings rather than adding a reactive
+memo per mark: the additional graph bookkeeping regressed macOS Traced CI.
+A local three-pair Traced comparison after removing that memo measured 6.830 ms
+baseline versus 6.759 ms current, with allocation reduced from 2,171,384 to
+1,974,056 bytes. The original regression thresholds remain unchanged.
 
 Packing uses a conservative enclosing circle, not D3's minimum-circle output;
 fitted padding is approximate. Cancellation occurs around the pure hierarchy
