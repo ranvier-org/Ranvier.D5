@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><PackageId>Ranvier.D5.Geo$(RanvierPackageSuffix)</PackageId><Description>Functional geographic geometry and map projections for Ranvier.D5.</Description><IsAotCompatible>true</IsAotCompatible></PropertyGroup>
-  <ItemGroup><Compile Include="Coordinates.fs" /><Compile Include="GeoTypes.fs" /><Compile Include="GeoJson.fs" /><Compile Include="Graticule.fs" /><Compile Include="GeoStream.fs" /><Compile Include="GeoMeasure.fs" /></ItemGroup>
+  <ItemGroup><Compile Include="Coordinates.fs" /><Compile Include="GeoTypes.fs" /><Compile Include="GeoJson.fs" /><Compile Include="Graticule.fs" /><Compile Include="GeoStream.fs" /><Compile Include="GeoMeasure.fs" /><Compile Include="Projection.fs" /></ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj" />
     <None Include="../../tools/reference-fixtures/licenses/d3-geo.txt" Pack="true" PackagePath="licenses/" />

@@ -34,6 +34,19 @@ let main args =
     let polygons=GeoGeometry.MultiPolygon(List.replicate 10000 [ring])
     let document=GeoDocument.Geometry(GeoGeometry.MultiPoint(List.take 10000 points))
     let json=GeoJson.serialize document |> ok
+    let projections =
+        [ProjectionKind.Equirectangular;ProjectionKind.Mercator;ProjectionKind.Orthographic]
+        |> List.map (fun kind -> kind,Projection.create (ProjectionConfig.defaultValue kind) |> ok)
+    let projectionResults =
+        projections |> List.map (fun (kind,projection) ->
+            measure (sprintf "geo-project-%A-100000" kind) 50. 4000000L (fun () ->
+                let mutable count=0
+                let mutable checksum=0.
+                for point in points do
+                    match Projection.project projection point with
+                    | Some screen -> count<-count+1; checksum<-checksum+screen.X+screen.Y
+                    | None -> ()
+                if count=0 || not(Double.IsFinite checksum) then failwith "Projection output"))
     let results=[|
         measure "geo-stream-100000" 10. 65536L (fun () ->
             let count=GeoStream.fold config (fun count event -> match event with GeoStreamEvent.Point _ -> count+1 | _ -> count) 0 geometry |> ok
@@ -56,6 +69,7 @@ let main args =
         measure "geojson-read-10000" 100. 8000000L (fun () -> GeoJson.parse json |> ok |> ignore)
         measure "geojson-write-10000" 100. 8000000L (fun () -> GeoJson.serialize document |> ok |> ignore)
     |]
+    let results=Array.append results (List.toArray projectionResults)
     let output=if args.Length=0 then "artifacts/geography-benchmarks.json" else args[0]
     let directory=Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore
