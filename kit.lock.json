@@ -14,7 +14,10 @@
                              "url":  "https://github.com/ranvier-org/Ranvier.Anime",
                              "commit":  "79dabde0d101f9465d27e2f90b577e1f45f81f9f",
                              "ref":  "refs/remotes/origin/main",
-                             "snapshot":  "snapshots/Ranvier.Anime"
+                             "snapshot":  "snapshots/Ranvier.Anime",
+                             "packageVersion": "0.1.0-rc.2",
+                             "packageCommit": "3e5a67a83619f03a18d3218124f1a09a6d0a8438",
+                             "upgradeReason": "Public pure sRGB/Lab/HCL interpolation; snapshot retains original audited source"
                          },
                          {
                              "name":  "Ranvier.Css",
