@@ -245,6 +245,57 @@ let capture kind path =
             if Object.ReferenceEquals(before,graph.Run(fun () -> scene.Value)) then failwith "Projection signal did not update the scene."
             verify 1.
             {new IDisposable with member _.Dispose()=mounted.Dispose()}
+        elif kind="map" then
+            let owner,rotation,loader,input,current=MapGallery.mount host graph
+            let timer=Stopwatch.StartNew()
+            let ready()=graph.Run(fun () -> loader.LastGood.IsSome && not (current()).HitTargets.IsEmpty)
+            while not(ready()) && timer.Elapsed.TotalSeconds<15. do
+                host.Cycle()
+                host.Frame()
+                System.Threading.Thread.Yield() |> ignore
+            if not(ready()) then failwith "Map worker failed to publish regions."
+            let paint()=
+                host.Cycle()
+                host.Frame()
+                let struct(w,h)=host.PaintSize
+                let pixels=Array.zeroCreate<byte>(w*h*4)
+                host.Paint pixels
+                fun (point:Point) ->
+                    let x,y=int(Math.Round point.X)+8,int(Math.Round point.Y)+8
+                    let i=(y*w+x)*4
+                    int pixels[i],int pixels[i+1],int pixels[i+2]
+            let near (r,g,b) (ar,ag,ab)=abs(ar-r)<=12 && abs(ag-g)<=12 && abs(ab-b)<=12
+            // A region anchor that picks only its own region must be painted with the joined value's fill.
+            let verify label =
+                let output=graph.Run current
+                let pixel=paint()
+                let regions=output.HitTargets |> List.choose(fun hit ->
+                    match hit.MarkPath,hit.Geometry with
+                    | "regions"::_,Ranvier.D5.Charts.HitRegion(polygons,_,anchor)
+                        when (polygons |> List.sumBy(fun polygon -> abs(Polygon.area polygon.Outer)))>600. &&
+                             (Ranvier.D5.Charts.HitTest.at anchor output |> List.map(fun target -> target.DataIds)) = [hit.DataIds] -> Some(hit.DataIds.Head,anchor)
+                    | _ -> None)
+                if regions.Length<3 then failwithf "Map %s exposed too few cleanly pickable regions." label
+                for id,anchor in regions do
+                    let value=(MapGallery.values |> List.find(fun row -> row.Region=id)).Value
+                    let expected=MapGallery.fill(value/23.)
+                    if not(near expected (pixel anchor)) then failwithf "Map %s region %s painted %A, expected %A." label id (pixel anchor) expected
+                regions
+            let regions=verify "initial"
+            let lake=Ranvier.D5.Geo.Projection.project (MapGallery.projection 100.) (Ranvier.D5.Geo.GeoPosition.create -112.5 0. |> Result.defaultWith(fun e -> failwithf "%A" e)) |> Option.get
+            let lakeFill=MapGallery.fill((MapGallery.values |> List.find(fun row -> row.Region="R10")).Value/23.)
+            if near lakeFill ((paint()) lake) then failwith "Map lake hole was filled."
+            let id,anchor=regions.Head
+            host.Mouse(0,int(Math.Round anchor.X)+8,int(Math.Round anchor.Y)+8,0,0,0) |> ignore
+            if graph.Run(fun () -> input.Selection.Hovered)<>Some id then failwithf "Map hover did not pick region %s." id
+            input.Send(InputEvent.Key "ArrowRight")
+            input.Send(InputEvent.Key "Enter")
+            if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Map keyboard selection failed."
+            let before=graph.Run current
+            graph.Run(fun () -> rotation.Value<-60.)
+            if Object.ReferenceEquals(before,graph.Run current) then failwith "Map rotation signal did not update the chart."
+            verify "rotated" |> ignore
+            owner :> IDisposable
         elif kind="linked" then
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
@@ -303,6 +354,14 @@ let main args =
         let timer=Stopwatch.StartNew()
         while window.Step() do window.Graph.Run(fun () -> phase.Value<-0.5-0.5*cos(timer.Elapsed.TotalSeconds*0.6))
         mounted.Dispose()
+    elif args.Length=2 && args[0]="--capture-map" then
+        capture "map" args[1]
+    elif Array.contains "--map" args then
+        use window=Window.Create("Ranvier.D5 reactive map",820,590)
+        let owner,rotation,_,_,_=MapGallery.mount window.Host window.Graph
+        let timer=Stopwatch.StartNew()
+        while window.Step() do window.Graph.Run(fun () -> rotation.Value<-100.-timer.Elapsed.TotalSeconds*8.)
+        owner.Dispose()
     elif args.Length=2 && args[0]="--capture-linked" then
         capture "linked" args[1]
     elif args.Length=2 && args[0]="--capture-hierarchy" then

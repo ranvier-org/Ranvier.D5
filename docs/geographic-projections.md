@@ -138,4 +138,4 @@ therefore succeed, while genuinely curved edges still report `BudgetExceeded`.
 Pinned d3-geo 3.1.1 fixtures add 90 azimuthal and 160 conic and transverse
 Mercator point/inverse cases, 132 azimuthal and 160 conic stream cases, eight
 projected world areas, 96 fits and eleven Albers USA points with four inset
-shapes. Map chart recipes (J4) are not yet provided.
+shapes. Map chart recipes are described in [map charts](map-charts.md).
