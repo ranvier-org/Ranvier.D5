@@ -67,7 +67,7 @@ The table above records baseline and planned ownership, not exhaustive parity.
 See [release validation](release-alpha.2.md) for tested scope and deliberate
 policies for alpha.2. The current hierarchy milestone adds task 5 construction,
 layouts and recipes, with [native snapshots and explicit limitations](hierarchy-charts.md).
-Task 6 now includes robust planar predicates/polygon operations and an immutable quadtree with aggregate traversal; see [planar contracts](planar.md) and [quadtree contracts](quadtree.md). Task 6 also adds [Delaunay triangulation, clipped Voronoi and native picking](spatial.md), with explicit extreme-input fallback and degeneracy policies. Task 7 now includes [deterministic immutable force state, collision and Barnes–Hut forces](force.md); [network/bubble recipes and owned worker/drag integration](network.md) are implemented. Tasks 8–11 remain open. Full locale/time parsers, all D3 palette tables,
+Task 6 now includes robust planar predicates/polygon operations and an immutable quadtree with aggregate traversal; see [planar contracts](planar.md) and [quadtree contracts](quadtree.md). Task 6 also adds [Delaunay triangulation, clipped Voronoi and native picking](spatial.md), with explicit extreme-input fallback and degeneracy policies. Task 7 now includes [deterministic immutable force state, collision and Barnes–Hut forces](force.md); [network/bubble recipes and owned worker/drag integration](network.md) are implemented. Task 8 now includes [chord/directed/transposed layouts and ribbon paths](chord.md); Sankey/alluvial and tasks 9–11 remain open. Full locale/time parsers, all D3 palette tables,
 geographic pipelines, complete network recipes, contours and flow layouts
 are not claimed by this milestone.
 

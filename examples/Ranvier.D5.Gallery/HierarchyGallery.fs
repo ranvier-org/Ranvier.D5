@@ -13,7 +13,7 @@ let private color depth =
     Chromatic.categorical Chromatic.category10 depth |> Chromatic.paint Ranvier.Anime.GamutPolicy.Clip
 
 let private points title x layout =
-    let items=layout (TreeConfig.create(Bounds.create 20. 45. 350. 170.)) root |> ok
+    let items:HierarchyPoint<string> list=layout (TreeConfig.create(Bounds.create 20. 45. 350. 170.)) root |> ok
     let positions=items |> List.map(fun item -> item.Id,item.Point) |> Map.ofList
     let edges=items |> List.choose(fun item -> item.Parent |> Option.map(fun parent ->
         Curves.linkVertical positions[parent] item.Point |> Mark.path("edge/"+item.Id) |> Mark.withStroke (Paint.rgb 150 160 175) 1.5 |> Mark.withFill Paint.none |> Leaf))

@@ -1,0 +1,1132 @@
+[
+  {
+    "mode": "Undirected",
+    "sorted": false,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        1,
+        2,
+        0
+      ],
+      [
+        4,
+        0,
+        3
+      ],
+      [
+        0,
+        1,
+        2
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 1.3945812247337506,
+        "value": 3
+      },
+      {
+        "index": 1,
+        "startAngle": 1.4745812247337506,
+        "endAngle": 4.728604082445835,
+        "value": 7
+      },
+      {
+        "index": 2,
+        "startAngle": 4.808604082445835,
+        "endAngle": 6.203185307179586,
+        "value": 3
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 0.4648604082445835,
+          "value": 1
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 0.4648604082445835,
+          "value": 1
+        }
+      },
+      {
+        "source": {
+          "index": 1,
+          "startAngle": 1.4745812247337506,
+          "endAngle": 3.3340228577120845,
+          "value": 4
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0.4648604082445835,
+          "endAngle": 1.3945812247337506,
+          "value": 2
+        }
+      },
+      {
+        "source": {
+          "index": 1,
+          "startAngle": 3.3340228577120845,
+          "endAngle": 4.728604082445835,
+          "value": 3
+        },
+        "target": {
+          "index": 2,
+          "startAngle": 4.808604082445835,
+          "endAngle": 5.273464490690419,
+          "value": 1
+        }
+      },
+      {
+        "source": {
+          "index": 2,
+          "startAngle": 5.273464490690419,
+          "endAngle": 6.203185307179586,
+          "value": 2
+        },
+        "target": {
+          "index": 2,
+          "startAngle": 5.273464490690419,
+          "endAngle": 6.203185307179586,
+          "value": 2
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Undirected",
+    "sorted": true,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        1,
+        2,
+        0
+      ],
+      [
+        4,
+        0,
+        3
+      ],
+      [
+        0,
+        1,
+        2
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 3.3340228577120845,
+        "endAngle": 4.728604082445835,
+        "value": 3
+      },
+      {
+        "index": 1,
+        "startAngle": 0,
+        "endAngle": 3.2540228577120844,
+        "value": 7
+      },
+      {
+        "index": 2,
+        "startAngle": 4.808604082445835,
+        "endAngle": 6.203185307179585,
+        "value": 3
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 1,
+          "startAngle": 0,
+          "endAngle": 1.859441632978334,
+          "value": 4
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 3.3340228577120845,
+          "endAngle": 4.263743674201251,
+          "value": 2
+        }
+      },
+      {
+        "source": {
+          "index": 1,
+          "startAngle": 1.859441632978334,
+          "endAngle": 3.2540228577120844,
+          "value": 3
+        },
+        "target": {
+          "index": 2,
+          "startAngle": 5.7383248989350015,
+          "endAngle": 6.203185307179585,
+          "value": 1
+        }
+      },
+      {
+        "source": {
+          "index": 2,
+          "startAngle": 4.808604082445835,
+          "endAngle": 5.7383248989350015,
+          "value": 2
+        },
+        "target": {
+          "index": 2,
+          "startAngle": 4.808604082445835,
+          "endAngle": 5.7383248989350015,
+          "value": 2
+        }
+      },
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 4.263743674201251,
+          "endAngle": 4.728604082445835,
+          "value": 1
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 4.263743674201251,
+          "endAngle": 4.728604082445835,
+          "value": 1
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Undirected",
+    "sorted": false,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        0,
+        5
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 6.123185307179586,
+        "value": 5
+      },
+      {
+        "index": 1,
+        "startAngle": 6.203185307179586,
+        "endAngle": 6.203185307179586,
+        "value": 0
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 6.123185307179586,
+          "value": 5
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 6.203185307179586,
+          "endAngle": 6.203185307179586,
+          "value": 0
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Undirected",
+    "sorted": true,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        0,
+        5
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 6.123185307179586,
+        "value": 5
+      },
+      {
+        "index": 1,
+        "startAngle": 6.203185307179586,
+        "endAngle": 6.203185307179586,
+        "value": 0
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 6.123185307179586,
+          "value": 5
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 6.203185307179586,
+          "endAngle": 6.203185307179586,
+          "value": 0
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Undirected",
+    "sorted": false,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        7
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 6.203185307179586,
+        "value": 7
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 6.203185307179586,
+          "value": 7
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 6.203185307179586,
+          "value": 7
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Undirected",
+    "sorted": true,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        7
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 6.203185307179586,
+        "value": 7
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 6.203185307179586,
+          "value": 7
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 6.203185307179586,
+          "value": 7
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Directed",
+    "sorted": false,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        1,
+        2,
+        0
+      ],
+      [
+        4,
+        0,
+        3
+      ],
+      [
+        0,
+        1,
+        2
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 1.8594416329783343,
+        "value": 8
+      },
+      {
+        "index": 1,
+        "startAngle": 1.9394416329783344,
+        "endAngle": 4.263743674201252,
+        "value": 10
+      },
+      {
+        "index": 2,
+        "startAngle": 4.343743674201252,
+        "endAngle": 6.203185307179586,
+        "value": 8
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 1.162151020611459,
+          "endAngle": 1.3945812247337508,
+          "value": 1
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0.929720816489167,
+          "endAngle": 1.162151020611459,
+          "value": 1
+        }
+      },
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 1.3945812247337508,
+          "endAngle": 1.8594416329783343,
+          "value": 2
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 2.171871837100626,
+          "endAngle": 2.6367322453452093,
+          "value": 2
+        }
+      },
+      {
+        "source": {
+          "index": 1,
+          "startAngle": 2.6367322453452093,
+          "endAngle": 3.5664530618343764,
+          "value": 4
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 0.929720816489167,
+          "value": 4
+        }
+      },
+      {
+        "source": {
+          "index": 1,
+          "startAngle": 3.5664530618343764,
+          "endAngle": 4.263743674201252,
+          "value": 3
+        },
+        "target": {
+          "index": 2,
+          "startAngle": 4.808604082445836,
+          "endAngle": 5.505894694812711,
+          "value": 3
+        }
+      },
+      {
+        "source": {
+          "index": 2,
+          "startAngle": 5.505894694812711,
+          "endAngle": 5.738324898935002,
+          "value": 1
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 1.9394416329783344,
+          "endAngle": 2.171871837100626,
+          "value": 1
+        }
+      },
+      {
+        "source": {
+          "index": 2,
+          "startAngle": 5.738324898935002,
+          "endAngle": 6.203185307179586,
+          "value": 2
+        },
+        "target": {
+          "index": 2,
+          "startAngle": 4.343743674201252,
+          "endAngle": 4.808604082445836,
+          "value": 2
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Directed",
+    "sorted": true,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        1,
+        2,
+        0
+      ],
+      [
+        4,
+        0,
+        3
+      ],
+      [
+        0,
+        1,
+        2
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 2.404302041222918,
+        "endAngle": 4.263743674201253,
+        "value": 8
+      },
+      {
+        "index": 1,
+        "startAngle": 0,
+        "endAngle": 2.324302041222918,
+        "value": 10
+      },
+      {
+        "index": 2,
+        "startAngle": 4.343743674201253,
+        "endAngle": 6.203185307179587,
+        "value": 8
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 1,
+          "startAngle": 0,
+          "endAngle": 0.929720816489167,
+          "value": 4
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 3.3340228577120854,
+          "endAngle": 4.263743674201253,
+          "value": 4
+        }
+      },
+      {
+        "source": {
+          "index": 1,
+          "startAngle": 0.929720816489167,
+          "endAngle": 1.6270114288560422,
+          "value": 3
+        },
+        "target": {
+          "index": 2,
+          "startAngle": 5.505894694812712,
+          "endAngle": 6.203185307179587,
+          "value": 3
+        }
+      },
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 2.404302041222918,
+          "endAngle": 2.8691624494675017,
+          "value": 2
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 1.859441632978334,
+          "endAngle": 2.324302041222918,
+          "value": 2
+        }
+      },
+      {
+        "source": {
+          "index": 2,
+          "startAngle": 4.343743674201253,
+          "endAngle": 4.808604082445837,
+          "value": 2
+        },
+        "target": {
+          "index": 2,
+          "startAngle": 5.041034286568128,
+          "endAngle": 5.505894694812712,
+          "value": 2
+        }
+      },
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 2.8691624494675017,
+          "endAngle": 3.1015926535897935,
+          "value": 1
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 3.1015926535897935,
+          "endAngle": 3.3340228577120854,
+          "value": 1
+        }
+      },
+      {
+        "source": {
+          "index": 2,
+          "startAngle": 4.808604082445837,
+          "endAngle": 5.041034286568128,
+          "value": 1
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 1.6270114288560422,
+          "endAngle": 1.859441632978334,
+          "value": 1
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Directed",
+    "sorted": false,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        0,
+        5
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 3.061592653589793,
+        "value": 5
+      },
+      {
+        "index": 1,
+        "startAngle": 3.141592653589793,
+        "endAngle": 6.203185307179586,
+        "value": 5
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 3.061592653589793,
+          "value": 5
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 3.141592653589793,
+          "endAngle": 6.203185307179586,
+          "value": 5
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Directed",
+    "sorted": true,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        0,
+        5
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 3.061592653589793,
+        "value": 5
+      },
+      {
+        "index": 1,
+        "startAngle": 3.141592653589793,
+        "endAngle": 6.203185307179586,
+        "value": 5
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 3.061592653589793,
+          "value": 5
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 3.141592653589793,
+          "endAngle": 6.203185307179586,
+          "value": 5
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Directed",
+    "sorted": false,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        7
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 6.203185307179586,
+        "value": 14
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 3.101592653589793,
+          "endAngle": 6.203185307179586,
+          "value": 7
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 3.101592653589793,
+          "value": 7
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Directed",
+    "sorted": true,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        7
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 6.203185307179586,
+        "value": 14
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 3.101592653589793,
+          "value": 7
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 3.101592653589793,
+          "endAngle": 6.203185307179586,
+          "value": 7
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Transposed",
+    "sorted": false,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        1,
+        2,
+        0
+      ],
+      [
+        4,
+        0,
+        3
+      ],
+      [
+        0,
+        1,
+        2
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 2.324302041222918,
+        "value": 5
+      },
+      {
+        "index": 1,
+        "startAngle": 2.404302041222918,
+        "endAngle": 3.7988832659566683,
+        "value": 3
+      },
+      {
+        "index": 2,
+        "startAngle": 3.8788832659566683,
+        "endAngle": 6.203185307179586,
+        "value": 5
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 0.4648604082445835,
+          "value": 1
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 0.4648604082445835,
+          "value": 1
+        }
+      },
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0.4648604082445835,
+          "endAngle": 2.324302041222918,
+          "value": 4
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 2.404302041222918,
+          "endAngle": 3.334022857712085,
+          "value": 2
+        }
+      },
+      {
+        "source": {
+          "index": 2,
+          "startAngle": 3.8788832659566683,
+          "endAngle": 5.273464490690419,
+          "value": 3
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 3.334022857712085,
+          "endAngle": 3.7988832659566683,
+          "value": 1
+        }
+      },
+      {
+        "source": {
+          "index": 2,
+          "startAngle": 5.273464490690419,
+          "endAngle": 6.203185307179586,
+          "value": 2
+        },
+        "target": {
+          "index": 2,
+          "startAngle": 5.273464490690419,
+          "endAngle": 6.203185307179586,
+          "value": 2
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Transposed",
+    "sorted": true,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        1,
+        2,
+        0
+      ],
+      [
+        4,
+        0,
+        3
+      ],
+      [
+        0,
+        1,
+        2
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 2.324302041222918,
+        "value": 5
+      },
+      {
+        "index": 1,
+        "startAngle": 4.808604082445836,
+        "endAngle": 6.203185307179587,
+        "value": 3
+      },
+      {
+        "index": 2,
+        "startAngle": 2.404302041222918,
+        "endAngle": 4.728604082445836,
+        "value": 5
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 1.859441632978334,
+          "value": 4
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 4.808604082445836,
+          "endAngle": 5.738324898935003,
+          "value": 2
+        }
+      },
+      {
+        "source": {
+          "index": 2,
+          "startAngle": 2.404302041222918,
+          "endAngle": 3.7988832659566683,
+          "value": 3
+        },
+        "target": {
+          "index": 1,
+          "startAngle": 5.738324898935003,
+          "endAngle": 6.203185307179587,
+          "value": 1
+        }
+      },
+      {
+        "source": {
+          "index": 2,
+          "startAngle": 3.7988832659566683,
+          "endAngle": 4.728604082445836,
+          "value": 2
+        },
+        "target": {
+          "index": 2,
+          "startAngle": 3.7988832659566683,
+          "endAngle": 4.728604082445836,
+          "value": 2
+        }
+      },
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 1.859441632978334,
+          "endAngle": 2.324302041222918,
+          "value": 1
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 1.859441632978334,
+          "endAngle": 2.324302041222918,
+          "value": 1
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Transposed",
+    "sorted": false,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        0,
+        5
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 0,
+        "value": 0
+      },
+      {
+        "index": 1,
+        "startAngle": 0.08,
+        "endAngle": 6.203185307179586,
+        "value": 5
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 1,
+          "startAngle": 0.08,
+          "endAngle": 6.203185307179586,
+          "value": 5
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 0,
+          "value": 0
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Transposed",
+    "sorted": true,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        0,
+        5
+      ],
+      [
+        0,
+        0
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 6.203185307179586,
+        "endAngle": 6.203185307179586,
+        "value": 0
+      },
+      {
+        "index": 1,
+        "startAngle": 0,
+        "endAngle": 6.123185307179586,
+        "value": 5
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 1,
+          "startAngle": 0,
+          "endAngle": 6.123185307179586,
+          "value": 5
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 6.203185307179586,
+          "endAngle": 6.203185307179586,
+          "value": 0
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Transposed",
+    "sorted": false,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        7
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 6.203185307179586,
+        "value": 7
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 6.203185307179586,
+          "value": 7
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 6.203185307179586,
+          "value": 7
+        }
+      }
+    ]
+  },
+  {
+    "mode": "Transposed",
+    "sorted": true,
+    "padAngle": 0.08,
+    "matrix": [
+      [
+        7
+      ]
+    ],
+    "groups": [
+      {
+        "index": 0,
+        "startAngle": 0,
+        "endAngle": 6.203185307179586,
+        "value": 7
+      }
+    ],
+    "chords": [
+      {
+        "source": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 6.203185307179586,
+          "value": 7
+        },
+        "target": {
+          "index": 0,
+          "startAngle": 0,
+          "endAngle": 6.203185307179586,
+          "value": 7
+        }
+      }
+    ]
+  }
+]

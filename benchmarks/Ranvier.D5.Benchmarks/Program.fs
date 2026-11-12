@@ -77,6 +77,12 @@ let main args =
         for theta,label in [0.,"exact";0.5,"barnes-hut"] do
             let state=Force.initialize {spatialConfig with Collision=None;ManyBody=Some {ManyBodyConfig.create -5. with Theta=theta}} (Seed.create 42u) smallGraph |> Result.defaultWith(fun errors -> failwithf "%A" errors)
             results.Add(measure ("force-"+label+"-400-step") 20. 3000000L (fun () -> Force.step 1 state |> ignore))
+        let chordMatrix=[for i in 0..255 -> [for j in 0..255 -> float((i+j)%17+1)]]
+        results.Add(measure "chord-directed-256" 200. 96000000L (fun () ->
+            Chord.layout {ChordConfig.defaultValue with Mode=ChordMode.Directed} chordMatrix |> Result.defaultWith(fun errors -> failwithf "%A" errors) |> ignore))
+        let ribbonFlow=(Chord.layout ChordConfig.defaultValue [[1.;2.];[3.;4.]] |> Result.defaultWith(fun errors -> failwithf "%A" errors)).Flows.Head
+        results.Add(measure "ribbons-10000-svg" 100. 48000000L (fun () ->
+            for _ in 1..10000 do Ribbon.path (RibbonSpec.create 100. ribbonFlow) |> Path.toSvg |> ignore))
         let curvePoints=points |> Array.map Some |> Array.toList
         results.Add(measure "natural-10000" 100. 16000000L (fun () -> Curves.line CurveSpec.Natural curvePoints |> ignore))
         let chartData=[0..999]
