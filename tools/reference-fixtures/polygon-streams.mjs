@@ -38,10 +38,18 @@ for(let index=0;index<40;index++){
   }
   inputs.push({name:`seeded-${index}`,kind:index%2?'Orthographic':'Equirectangular',rings,rotate:[random()*360-180,random()*100-50,random()*60-30]});
 }
+for(const input of [...inputs]){
+  const projection=(input.kind==='Orthographic'?geoOrthographic():geoEquirectangular())
+    .scale(100).translate([0,0]).rotate(input.rotate??[0,0,0]);
+  const [x,y]=projection(input.rings[0][0]);
+  const width=20+random()*80,height=20+random()*80;
+  inputs.push({...input,name:input.name+'-rectangle',clip:[[x-width/2,y-height/2],[x+width/2,y+height/2]]});
+}
 const cases=inputs.map(input=>{
   const output=[]; let current;
   const projection=(input.kind==='Orthographic'?geoOrthographic().clipAngle(90):geoEquirectangular())
     .scale(100).translate([0,0]).precision(0.1).rotate(input.rotate??[0,0,0]);
+  if(input.clip) projection.clipExtent(input.clip);
   geoStream({type:'Polygon',coordinates:input.rings},projection.stream({
     lineStart(){current=[];},point(x,y){current.push([x,y]);},lineEnd(){output.push(current);},
     polygonStart(){},polygonEnd(){},sphere(){throw new Error('Unexpected sphere');}

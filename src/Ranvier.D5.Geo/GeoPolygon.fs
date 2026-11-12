@@ -95,12 +95,13 @@ module internal GeoPolygon =
             let maxAngle=4.*asin(sqrt(min 0.5 (precision/scale/2.)))
             let checkBuffer count =
                 if count>maxBuffer then raise(Rejected(BudgetExceeded "Polygon clipping exceeds its vertex buffer budget."))
-            let boundaryBetween fromPoint toPoint direction emit =
+            let boundaryBetween fromPoint toPoint direction whole emit =
                 let first=parameter fromPoint
                 let mutable last=parameter toPoint
-                if direction>0 then
-                    if last<=first then last<-last+period
-                elif last>=first then last<-last-period
+                if whole then last<-first+float direction*period
+                elif direction>0 then
+                    if last<first then last<-last+period
+                elif last>first then last<-last-period
                 if orthographic then
                     let required=ceil(abs(last-first)/maxAngle)
                     if not(Double.IsFinite required) || required>float maxBuffer || required>4.*pown 2. maxDepth then
@@ -116,13 +117,6 @@ module internal GeoPolygon =
                         emit(boundaryPoint corner)
                         corner<-corner+float direction
                 emit toPoint
-            let output=ResizeArray<Point array>()
-            let mutable outputVertices=0
-            let publish (points:Point array) =
-                if points.Length>=3 then
-                    checkBuffer(outputVertices+points.Length)
-                    outputVertices<-outputVertices+points.Length
-                    output.Add points
             let fragments=ResizeArray<Point array>()
             let working=ResizeArray<Point>()
             let mutable buffered=0
@@ -176,92 +170,13 @@ module internal GeoPolygon =
                             fragments[start]<-merged
                             fragments.RemoveAt(fragments.Count-1)
                             buffered<-buffered-1
-            let openFragments=ResizeArray<Point array>()
-            for points in fragments do
-                spend 1L
-                if points[0]=points[points.Length-1] then
-                    publish points[0..points.Length-2]
-                else openFragments.Add points
-            buffered<-0
             let rotated=rotated.ToArray()
-            if openFragments.Count=0 then
-                if contains spend rotated (boundaryPosition 0.) then
-                    working.Clear()
-                    let first=boundaryPoint 0.
-                    working.Add first
-                    boundaryBetween first first 1 add
-                    if working.Count>1 && working[0]=working[working.Count-1] then working.RemoveAt(working.Count-1)
-                    publish(working.ToArray())
-            else
-                let count=openFragments.Count*2
-                checkBuffer count
-                let points=Array.zeroCreate<Point> count
-                let parameters=Array.zeroCreate<float> count
-                for index=0 to count-1 do
-                    spend 1L
-                    let fragment=openFragments[index/2]
-                    points[index]<-if index%2=0 then fragment[0] else fragment[fragment.Length-1]
-                    parameters[index]<-parameter points[index]
-                let order=Array.init count id
-                let scratch=Array.zeroCreate<int> count
-                let mutable width=1
-                while width<count do
-                    let mutable start=0
-                    while start<count do
-                        let middle=min count (start+width)
-                        let finish=min count (middle+width)
-                        let mutable left,right=start,middle
-                        for index=start to finish-1 do
-                            spend 1L
-                            if left<middle && (right>=finish || parameters[order[left]]<=parameters[order[right]]) then
-                                scratch[index]<-order[left];left<-left+1
-                            else scratch[index]<-order[right];right<-right+1
-                        start<-finish
-                    for index=0 to count-1 do
-                        spend 1L
-                        order[index]<-scratch[index]
-                    width<-width*2
-                let next=Array.zeroCreate<int> count
-                let previous=Array.zeroCreate<int> count
-                let entry=Array.zeroCreate<bool> count
-                let visited=Array.zeroCreate<bool> count
-                let seed=(parameters[order[count-1]]+parameters[order[0]]+period)/2.
-                let mutable inside=contains spend rotated (boundaryPosition seed)
-                for index=0 to count-1 do
-                    spend 1L
-                    let current=order[index]
-                    next[current]<-order[(index+1)%count]
-                    previous[current]<-order[(index+count-1)%count]
-                    inside<-not inside
-                    entry[current]<-inside
-                for start=0 to count-1 do
-                    if not visited[start] then
-                        working.Clear()
-                        let mutable current=start
-                        let mutable subject=true
-                        let mutable running=true
-                        while running do
-                            spend 1L
-                            visited[current]<-true
-                            if subject then
-                                let fragment=openFragments[current/2]
-                                if current%2=0 then
-                                    for point in fragment do add point
-                                    current<-current+1
-                                else
-                                    for index=fragment.Length-1 downto 0 do add fragment[index]
-                                    current<-current-1
-                            else
-                                let target=if entry[current] then next[current] else previous[current]
-                                boundaryBetween points[current] points[target] (if entry[current] then 1 else -1) add
-                                current<-target
-                            subject<-not subject
-                            running<-not visited[current]
-                        if working.Count>1 && working[0]=working[working.Count-1] then working.RemoveAt(working.Count-1)
-                        publish(working.ToArray())
-            let mutable result=[]
-            for index=output.Count-1 downto 0 do
-                spend 1L
-                result<-output[index]::result
-            Ok result
+            let boundary = {
+                Period=period
+                Parameter=parameter
+                PointAt=boundaryPoint
+                ContainsAt=fun amount -> contains spend rotated (boundaryPosition amount)
+                Between=boundaryBetween
+            }
+            GeoRejoin.run maxBuffer spend boundary fragments
         with Rejected error -> Error error

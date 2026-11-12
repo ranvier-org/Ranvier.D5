@@ -80,7 +80,19 @@ let main args =
                        yield p (10.*cos angle) (10.*sin angle)
                    yield p 10. 0.]
     let densePolygon=GeoGeometry.Polygon[denseRing]
+    let denseClipOptions={polygonOptions with ClipExtent=Some(Ranvier.D5.Bounds.create -5. -20. 10. 40.)}
+    let concaveRing=[p -40. -40.;p -40. 40.;p -20. 40.;p -20. -20.;p 20. -20.;p 20. 40.;p 40. 40.;p 40. -40.;p -40. -40.]
+    let concavePolygons=GeoGeometry.MultiPolygon(List.replicate 1000 [concaveRing])
+    let radians=100.*Math.PI/180.
+    let concaveOptions={polygonOptions with ClipExtent=Some(Ranvier.D5.Bounds.create (-50.*radians) (-15.*radians) (100.*radians) (10.*radians))}
     let results=[|
+        measure "geo-rectangle-polygon-100000" 150. 28000000L (fun () ->
+            let paths=GeoPath.project denseClipOptions polygonProjection densePolygon |> ok
+            if paths.Length<>1 then failwith "Dense clipped polygon count")
+        measure "geo-rectangle-concave-polygons-1000" 100. 12000000L (fun () ->
+            let paths=GeoPath.project concaveOptions polygonProjection concavePolygons |> ok
+            let rings=paths |> List.sumBy(fun path -> Ranvier.D5.Path.commands path |> List.sumBy(function Ranvier.D5.PathCommand.Close -> 1 | _ -> 0))
+            if paths.Length<>1000 || rings<>2000 then failwith "Disconnected rectangle polygon components")
         measure "geo-polygon-100000" 150. 32000000L (fun () ->
             let paths=GeoPath.project polygonOptions polygonProjection densePolygon |> ok
             if paths.Length<>1 || (Ranvier.D5.Path.commands paths.Head |> List.length)<>100001 then failwith "Dense polygon closure")
@@ -135,4 +147,7 @@ let main args =
     let directory=Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore
     File.WriteAllText(output,JsonSerializer.Serialize(results,JsonSerializerOptions(WriteIndented=true)))
-    if results |> Array.exists(fun value -> value.P95Ms>value.LimitMs || value.MedianBytes>value.LimitBytes) then 1 else 0
+    let failures=results |> Array.filter(fun value -> value.P95Ms>value.LimitMs || value.MedianBytes>value.LimitBytes)
+    for value in failures do
+        printfn "FAIL %s: p95 %.3f ms (limit %.3f); allocation %d bytes (limit %d)" value.Name value.P95Ms value.LimitMs value.MedianBytes value.LimitBytes
+    if failures.Length>0 then 1 else 0

@@ -11,6 +11,19 @@ let private ok = function Ok value -> value | Error errors -> failtestf "%A" err
 let private p longitude latitude = GeoPosition.create longitude latitude |> ok
 let private projection kind = Projection.create (ProjectionConfig.defaultValue kind) |> ok
 
+let private polygonRings paths =
+    let rings=ResizeArray<Point list>()
+    for path in paths do
+        let mutable current=[]
+        for command in Path.commands path do
+            match command with
+            | MoveTo point -> current<-[point]
+            | LineTo point -> current<-point::current
+            | Close -> rings.Add(List.rev current);current<-[]
+            | _ -> failtest "Expected sampled polygon commands"
+        Expect.isEmpty current "polygon rings close"
+    List.ofSeq rings
+
 [<Tests>]
 let tests = testList "geographic paths" [
     testCase "polygon topology and filled area match pinned spherical stream fixtures" <| fun _ ->
@@ -24,7 +37,13 @@ let tests = testList "geographic paths" [
                 | _ -> (ProjectionConfig.defaultValue kind).Rotation
             let projected=Projection.create {ProjectionConfig.defaultValue kind with Scale=item.GetProperty("scale").GetDouble();Rotation=rotation} |> ok
             let rings=item.GetProperty("rings").EnumerateArray() |> Seq.map(fun ring -> ring.EnumerateArray() |> Seq.map(fun point -> p (point[0].GetDouble()) (point[1].GetDouble())) |> Seq.toList) |> Seq.toList
-            let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=item.GetProperty("precision").GetDouble()} projected (GeoGeometry.Polygon rings) |> ok
+            let extent =
+                match item.TryGetProperty("clip") with
+                | true,value ->
+                    let lower,upper=value[0],value[1]
+                    Some(Bounds.create (lower[0].GetDouble()) (lower[1].GetDouble()) (upper[0].GetDouble()-lower[0].GetDouble()) (upper[1].GetDouble()-lower[1].GetDouble()))
+                | _ -> None
+            let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=item.GetProperty("precision").GetDouble();ClipExtent=extent} projected (GeoGeometry.Polygon rings) |> ok
             let actual=ResizeArray<Point list>()
             for path in paths do
                 let mutable vertices=[]
@@ -90,6 +109,102 @@ let tests = testList "geographic paths" [
         cancelled.CancelAfter(1)
         Expect.throwsT<OperationCanceledException> (fun () ->
             GeoPath.projectWithCancellation GeoPathOptions.defaultValue cancelled.Token (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[ring]) |> ignore) "cooperative polygon cancellation"
+    testCase "rectangle polygon clipping preserves a viewport inside an exterior" <| fun _ ->
+        let outer=[p -40. -40.;p -40. 40.;p 40. 40.;p 40. -40.;p -40. -40.]
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.1 -0.1 0.2 0.2)}
+        let rings=GeoPath.project options (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[outer]) |> ok |> polygonRings
+        Expect.equal rings.Length 1 "one viewport boundary"
+        Expect.isLessThan (abs(Polygon.area rings.Head-0.04)) 1e-12 "filled viewport without visible input vertices"
+    testCase "rectangle polygon clipping omits a viewport inside a hole" <| fun _ ->
+        let outer=[p -40. -40.;p -40. 40.;p 40. 40.;p 40. -40.;p -40. -40.]
+        let hole=[p -10. -10.;p 10. -10.;p 10. 10.;p -10. 10.;p -10. -10.]
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.1 -0.1 0.2 0.2);MaxOutputPoints=1}
+        Expect.equal (GeoPath.project options (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[outer;hole]) |> ok) [] "hole excludes the viewport"
+    testCase "rectangle separates disconnected intersections of a concave polygon" <| fun _ ->
+        let ring=[p -40. -40.;p -40. 40.;p -20. 40.;p -20. -20.;p 20. -20.;p 20. 40.;p 40. 40.;p 40. -40.;p -40. -40.]
+        let radians=Math.PI/180.
+        let options={GeoPathOptions.defaultValue with Precision=0.001;ClipExtent=Some(Bounds.create (-50.*radians) (-15.*radians) (100.*radians) (10.*radians))}
+        let paths=GeoPath.project options (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[ring]) |> ok
+        Expect.equal paths.Length 1 "one compound polygon"
+        let rings=polygonRings paths
+        Expect.equal rings.Length 2 "two visible arms without a connector"
+        Expect.isLessThan (abs((rings |> List.sumBy Polygon.area)-400.*radians*radians)) 1e-12 "two clipped rectangles"
+    testCase "rectangle polygon clipping retains fully enclosed holes" <| fun _ ->
+        let outer=[p -40. -40.;p -40. 40.;p 40. 40.;p 40. -40.;p -40. -40.]
+        let hole=[p -10. -10.;p 10. -10.;p 10. 10.;p -10. 10.;p -10. -10.]
+        let projected=projection ProjectionKind.Equirectangular
+        let options={GeoPathOptions.defaultValue with Precision=0.001}
+        let small=GeoPath.project options projected (GeoGeometry.Polygon[List.rev hole]) |> ok |> polygonRings |> List.sumBy Polygon.area
+        let clipped={options with ClipExtent=Some(Bounds.create -0.5 -0.5 1. 1.)}
+        let rings=GeoPath.project clipped projected (GeoGeometry.Polygon[outer;hole]) |> ok |> polygonRings
+        Expect.equal rings.Length 2 "rectangle exterior and original hole"
+        Expect.isLessThan (abs((rings |> List.sumBy Polygon.area)-(1.-small))) 1e-12 "hole winding subtracts its area"
+    testCase "rectangle polygon clipping omits empty and disjoint viewports" <| fun _ ->
+        let ring=[p -10. -10.;p -10. 10.;p 10. 10.;p 10. -10.;p -10. -10.]
+        for extent in [Bounds.create 0. 0. 0. 1.;Bounds.create 10. 10. 1. 1.] do
+            let options={GeoPathOptions.defaultValue with ClipExtent=Some extent;MaxOutputPoints=1}
+            Expect.equal (GeoPath.project options (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[ring]) |> ok) [] "no phantom output"
+    testCase "rectangle polygon clipping follows hemisphere clipping" <| fun _ ->
+        let ring=[p -40. -35.;p -40. 45.;p 130. 45.;p 130. -35.;p -40. -35.]
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.25 -0.25 0.5 0.5);Precision=0.001}
+        let rings=GeoPath.project options (projection ProjectionKind.Orthographic) (GeoGeometry.Polygon[ring]) |> ok |> polygonRings
+        Expect.isNonEmpty rings "visible clipped region"
+        for ring in rings do
+            Expect.isTrue (ring |> List.forall(fun point -> abs point.X<=0.25+1e-12 && abs point.Y<=0.25+1e-12)) "no vertex escapes the viewport"
+    testCase "rectangle polygon boundary-only contacts do not create a filled region" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create 0. -0.1 1. 0.2);MaxOutputPoints=1}
+        let ring=[p 0. -10.;p -10. 0.;p 0. 10.;p 0. -10.]
+        Expect.equal (GeoPath.project options (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[ring]) |> ok) [] "shared edge has no area"
+        let corner=[p -10. 10.;p -10. 20.;p 0. 0.;p -10. 10.]
+        let cornerOptions={options with ClipExtent=Some(Bounds.create 0. 0. 1. 1.)}
+        Expect.equal (GeoPath.project cornerOptions (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[corner]) |> ok) [] "corner touch has no area"
+    testCase "rectangle clipping does not duplicate an exactly coincident world boundary" <| fun _ ->
+        let small=[p -10. -10.;p -10. 10.;p 10. 10.;p 10. -10.;p -10. -10.]
+        let geometry=GeoGeometry.Polygon[List.rev small]
+        let projected=projection ProjectionKind.Equirectangular
+        let expected=GeoPath.project GeoPathOptions.defaultValue projected geometry |> ok |> polygonRings
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -Math.PI (-Math.PI/2.) (2.*Math.PI) Math.PI)}
+        let actual=GeoPath.project options projected geometry |> ok |> polygonRings
+        Expect.equal actual.Length 2 "one world boundary and one hole"
+        Expect.isLessThan (abs((actual |> List.sumBy Polygon.area)-(expected |> List.sumBy Polygon.area))) 1e-12 "no duplicate world fill"
+    testCase "rectangle polygon budgets count final output rather than discarded input" <| fun _ ->
+        let ring=[p -40. -40.;p -40. 40.;p 40. 40.;p 40. -40.;p -40. -40.]
+        let geometry=GeoGeometry.Polygon[ring]
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.1 -0.1 0.2 0.2);MaxOutputPoints=4;Precision=0.001}
+        Expect.equal (GeoPath.project options (projection ProjectionKind.Equirectangular) geometry |> ok |> List.length) 1 "four viewport corners despite many resampled input vertices"
+        for limited in [{options with MaxOutputPoints=3};{options with MaxWork=20L};{options with MaxBufferedPoints=4}] do
+            match GeoPath.project limited (projection ProjectionKind.Equirectangular) geometry with
+            | Error [BudgetExceeded _] -> ()
+            | other -> failtestf "Expected a clipping budget error, got %A" other
+    testCase "zero-area polygon viewports bypass all projection singularities" <| fun _ ->
+        let ring=[p 0. 0.;p 0. 90.;p 90. 0.;p 0. 0.]
+        for kind in [ProjectionKind.Equirectangular;ProjectionKind.Mercator;ProjectionKind.Orthographic] do
+            let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create 0. 0. 0. 1.);MaxOutputPoints=1}
+            Expect.equal (GeoPath.project options (projection kind) (GeoGeometry.Polygon[ring]) |> ok) [] "empty viewport"
+    testCase "empty viewports still validate input without projecting invisible paths" <| fun _ ->
+        let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create 0. 0. 0. 1.);PointRadius=Double.MaxValue}
+        let projected=projection ProjectionKind.Mercator
+        Expect.equal (GeoPath.project options projected (GeoGeometry.LineString[p 0. 0.;p 0. 90.]) |> ok) [] "no pole projection"
+        Expect.equal (GeoPath.project options projected (GeoGeometry.Point(Some(p 0. 0.))) |> ok) [] "no invisible radius arithmetic"
+        Expect.isError (GeoPath.project options projected (GeoGeometry.LineString[p 0. 0.])) "malformed input remains invalid"
+    testCase "cylindrical resampling stays within precision across scales and near-pole arcs" <| fun _ ->
+        for kind in [ProjectionKind.Equirectangular;ProjectionKind.Mercator] do
+            for latitude in [-70.;0.;45.;80.;88.] do
+                for scale,precision in [1.,0.5;3.,0.1;100.,0.01] do
+                    let first,last=p -20. latitude,p 20. (latitude+min 5. (89.-latitude))
+                    let projected=Projection.create {ProjectionConfig.defaultValue kind with Scale=scale} |> ok
+                    let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=precision} projected (GeoGeometry.LineString[first;last]) |> ok
+                    Expect.equal paths.Length 1 "continuous arc"
+                    let vertices=Path.commands paths.Head |> List.choose(function MoveTo point | LineTo point -> Some point | _ -> None)
+                    let segments=List.pairwise vertices
+                    for index=0 to 100 do
+                        let point=Geodesic.interpolate (float index/100.) first last |> ok |> Projection.project projected |> Option.get
+                        let distance=segments |> List.map(fun (a,b) ->
+                            let dx,dy=b.X-a.X,b.Y-a.Y
+                            let lengthSquared=dx*dx+dy*dy
+                            let amount=if lengthSquared=0. then 0. else Math.Clamp(((point.X-a.X)*dx+(point.Y-a.Y)*dy)/lengthSquared,0.,1.)
+                            sqrt(Point.distanceSquared point {X=a.X+amount*dx;Y=a.Y+amount*dy})) |> List.min
+                        Expect.isLessThanOrEqual distance (precision+1e-10) "screen error bound"
     testCase "sphere emits the complete equirectangular boundary" <| fun _ ->
         let paths=GeoPath.project GeoPathOptions.defaultValue (projection ProjectionKind.Equirectangular) GeoGeometry.Sphere |> ok
         Expect.equal paths.Length 1 "one world boundary"
