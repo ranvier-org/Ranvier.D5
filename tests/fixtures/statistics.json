@@ -1,0 +1,90 @@
+[
+  {
+    "values": [],
+    "variance": null,
+    "cumsum": [],
+    "sturges": 1,
+    "scott": 1,
+    "fd": 1
+  },
+  {
+    "values": [
+      1
+    ],
+    "variance": null,
+    "cumsum": [
+      1
+    ],
+    "sturges": 1,
+    "scott": 1,
+    "fd": 1
+  },
+  {
+    "values": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "variance": 1.6666666666666667,
+    "cumsum": [
+      1,
+      3,
+      6,
+      10
+    ],
+    "sturges": 3,
+    "scott": 2,
+    "fd": 2
+  },
+  {
+    "values": [
+      0,
+      0,
+      0
+    ],
+    "variance": 0,
+    "cumsum": [
+      0,
+      0,
+      0
+    ],
+    "sturges": 3,
+    "scott": 1,
+    "fd": 1
+  },
+  {
+    "values": [
+      1,
+      1,
+      2,
+      8
+    ],
+    "variance": 11.333333333333334,
+    "cumsum": [
+      1,
+      2,
+      4,
+      12
+    ],
+    "sturges": 3,
+    "scott": 1,
+    "fd": 3
+  },
+  {
+    "values": [
+      1e-100,
+      2e-100,
+      3e-100
+    ],
+    "variance": 1e-200,
+    "cumsum": [
+      1e-100,
+      3e-100,
+      6e-100
+    ],
+    "sturges": 3,
+    "scott": 1,
+    "fd": 2
+  }
+]
