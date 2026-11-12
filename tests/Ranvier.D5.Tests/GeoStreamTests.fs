@@ -51,6 +51,16 @@ let tests = testList "GeoStream" [
         let allocated=GC.GetAllocatedBytesForCurrentThread()-before
         Expect.equal count 100000 "Every input point is visited"
         Expect.isLessThan allocated 65536L "Streaming must not allocate per input vertex"
+    testCase "many polygon rings do not allocate closing-point wrappers" <| fun _ ->
+        let ring=[p 0. 0.;p 0. 90.;p 90. 0.;p 0. 0.]
+        let geometry=GeoGeometry.MultiPolygon(List.replicate 10000 [ring])
+        let run () = GeoStream.fold GeoStreamConfig.defaultValue (fun n event -> match event with GeoStreamEvent.Point _ -> n+1 | _ -> n) 0 geometry |> ok
+        for _ in 1..3 do run() |> ignore
+        let before=GC.GetAllocatedBytesForCurrentThread()
+        let count=run()
+        let allocated=GC.GetAllocatedBytesForCurrentThread()-before
+        Expect.equal count 30000 "Each closing duplicate is omitted"
+        Expect.isLessThan allocated 65536L "Ring validation must not allocate per ring"
     testCase "cancellation during a fold prevents later callbacks" <| fun _ ->
         use cancellation=new CancellationTokenSource()
         let mutable seen=0

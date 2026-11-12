@@ -54,11 +54,11 @@ module GeoStream =
                 let point position =
                     inputPoint()
                     emit(GeoStreamEvent.Point position)
-                let line ring positions =
+                let line ring (positions: GeoPosition list) =
                     visit()
                     emit GeoStreamEvent.LineStart
                     let mutable count=0
-                    let first=List.tryHead positions
+                    let first=match positions with head::_ -> ValueSome head | [] -> ValueNone
                     let mutable remaining=positions
                     while not(List.isEmpty remaining) do
                         let position=remaining.Head
@@ -66,12 +66,14 @@ module GeoStream =
                         inputPoint()
                         count <- count+1
                         if ring && List.isEmpty remaining then
-                            if Some position <> first then raise(Rejected(InvalidObservation "Polygon rings must close at their first coordinate."))
+                            match first with
+                            | ValueSome start when start.Longitude=position.Longitude && start.Latitude=position.Latitude -> ()
+                            | _ -> raise(Rejected(InvalidObservation "Polygon rings must close at their first coordinate."))
                         else emit(GeoStreamEvent.Point position)
                     if (ring && count < 4) || (not ring && count=1) then
                         raise(Rejected(InvalidObservation "Lines require zero or at least two coordinates; polygon rings require at least four closed coordinates."))
                     emit GeoStreamEvent.LineEnd
-                let polygon rings =
+                let polygon (rings: GeoPosition list list) =
                     visit()
                     emit GeoStreamEvent.PolygonStart
                     for ring in rings do line true ring
