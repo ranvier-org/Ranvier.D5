@@ -87,22 +87,23 @@ module internal GeoPolygon =
                 elif t<=3. then position (180.-360.*(t-2.)) (latitude -halfHeight)
                 else position -180. (latitude(-halfHeight+2.*halfHeight*(t-3.)))
             let boundaryPoint amount = boundaryPosition amount |> screen
-            let parameter (point:Point) =
-                let x,y=(point.X-origin.X)/scale,(origin.Y-point.Y)/scale
-                if circular then normalize(atan2 x y)
-                elif abs(abs x-Math.PI)<=abs(abs y-halfHeight) then
-                    if x>=0. then 1.+Math.Clamp((halfHeight-y)/(2.*halfHeight),0.,1.)
-                    else normalize(3.+Math.Clamp((y+halfHeight)/(2.*halfHeight),0.,1.))
-                elif y>=0. then Math.Clamp((x+Math.PI)/(2.*Math.PI),0.,1.)
-                else 2.+Math.Clamp((Math.PI-x)/(2.*Math.PI),0.,1.)
+            let northLimit=latitude halfHeight
+            // Preclipping leaves open fragments on the cap circle, an exact seam longitude or an exact pole or band latitude.
+            let parameter (point:GeoPosition) =
+                if circular then
+                    let struct(_,y,z)=GeoMath.vector point
+                    normalize(atan2 y z)
+                elif point.Latitude>=northLimit then Math.Clamp((point.Longitude+180.)/360.,0.,1.)
+                elif point.Longitude>=180. then 1.+Math.Clamp((northLimit-point.Latitude)/(2.*northLimit),0.,1.)
+                elif point.Latitude<= -northLimit then 2.+Math.Clamp((180.-point.Longitude)/360.,0.,1.)
+                else normalize(3.+Math.Clamp((point.Latitude+northLimit)/(2.*northLimit),0.,1.))
             // Boundary chords of a screen circle with this radius stay within precision.
             let boundaryRadius=if circular then scale*Projection.clipPlaneRadius projection else scale
             let maxAngle=4.*asin(sqrt(min 0.5 (precision/boundaryRadius/2.)))
             let checkBuffer count =
                 if count>maxBuffer then raise(Rejected(BudgetExceeded "Polygon clipping exceeds its vertex buffer budget."))
-            let boundaryBetween fromPoint toPoint direction whole emit =
-                let first=parameter fromPoint
-                let mutable last=parameter toPoint
+            let boundaryBetween first last toPoint direction whole emit =
+                let mutable last=last
                 if whole then last<-first+float direction*period
                 elif direction>0 then
                     if last<first then last<-last+period
@@ -122,8 +123,10 @@ module internal GeoPolygon =
                         emit(boundaryPoint corner)
                         corner<-corner+float direction
                 emit toPoint
-            let fragments=ResizeArray<Point array>()
+            let fragments=ResizeArray<struct(Point array*GeoPosition*GeoPosition)>()
             let working=ResizeArray<Point>()
+            let mutable startPosition=Unchecked.defaultof<GeoPosition>
+            let mutable endPosition=Unchecked.defaultof<GeoPosition>
             let mutable buffered=0
             let add (point:Point) =
                 spend 1L
@@ -133,13 +136,13 @@ module internal GeoPolygon =
             let finish () =
                 if working.Count>1 then
                     buffered<-buffered+working.Count
-                    fragments.Add(working.ToArray())
+                    fragments.Add(struct(working.ToArray(),startPosition,endPosition))
                 working.Clear()
             let sample=makeSampler add
             let sink = {
-                Start=fun point -> working.Clear();add(screen point)
-                Arc=sample
-                Boundary=fun point -> add(screen point)
+                Start=fun point -> working.Clear();startPosition<-point;endPosition<-point;add(screen point)
+                Arc=fun first last -> sample first last;endPosition<-last
+                Boundary=fun point -> add(screen point);endPosition<-point
                 Finish=finish
             }
             let rotated=ResizeArray<GeoPosition array>()
@@ -162,7 +165,8 @@ module internal GeoPolygon =
                     | Error error -> raise(Rejected error)
                     | Ok () -> ()
                     if fragments.Count-start>1 then
-                        let first,last=fragments[start],fragments[fragments.Count-1]
+                        let struct(first,_,firstEnd)=fragments[start]
+                        let struct(last,lastStart,_)=fragments[fragments.Count-1]
                         if first[0]=last[last.Length-1] then
                             checkBuffer(first.Length+last.Length-1)
                             let merged=Array.zeroCreate<Point>(first.Length+last.Length-1)
@@ -172,7 +176,7 @@ module internal GeoPolygon =
                             for index=0 to first.Length-1 do
                                 spend 1L
                                 merged[last.Length-1+index]<-first[index]
-                            fragments[start]<-merged
+                            fragments[start]<-struct(merged,lastStart,firstEnd)
                             fragments.RemoveAt(fragments.Count-1)
                             buffered<-buffered-1
             let rotated=rotated.ToArray()
@@ -190,7 +194,6 @@ module internal GeoPolygon =
                     twice))<0.
             let boundary = {
                 Period=period
-                Parameter=parameter
                 PointAt=boundaryPoint
                 ContainsAt=fun amount -> if wholeCut then coversWorld else contains spend rotated (boundaryPosition amount)
                 Between=boundaryBetween
@@ -198,5 +201,10 @@ module internal GeoPolygon =
             // Fragments of a whole-cut ring lie on the boundary itself, so emit the complete world or nothing.
             if wholeCut then
                 if coversWorld then GeoRejoin.run maxBuffer spend boundary (ResizeArray()) else Ok []
-            else GeoRejoin.run maxBuffer spend boundary fragments
+            else
+                let ended=ResizeArray<struct(Point array*float*float)>(fragments.Count)
+                for struct(points,first,last) in fragments do
+                    spend 1L
+                    ended.Add(struct(points,parameter first,parameter last))
+                GeoRejoin.run maxBuffer spend boundary ended
         with Rejected error -> Error error

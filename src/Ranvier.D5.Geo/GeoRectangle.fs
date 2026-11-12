@@ -76,9 +76,8 @@ module internal GeoRectangle =
                                 if b.Y>point.Y && Predicates.orient2d a b point>0 then winding<-winding+1
                             elif b.Y<=point.Y && Predicates.orient2d a b point<0 then winding<-winding-1
                     winding<>0
-                let between fromPoint toPoint direction whole emit =
-                    let first=parameter fromPoint
-                    let mutable last=parameter toPoint
+                let between first last toPoint direction whole emit =
+                    let mutable last=last
                     if whole then last<-first+float direction*4.
                     elif direction>0 then
                         if last<first then last<-last+4.
@@ -133,6 +132,10 @@ module internal GeoRectangle =
                             fragments[start]<-merged
                             fragments.RemoveAt(fragments.Count-1)
                             buffered<-buffered-1
-                let boundary={Period=4.;Parameter=parameter;PointAt=pointAt;ContainsAt=(fun amount -> contains(pointAt amount));Between=between}
-                GeoRejoin.run maxBuffer spend boundary fragments
+                let boundary={Period=4.;PointAt=pointAt;ContainsAt=(fun amount -> contains(pointAt amount));Between=between}
+                let ended=ResizeArray<struct(Point array*float*float)>(fragments.Count)
+                for fragment in fragments do
+                    spend 1L
+                    ended.Add(struct(fragment,parameter fragment[0],parameter fragment[fragment.Length-1]))
+                GeoRejoin.run maxBuffer spend boundary ended
         with Rejected error -> Error error
