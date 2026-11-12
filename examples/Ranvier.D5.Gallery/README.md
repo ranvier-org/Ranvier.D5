@@ -11,6 +11,14 @@ One signal rotates all four panels. The capture paints two phases and fails unle
 native pixels show filled polygons, open holes and the clipped Mercator polar cap.
 [Source](ProjectionGallery.fs) · [Pipeline contracts](../../docs/geographic-projections.md).
 
+## Advanced recipes
+
+![Native connected scatter, slope, bump, horizon, beeswarm and adjacency matrix](../../docs/images/advanced.png)
+
+Run `--advanced`; capture with `--capture-advanced artifacts/advanced.bmp`. Six pure recipes in one
+facet grid, moved by a signal; the capture checks that every pickable dot and matrix cell paints.
+[Source](AdvancedRecipesGallery.fs) · [Contracts and extension guide](../../docs/advanced-charts.md).
+
 ## Planar geometry
 
 ![Native hull, centroid and containment](../../docs/images/planar.png)
