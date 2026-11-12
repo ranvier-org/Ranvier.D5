@@ -208,8 +208,27 @@ let main args =
     let mutable offset = 0.
     let retainedStages=ResizeArray<float array>(63)
     let networkStages=ResizeArray<float array>(63)
+    let retainedRuntime=ResizeArray<float array>(63)
+    let networkRuntime=ResizeArray<float array>(63)
+    let traceType=typeof<Graph>.Assembly.GetType("Ranvier.TraceModule")
+    let traceClock=
+        if isNull traceType then None
+        else
+            let method=traceType.GetMethod("lastSeq",Reflection.BindingFlags.Public ||| Reflection.BindingFlags.Static)
+            if isNull method then None else Some method
+    let runtimeStart() =
+        struct(GC.GetTotalPauseDuration().TotalMilliseconds,
+               Runtime.JitInfo.GetCompilationTime(false).TotalMilliseconds,
+               Runtime.JitInfo.GetCompilationTime(true).TotalMilliseconds)
+    let runtimeSample struct(pause,jit,currentJit) =
+        let traceEvents=traceClock |> Option.map(fun method -> float(unbox<int>(method.Invoke(null,[|box graph|])))) |> Option.defaultValue 0.
+        [|GC.GetTotalPauseDuration().TotalMilliseconds-pause;
+          Runtime.JitInfo.GetCompilationTime(false).TotalMilliseconds-jit;
+          Runtime.JitInfo.GetCompilationTime(true).TotalMilliseconds-currentJit;
+          float(GC.GetTotalMemory false);traceEvents|]
     results.Add(measure "native-retained-500-paint" 150. 32000000L (fun () ->
         offset <- 1. - offset
+        let runtime=runtimeStart()
         let gc0,gc1,gc2=GC.CollectionCount 0,GC.CollectionCount 1,GC.CollectionCount 2
         let started=Stopwatch.GetTimestamp()
         let next=make offset
@@ -222,7 +241,8 @@ let main args =
         let painted=Stopwatch.GetTimestamp()
         let elapsed a b=Stopwatch.GetElapsedTime(a,b).TotalMilliseconds
         retainedStages.Add [|elapsed started built;elapsed built updated;elapsed updated cycled;elapsed cycled painted;
-                            float(GC.CollectionCount 0-gc0);float(GC.CollectionCount 1-gc1);float(GC.CollectionCount 2-gc2)|]))
+                            float(GC.CollectionCount 0-gc0);float(GC.CollectionCount 1-gc1);float(GC.CollectionCount 2-gc2)|]
+        retainedRuntime.Add(runtimeSample runtime)))
     mounted.Dispose()
     if not baselineOnly then
         let topology=GraphData.create
@@ -241,6 +261,7 @@ let main args =
         let mutable index=0
         results.Add(measure "native-network-1000-nodes-2000-edges-paint" 100. 13000000L (fun () ->
             index<-1-index
+            let runtime=runtimeStart()
             let gc0,gc1,gc2=GC.CollectionCount 0,GC.CollectionCount 1,GC.CollectionCount 2
             let started=Stopwatch.GetTimestamp()
             let next=(build snapshots[index]).Scene
@@ -253,7 +274,8 @@ let main args =
             let painted=Stopwatch.GetTimestamp()
             let elapsed a b=Stopwatch.GetElapsedTime(a,b).TotalMilliseconds
             networkStages.Add [|elapsed started built;elapsed built updated;elapsed updated cycled;elapsed cycled painted;
-                               float(GC.CollectionCount 0-gc0);float(GC.CollectionCount 1-gc1);float(GC.CollectionCount 2-gc2)|]))
+                               float(GC.CollectionCount 0-gc0);float(GC.CollectionCount 1-gc1);float(GC.CollectionCount 2-gc2)|]
+            networkRuntime.Add(runtimeSample runtime)))
         networkMount.Dispose()
         let flowTopology=FlowGraph.create ("source"::[for i in 0..199 -> string i])
                             [for i in 0..399 -> {FlowLink.Id=string i;Source="source";Target=string(i%200);Value=1.}]
@@ -286,7 +308,7 @@ let main args =
     let directory = Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore
     File.WriteAllText(output, JsonSerializer.Serialize(results, JsonSerializerOptions(WriteIndented=true)))
-    let stages={| WarmupSamples=3; Columns=[|"BuildMs";"SignalUpdateMs";"HostCycleMs";"PaintMs";"Gen0";"Gen1";"Gen2"|]; Samples=retainedStages.ToArray(); NetworkSamples=networkStages.ToArray() |}
+    let stages={| WarmupSamples=3; Columns=[|"BuildMs";"SignalUpdateMs";"HostCycleMs";"PaintMs";"Gen0";"Gen1";"Gen2"|]; Samples=retainedStages.ToArray(); NetworkSamples=networkStages.ToArray(); RuntimeColumns=[|"GCPauseMs";"JitMs";"CurrentThreadJitMs";"ManagedHeapBytes";"TraceEvents"|]; RuntimeSamples=retainedRuntime.ToArray(); NetworkRuntimeSamples=networkRuntime.ToArray() |}
     File.WriteAllText(Path.ChangeExtension(output,"stages.json"),JsonSerializer.Serialize(stages,JsonSerializerOptions(WriteIndented=true)))
     let failures=results |> Seq.filter(fun r -> r.P95Ms > r.LimitMs || r.MedianBytes > r.LimitBytes) |> Seq.toArray
     for result in failures do
