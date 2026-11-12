@@ -87,6 +87,14 @@ Run `--chord` for a signal-driven matrix; capture with
 `--capture-chord artifacts/chord.bmp`.
 [Source](ChordGallery.fs) and [layout contracts](../../docs/chord.md).
 
+## Sankey flows
+
+![Native energy-flow Sankey view](../../docs/images/sankey.png)
+
+Run `--sankey` for a signal-driven DAG layout; capture with
+`--capture-sankey artifacts/sankey.bmp`.
+[Source](SankeyGallery.fs) and [flow contracts](../../docs/sankey.md).
+
 ## Foundation scene
 
 ![Native foundation gallery](../../docs/images/gallery.png)
