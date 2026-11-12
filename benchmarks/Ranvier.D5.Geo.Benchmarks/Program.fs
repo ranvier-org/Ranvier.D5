@@ -47,7 +47,12 @@ let main args =
                     | Some screen -> count<-count+1; checksum<-checksum+screen.X+screen.Y
                     | None -> ()
                 if count=0 || not(Double.IsFinite checksum) then failwith "Projection output"))
+    let pointProjection=Projection.create (ProjectionConfig.defaultValue ProjectionKind.Equirectangular) |> ok
+    let pointGeometry=GeoGeometry.MultiPoint(List.take 10000 points)
     let results=[|
+        measure "geo-point-paths-10000" 50. 8000000L (fun () ->
+            let paths=GeoPath.project GeoPathOptions.defaultValue pointProjection pointGeometry |> ok
+            if paths.Length<>10000 then failwith "Point path count")
         measure "geo-stream-100000" 10. 65536L (fun () ->
             let count=GeoStream.fold config (fun count event -> match event with GeoStreamEvent.Point _ -> count+1 | _ -> count) 0 geometry |> ok
             if count<>100000 then failwith "Stream count")
