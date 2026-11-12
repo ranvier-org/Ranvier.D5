@@ -21,6 +21,8 @@
     <Compile Include="HierarchyIndex.fs" />
     <Compile Include="Tree.fs" />
     <Compile Include="Partition.fs" />
+    <Compile Include="Treemap.fs" />
+    <Compile Include="Pack.fs" />
     <Compile Include="Curves.fs" />
     <Compile Include="ShapeExtensions.fs" />
     <Compile Include="Stack.fs" />
