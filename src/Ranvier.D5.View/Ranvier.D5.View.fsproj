@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><PackageId>Ranvier.D5.View$(RanvierPackageSuffix)</PackageId><Description>Keyed native SVG rendering for Ranvier.D5 scenes using Ranvier.View.</Description></PropertyGroup>
-  <ItemGroup><Compile Include="Renderer.fs" /><Compile Include="TextMeasurement.fs" /></ItemGroup>
+  <ItemGroup><Compile Include="Renderer.fs" /><Compile Include="TextMeasurement.fs" /><Compile Include="InputAdapter.fs" /><Compile Include="ChartInteraction.fs" /></ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />
+    <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" /><ProjectReference Include="../Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj" />
     <PackageReference Include="Ranvier.View$(RanvierPackageSuffix)" Version="[0.1.49-rc.2]" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>

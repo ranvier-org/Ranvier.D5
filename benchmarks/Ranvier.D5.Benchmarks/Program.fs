@@ -51,6 +51,10 @@ let main args =
     results.Add(measure "histogram-chart-10000" 100. 20000000L (fun () -> Ranvier.D5.Charts.Chart.histogram histogramSpec data |> Result.defaultWith (fun e -> failwithf "%A" e) |> ignore))
     let observations = Array.init 100000 (fun i -> float(i % 1000))
     results.Add(measure "statistics-100000" 100. 16000000L (fun () -> Statistics.variance observations |> ignore; Statistics.histogram BinRule.FreedmanDiaconis observations |> ignore))
+    let gestureConfig={Mode=GestureMode.Lasso;MinZoom=0.1;MaxZoom=10.;WheelSensitivity=0.01;MaxLassoPoints=128}
+    results.Add(measure "gesture-lasso-10000" 100. 32000000L (fun () ->
+        let mutable state=Gesture.update gestureConfig (InputEvent.Down(1,Point.create 0. 0.,None)) Gesture.empty |> fst
+        for i in 1..10000 do state<-Gesture.update gestureConfig (InputEvent.Move(1,Point.create (float i) (float(i%100)))) state |> fst))
     use host = WebCoreHost.Create(800, 600)
     use graph = new Graph()
     let container = host.Document.createElement "div"

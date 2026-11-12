@@ -55,6 +55,26 @@ let acceptance () =
         Expect.isFalse (before = after) "native pixels changed"
         host.Click(40, 40) |> ignore
         Expect.isTrue (events.Contains ("a", "click")) "retained mark receives pointer event"
+        let svg=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
+        let commands=ResizeArray<GestureCommand>()
+        let config={Mode=GestureMode.Pan;MinZoom=0.1;MaxZoom=10.;WheelSensitivity=0.01;MaxLassoPoints=128}
+        let inputOwner,input,state=graph.Run(fun () ->
+            Api.createRoot(fun owner ->
+                let state=Api.createSignal Gesture.empty
+                let input=InputAdapter.attach svg (fun () -> config) (fun () -> state.Value) (fun value -> state.Value<-value) commands.Add
+                owner,input,state))
+        host.Mouse(1,40,40,0,1,0) |> ignore
+        host.Mouse(0,60,50,0,0,0) |> ignore
+        Expect.isTrue (svg.hasPointerCapture 1) "native pointer capture"
+        host.Mouse(2,60,50,0,1,0) |> ignore
+        Expect.isFalse (svg.hasPointerCapture 1) "pointer release"
+        Expect.isTrue (commands |> Seq.exists(function GestureCommand.ZoomChanged _ -> true | _ -> false)) "native event enters signal graph"
+        Expect.isEmpty (graph.Run(fun () -> state.Value.Pointers)) "pointer state released"
+        inputOwner.Dispose()
+        let count=commands.Count
+        input.Send(InputEvent.Wheel(Point.create 40. 40.,1.))
+        host.Click(40,40) |> ignore
+        Expect.equal commands.Count count "disposed listeners and explicit input remain inert"
         graph.Run(fun () -> source.Value <- make [Mark.text "a" (Point.create 10. 30.) "<script>&\"Hello\"" |> Mark.withLabel (Some "<unsafe>&\"label\"")])
         host.Cycle()
         Expect.equal ((container.querySelector "text").textContent) "<script>&\"Hello\"" "same key can change geometry kind"
