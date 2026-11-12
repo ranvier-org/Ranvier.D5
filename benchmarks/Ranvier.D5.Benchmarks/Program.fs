@@ -53,6 +53,9 @@ let main args =
     results.Add(measure "statistics-100000" 100. 16000000L (fun () -> Statistics.variance observations |> ignore; Statistics.histogram BinRule.FreedmanDiaconis observations |> ignore))
     let palette=Chromatic.sequential Ranvier.Anime.ColorInterpolation.Hcl Ranvier.Anime.GamutPolicy.Clip Chromatic.blues
     results.Add(measure "chromatic-10000" 100. 16000000L (fun () -> for i in 0..9999 do palette (float i/9999.) |> ignore))
+    let transitionMarks=[for i in 0..499 -> Shape.rectangle(Bounds.create (float i) 0. 10. 10.) |> Mark.path(string i)]
+    let transition=KeyedTransition.start 0. transitionMarks |> KeyedTransition.retarget 0. 100. id false (transitionMarks |> List.map(Mark.withTransform(Transform.translate 5. 5.)))
+    results.Add(measure "transition-sample-500" 100. 16000000L (fun () -> KeyedTransition.sample 50. transition |> ignore))
     let gestureConfig={Mode=GestureMode.Lasso;MinZoom=0.1;MaxZoom=10.;WheelSensitivity=0.01;MaxLassoPoints=128}
     results.Add(measure "gesture-lasso-10000" 100. 32000000L (fun () ->
         let mutable state=Gesture.update gestureConfig (InputEvent.Down(1,Point.create 0. 0.,None)) Gesture.empty |> fst
