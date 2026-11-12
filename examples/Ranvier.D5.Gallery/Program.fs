@@ -49,7 +49,7 @@ let capture kind path =
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
         else
-            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene elif kind="tiling" then TilingGallery.scene elif kind="hierarchy-charts" then HierarchyChartsGallery.scene elif kind="planar" then PlanarGallery.scene else fun () -> Scenes.scene 0.)
+            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene elif kind="tiling" then TilingGallery.scene elif kind="hierarchy-charts" then HierarchyChartsGallery.scene elif kind="planar" then PlanarGallery.scene elif kind="quadtree" then (fun () -> QuadtreeGallery.scene(Point.create 410. 265.)) else fun () -> Scenes.scene 0.)
             {new IDisposable with member _.Dispose()=mounted.Dispose()}
     host.Cycle()
     host.Frame()
@@ -94,6 +94,18 @@ let main args =
         capture "hierarchy-explorer" args[1]
     elif args.Length=2 && args[0]="--capture-planar" then
         capture "planar" args[1]
+    elif args.Length=2 && args[0]="--capture-quadtree" then
+        capture "quadtree" args[1]
+    elif Array.contains "--quadtree" args then
+        use window=Window.Create("Ranvier.D5 quadtree",820,590)
+        let query=window.Graph.Run(fun () -> Api.createSignal(Point.create 410. 265.))
+        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> query.Value) QuadtreeGallery.scene)
+        let mounted=mount window.Host window.Graph (fun () -> scene.Value)
+        let clock=Stopwatch.StartNew()
+        while window.Step() do
+            let t=clock.Elapsed.TotalSeconds
+            window.Graph.Run(fun () -> query.Value<-Point.create (400.+180.*sin t) (265.+100.*cos(t*0.7)))
+        mounted.Dispose()
     elif Array.contains "--planar" args then
         use window = Window.Create("Ranvier.D5 planar geometry",820,590)
         let mounted=mount window.Host window.Graph PlanarGallery.scene

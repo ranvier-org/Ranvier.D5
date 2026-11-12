@@ -29,6 +29,7 @@
     <Compile Include="ShapeExtensions.fs" />
     <Compile Include="Stack.fs" />
     <Compile Include="Spatial.fs" />
+    <Compile Include="Quadtree.fs" />
     <Compile Include="Reactive.fs" />
     <Compile Include="KeyedTransition.fs" />
     <Compile Include="Interaction.fs" />

@@ -43,6 +43,14 @@ Brush the upper scatter plot and the lower line updates through a shared Ranvier
 signal. Arrow keys and Enter select, Escape clears.
 [Source](../Shared/LinkedCharts.fs).
 
+## Quadtree search
+
+![Native quadtree search](../../docs/images/quadtree.png)
+
+Run `--quadtree` for a signal-driven moving query over a retained immutable index.
+Capture with `--capture-quadtree artifacts/quadtree.bmp`.
+[Source](QuadtreeGallery.fs) and [contracts](../../docs/quadtree.md).
+
 ## Foundation scene
 
 ![Native foundation gallery](../../docs/images/gallery.png)
