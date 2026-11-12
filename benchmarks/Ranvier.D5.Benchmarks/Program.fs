@@ -51,6 +51,8 @@ let main args =
     results.Add(measure "histogram-chart-10000" 100. 20000000L (fun () -> Ranvier.D5.Charts.Chart.histogram histogramSpec data |> Result.defaultWith (fun e -> failwithf "%A" e) |> ignore))
     let observations = Array.init 100000 (fun i -> float(i % 1000))
     results.Add(measure "statistics-100000" 100. 16000000L (fun () -> Statistics.variance observations |> ignore; Statistics.histogram BinRule.FreedmanDiaconis observations |> ignore))
+    let palette=Chromatic.sequential Ranvier.Anime.ColorInterpolation.Hcl Ranvier.Anime.GamutPolicy.Clip Chromatic.blues
+    results.Add(measure "chromatic-10000" 100. 16000000L (fun () -> for i in 0..9999 do palette (float i/9999.) |> ignore))
     let gestureConfig={Mode=GestureMode.Lasso;MinZoom=0.1;MaxZoom=10.;WheelSensitivity=0.01;MaxLassoPoints=128}
     results.Add(measure "gesture-lasso-10000" 100. 32000000L (fun () ->
         let mutable state=Gesture.update gestureConfig (InputEvent.Down(1,Point.create 0. 0.,None)) Gesture.empty |> fst
