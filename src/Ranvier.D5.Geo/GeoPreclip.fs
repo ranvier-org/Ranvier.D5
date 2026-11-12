@@ -41,11 +41,15 @@ module internal GeoPreclip =
             tail<-ValueSome last
         let clip (first:GeoPosition) (last:GeoPosition) =
             spend 1L
-            let arc=arcBetween first last
             // A unit-speed spherical arc cannot change latitude faster than its arc length.
             if min first.Latitude last.Latitude>=mercatorLatitude || max first.Latitude last.Latitude<= -mercatorLatitude then
                 finish()
-            elif max(abs first.Latitude)(abs last.Latitude)+arc.Angle*180./Math.PI<=mercatorLatitude then
+            // A cheap bound on the arc length keeps short arcs from solving their great circle at all.
+            elif max(abs first.Latitude)(abs last.Latitude)+GeoMath.distanceBound first last<=mercatorLatitude then
+                emit first last
+            else
+            let arc=arcBetween first last
+            if max(abs first.Latitude)(abs last.Latitude)+arc.Angle*180./Math.PI<=mercatorLatitude then
                 emit first last
             else
                 roots.Clear()

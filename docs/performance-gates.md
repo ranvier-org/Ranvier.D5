@@ -129,3 +129,13 @@ counts and passing the pinned D3 fixtures. In two alternating runs the
 10,000-vertex Mercator polar workload measured 49.6–50.9 ms before and
 34.0–34.1 ms after; the equirectangular variant measured 46.5–46.9 and
 19.1–20.5 ms. The 150 ms p95 gate is unchanged.
+
+Short geographic arcs no longer solve their great circle when a cheap bound
+already settles them: the distance along a meridian and then a parallel
+(|Δlatitude| + |Δlongitude|) never undercuts the great-circle distance, and both
+the Mercator band test and the cylindrical precision test are monotone in arc
+length. Two alternating same-machine runs measured the 100,000-vertex Mercator
+line at 28.1–28.6 ms before and 13.6 ms after, the equirectangular line at
+21.3–22.0 and 9.9–10.8 ms, and the seam-heavy line at 85.7–87.7 and
+53.2–65.1 ms. Outputs and gates are unchanged; this follows a merged-main
+Windows Traced p95 tail of 111.6 ms against the 100 ms Mercator line gate.
