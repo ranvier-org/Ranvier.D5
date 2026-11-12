@@ -73,6 +73,7 @@ jobs:
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-flow-alluvial artifacts/flow-alluvial.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-flow-chord artifacts/flow-chord.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-density artifacts/density.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-contour artifacts/contour.bmp
       - name: Paired performance regression gate
         shell: bash
         run: |
@@ -124,6 +125,8 @@ jobs:
           let density = Density.grid (DensityConfig.create (Bounds.create 0. 0. 1. 1.) 2 2) [{WeightedPoint.Id="point";Position=Point.create 0. 0.;Weight=3.}] |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           if DensityGrid.value 0 0 density <> Some 3. then failwith "Packed density failed"
           Density.kde1d 1. [0.,1.] [0.] |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
+          let contours = Contour.compute (ContourConfig.create [1.]) density |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if contours.IsEmpty then failwith "Packed contours failed"
           Ranvier.D5.View.ForceChunk.defaultValue |> ignore
           Ranvier.D5.View.Renderer.passive |> ignore
           graph.Dispose()

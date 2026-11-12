@@ -18,6 +18,7 @@
     <Compile Include="Density.fs" />
     <Compile Include="Predicates.fs" />
     <Compile Include="Polygon.fs" />
+    <Compile Include="Contour.fs" />
     <Compile Include="Mark.fs" />
     <Compile Include="Chromatic.fs" />
     <Compile Include="SceneDefinitions.fs" />

@@ -97,6 +97,21 @@ let main args =
             results.Add(measure (sprintf "density-100000-grid-%d" size) limit bytes (fun () ->
                 let grid=Density.grid cfg densityPoints |> Result.defaultWith(fun errors -> failwithf "%A" errors)
                 if DensityGrid.columns grid<>size || DensityGrid.rows grid<>size then failwith "Density output exceeds requested bounds."))
+        for size,limit,bytes in [256,75.,24000000L;1024,250.,100000000L] do
+            let field=DensityGrid.create (Bounds.create 0. 0. 1. 1.) size size
+                          [for row in 0..size-1 do
+                              for column in 0..size-1 ->
+                                  let x,y=float column/float size-0.5,float row/float size-0.5
+                                  Some(x*x+y*y)]
+                      |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+            results.Add(measure (sprintf "contour-grid-%d-three-levels" size) limit bytes (fun () ->
+                let polygons=Contour.compute (ContourConfig.create [0.025;0.075;0.15]) field |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+                if polygons.Length<>3 || polygons |> List.exists(fun polygon -> polygon.Holes.Length<>1) then failwith "Contour benchmark lost ring topology."))
+        let fragmented=DensityGrid.create (Bounds.create 0. 0. 64. 64.) 64 64 [for row in 0..63 do for column in 0..63 -> Some(if (row+column)%2=0 then 1. else -1.)]
+                       |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        results.Add(measure "contour-fragments-2048" 100. 32000000L (fun () ->
+            let polygons=Contour.compute (ContourConfig.create [0.]) fragmented |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+            if polygons.Length<>2048 then failwith "Fragment benchmark lost disconnected saddle components."))
         let kdeSamples=[for i in 0..999 -> float i,1.]
         let kdeQueries=[for i in 0..511 -> float i*2.]
         results.Add(measure "density-kde-1000-by-512" 30. 1000000L (fun () -> Density.kde1d 10. kdeSamples kdeQueries |> Result.defaultWith(fun errors -> failwithf "%A" errors) |> ignore))

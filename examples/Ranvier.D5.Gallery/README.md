@@ -124,3 +124,9 @@ Convert captures to checked-in lossless PNGs with
 ![Native density view](../../docs/images/density.png)
 
 Run --density; Left/Right adjusts bandwidth. Capture with --capture-density artifacts/density.bmp. The example aggregates 100,000 observations in the owned worker and paints 768 cells. [Source](DensityGallery.fs) and [density contracts](../../docs/density.md).
+
+## Density contours
+
+![Native contour view](../../docs/images/contour.png)
+
+Run --contour; Left/Right adjusts levels. Capture with --capture-contour artifacts/contour.bmp. Density and topology run through the owned worker. [Source](ContourGallery.fs) and [topology contracts](../../docs/contours.md).
