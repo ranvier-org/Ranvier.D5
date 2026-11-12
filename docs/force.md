@@ -94,5 +94,6 @@ exact evaluation takes 1.47 ms versus 0.93 ms for theta 0.5, at the cost of
 for coincident or highly clustered points; exact evaluation is always quadratic.
 These are solver measurements, excluding host rendering and publication.
 
-The native snapshot above includes link, charge and collision forces. Task 7 G3
-still owns bounded worker publication, interactive dragging and network recipes.
+The native snapshot above includes link, charge and collision forces. See
+[network recipes](network.md) for bounded worker publication, native dragging
+and bubble-cluster composition.

@@ -68,6 +68,17 @@ Run `--quadtree` for a signal-driven moving query over a retained immutable inde
 Capture with `--capture-quadtree artifacts/quadtree.bmp`.
 [Source](QuadtreeGallery.fs) and [contracts](../../docs/quadtree.md).
 
+## Networks and bubble clusters
+
+![Native worker-driven network](../../docs/images/network.png)
+![Native bubble cluster](../../docs/images/bubbles.png)
+
+Run `--network` for 1,000 nodes and 2,000 edges, or `--bubbles` for variable-radius
+collision layout. Drag pins/unpins a node; arrows focus and Enter selects.
+Capture with `--capture-network artifacts/network.bmp` or
+`--capture-bubbles artifacts/bubbles.bmp`.
+[Source](NetworkGallery.fs) and [contracts and measured limits](../../docs/network.md).
+
 ## Foundation scene
 
 ![Native foundation gallery](../../docs/images/gallery.png)

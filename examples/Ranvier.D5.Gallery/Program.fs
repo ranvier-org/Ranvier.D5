@@ -21,7 +21,31 @@ let capture kind path =
     use host = WebCoreHost.Create(820, 590)
     use graph = new Graph()
     let mounted:IDisposable =
-        if kind="hierarchy-explorer" then
+        if kind="network" || kind="bubbles" then
+            let owner,force,input=NetworkGallery.mount (kind="bubbles") host graph
+            let timer=Stopwatch.StartNew()
+            while graph.Run(fun () -> force.Snapshot.Iteration<40 && not force.Snapshot.Finished) && timer.Elapsed.TotalSeconds<15. do
+                host.Cycle()
+                host.Frame()
+                System.Threading.Thread.Yield() |> ignore
+            if graph.Run(fun () -> force.Snapshot.Iteration<40) then failwith "Network worker did not make progress."
+            host.Cycle()
+            let struct(w,h)=host.PaintSize
+            host.Paint(Array.zeroCreate<byte>(w*h*4))
+            let node=graph.Run(fun () -> force.Snapshot.Nodes.Head)
+            let x,y=int(Math.Round node.Position.X)+8,int(Math.Round node.Position.Y)+8
+            host.Mouse(1,x,y,0,1,0) |> ignore
+            if graph.Run(fun () -> force.Snapshot.Nodes |> List.find(fun item -> item.Id=node.Id) |> fun item -> item.Pinned.IsNone) then
+                failwith "Dense native network drag did not pin the node."
+            host.Mouse(0,x+10,y+5,0,0,0) |> ignore
+            host.Mouse(2,x+10,y+5,0,1,0) |> ignore
+            if graph.Run(fun () -> force.Snapshot.Nodes |> List.find(fun item -> item.Id=node.Id) |> fun item -> item.Pinned.IsSome) then
+                failwith "Dense native network release did not unpin the node."
+            input.Send(InputEvent.Key "ArrowRight")
+            input.Send(InputEvent.Key "Enter")
+            if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Network keyboard selection failed."
+            owner :> IDisposable
+        elif kind="hierarchy-explorer" then
             let owner,tick,state,worker=HierarchyExplorer.mount host graph
             graph.Run(fun () -> state.Value<-{state.Value with Collapsed=set ["Signals"];Selected=set ["Scene"]})
             let timer=Stopwatch.StartNew()
@@ -107,6 +131,15 @@ let main args =
         capture "spatial" args[1]
     elif args.Length=2 && args[0]="--capture-force" then
         capture "force" args[1]
+    elif args.Length=2 && args[0]="--capture-network" then
+        capture "network" args[1]
+    elif args.Length=2 && args[0]="--capture-bubbles" then
+        capture "bubbles" args[1]
+    elif Array.contains "--network" args || Array.contains "--bubbles" args then
+        use window=Window.Create("Ranvier.D5 interactive network",820,590)
+        let owner,_,_=NetworkGallery.mount (Array.contains "--bubbles" args) window.Host window.Graph
+        while window.Step() do ()
+        owner.Dispose()
     elif Array.contains "--force" args then
         use window=Window.Create("Ranvier.D5 force state",820,590)
         let state=window.Graph.Run(fun () -> Api.createSignal(ForceGallery.initial()))
