@@ -1,14 +1,22 @@
 namespace Ranvier.D5
 
+/// <summary>Scene viewport dimensions in scene units; <c>Scene.compose</c> requires both to be finite and positive.</summary>
 type Viewport = { Width:float; Height:float }
+/// <summary>A gradient color stop; offset and opacity must lie in [0,1], and offsets must be nondecreasing within a gradient.</summary>
 type GradientStop = { Offset:float; Color:Paint; Opacity:float }
+/// <summary>A keyed, reusable scene resource that groups reference as a clip and marks reference as a gradient fill.</summary>
 type SceneDefinition =
+    /// <summary>A rectangular clip region in scene coordinates.</summary>
     | RectClip of key:string * bounds:Bounds
+    /// <summary>A linear gradient from <c>start</c> to <c>finish</c> in scene coordinates; both points must be finite.</summary>
     | LinearGradient of key:string * start:Point * finish:Point * stops:GradientStop list
+    /// <summary>A radial gradient about a finite center with a finite positive radius in scene units.</summary>
     | RadialGradient of key:string * center:Point * radius:float * stops:GradientStop list
 
+/// <summary>Helpers for <c>SceneDefinition</c> values.</summary>
 [<RequireQualifiedAccess>]
 module SceneDefinition =
+    /// <summary>Returns the definition's key, which must be nonempty and unique within a composed scene.</summary>
     let key = function RectClip(k,_) | LinearGradient(k,_,_,_) | RadialGradient(k,_,_,_) -> k
     let internal validate definition =
         if System.String.IsNullOrEmpty(key definition) then invalidArg "definitions" "Empty definition key."

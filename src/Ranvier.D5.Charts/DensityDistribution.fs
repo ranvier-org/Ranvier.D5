@@ -2,17 +2,25 @@ namespace Ranvier.D5.Charts
 
 open Ranvier.D5
 
+/// <summary>Count, extent, mean and median of the non-missing values; each statistic is None when there are no values.</summary>
 type ObservationSummary = { Count:int; Minimum:float option; Maximum:float option; Mean:float option; Median:float option }
+/// <summary>One observation with a globally unique, nonblank ID; a None value is missing and excluded from density and membership.</summary>
 type DistributionObservation = { Id:string; Value:float option }
+/// <summary>A group of observations drawn as one violin; the group ID is its category.</summary>
 type ViolinGroup = { Id:string; Observations:DistributionObservation list }
+/// <summary>Violin width scaling: EachGroup scales every violin to its own peak density, SharedPeak scales all violins by the largest peak.</summary>
 type ViolinWidth = EachGroup | SharedPeak
+/// <summary>Violin specification: Domain and Bandwidth are in data units, Resolution (2 to 4096) is the KDE query count, and the Max fields are budgets whose excess is a BudgetExceeded error.</summary>
 type ViolinSpec =
     { Frame:ChartFrame; Domain:float*float; Bandwidth:float; Resolution:int; Width:ViolinWidth
       Color:string -> Paint; Selected:Set<string>; MaxGroups:int; MaxSamples:int; MaxVertices:int; MaxWork:int64 }
+/// <summary>The aggregate violin chart and an observation summary for every group, keyed by group ID.</summary>
 type ViolinOutput = { Aggregate:AggregateChartOutput; Summaries:Map<string,ObservationSummary> }
 
+/// <summary>Defaults for violin specifications.</summary>
 [<RequireQualifiedAccess>]
 module ViolinSpec =
+    /// <summary>Creates a specification with 128 query samples, per-group width, ChartSpec.color fills, no selection and large default budgets.</summary>
     let create frame domain bandwidth =
         {Frame=frame;Domain=domain;Bandwidth=bandwidth;Resolution=128;Width=EachGroup;Color=ChartSpec.color;Selected=Set.empty
          MaxGroups=1000;MaxSamples=1000000;MaxVertices=1000000;MaxWork=100000000L}
@@ -22,9 +30,11 @@ module internal DistributionSummary =
         let extent=Data.extent values
         {Count=List.length values;Minimum=Option.map fst extent;Maximum=Option.map snd extent;Mean=Data.mean values;Median=Data.quantile 0.5 values}
 
+/// <summary>Kernel density violin charts.</summary>
 [<RequireQualifiedAccess>]
 module ViolinChart =
     exception private ViolinAbort of LayoutError list
+    /// <summary>As build, but checks the token throughout and throws OperationCanceledException when it is cancelled.</summary>
     let buildWithCancellation (token:System.Threading.CancellationToken) (spec:ViolinSpec) (groups:ViolinGroup list) : Result<ViolinOutput,LayoutError list> =
         token.ThrowIfCancellationRequested()
         let low,high=spec.Domain
@@ -101,4 +111,5 @@ module ViolinChart =
                 token.ThrowIfCancellationRequested()
                 output)
           with ViolinAbort errors -> Error errors
+    /// <summary>Draws one KDE violin per group with values, keyed by a semantic mark key whose Membership lists the non-missing observation IDs; empty groups keep their band but draw nothing, and invalid input or exceeded budgets are typed errors.</summary>
     let build spec groups = buildWithCancellation System.Threading.CancellationToken.None spec groups

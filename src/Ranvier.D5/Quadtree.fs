@@ -11,8 +11,11 @@ type QuadCell<'T> = { Extent:QuadExtent; Count:int; Mass:float; Center:Point; De
 
 type private QuadNode<'T> = QuadNode of QuadCell<'T> * QuadNode<'T>[]
 
+/// <summary>An opaque, immutable point-region quadtree with per-cell mass summaries;
+/// leaves hold at most eight items unless further splitting is impossible.</summary>
 type Quadtree<'T> = private Quadtree of QuadNode<'T> option
 
+/// <summary>Builds and queries <c>Quadtree</c> values; non-finite positions or invalid masses throw <c>ArgumentException</c>.</summary>
 [<RequireQualifiedAccess>]
 module Quadtree =
     let private interpolate a b t =
@@ -74,6 +77,7 @@ module Quadtree =
     /// <summary>Captures an immutable quadtree without cancellation; use buildWithCancellation for cancellable worker construction.</summary>
     let build position mass items = buildWithCancellation System.Threading.CancellationToken.None position mass items
 
+    /// <summary>Returns the number of captured items, including those at duplicate positions.</summary>
     let count (Quadtree root) = match root with None -> 0 | Some(QuadNode(cell,_)) -> cell.Count
 
     // Force passes query the same immutable tree once per node; keep the traversal buffer local to that pass.

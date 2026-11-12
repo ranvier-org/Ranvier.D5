@@ -1,7 +1,9 @@
 namespace Ranvier.D5
 
+/// <summary>Partition (icicle) settings: target bounds in scene coordinates and a finite nonnegative padding in scene units.</summary>
 type PartitionConfig = {Bounds:Bounds;Padding:float}
 
+/// <summary>Adjacency (icicle) layout of a hierarchy; invalid configuration or identities yield <c>Error [InvalidObservation]</c>.</summary>
 [<RequireQualifiedAccess>]
 module Partition =
     /// <summary>Partitions each depth into a horizontal band. Own branch weight reserves unallocated space; all-zero siblings share equally.</summary>

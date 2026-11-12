@@ -9,6 +9,7 @@ type private SpatialNode<'T> =
 /// <summary>An immutable balanced spatial index with original-order tie breaking.</summary>
 type SpatialIndex<'T> = private SpatialIndex of SpatialNode<'T>
 
+/// <summary>Builds and queries <c>SpatialIndex</c> values; non-finite points throw <c>ArgumentException</c>.</summary>
 [<RequireQualifiedAccess>]
 module Spatial =
     /// <summary>Builds a balanced k-d tree from a copy in O(n log-squared n); points must be finite.</summary>

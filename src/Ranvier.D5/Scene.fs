@@ -7,6 +7,7 @@ open System
 /// <summary>A finite viewport and ordered, uniquely keyed marks.</summary>
 type Scene = private { Width:float; Height:float; Title:string; Marks:Mark list; Nodes:SceneNode list; Definitions:SceneDefinition list; Composed:bool }
 
+/// <summary>Constructors and accessors for <c>Scene</c>; invalid input throws <c>ArgumentException</c>.</summary>
 [<RequireQualifiedAccess>]
 module Scene =
     /// <summary>Creates a scene with positive viewport dimensions; duplicate mark keys reject the scene.</summary>
@@ -16,12 +17,19 @@ module Scene =
         if isNull title then nullArg "title"
         Check.unique "marks" Mark.key marks
         {Width=width;Height=height;Title=title;Marks=marks;Nodes=List.map Leaf marks;Definitions=[];Composed=false}
+    /// <summary>Returns the viewport width in scene units.</summary>
     let width scene = scene.Width
+    /// <summary>Returns the viewport height in scene units.</summary>
     let height scene = scene.Height
+    /// <summary>Returns the scene title.</summary>
     let title scene = scene.Title
+    /// <summary>Returns every mark in depth-first document order; for a composed scene, group transforms are not applied.</summary>
     let marks scene = scene.Marks
+    /// <summary>Returns the top-level scene nodes; a scene from <c>create</c> has one leaf per mark.</summary>
     let nodes scene = scene.Nodes
+    /// <summary>Returns true when the scene was built by <c>compose</c> rather than <c>create</c>.</summary>
     let isComposed scene = scene.Composed
+    /// <summary>Returns the clip and gradient definitions; empty for a scene from <c>create</c>.</summary>
     let definitions scene = scene.Definitions
     /// <summary>Creates a composed scene. Keys are unique among siblings; moving between parents changes identity.</summary>
     let compose (viewport:Viewport) title definitions nodes =
@@ -49,14 +57,16 @@ module Scene =
 [<RequireQualifiedAccess>]
 type AxisOrientation = Bottom | Top | Left | Right
 
+/// <summary>Builds axis domain, tick and label marks along a fixed cross-axis origin.</summary>
 [<RequireQualifiedAccess>]
 module Axis =
-    /// <summary>Builds explicitly bounded axes with caller-supplied semantic tick keys.</summary>
     let private labelStyle orientation mark =
         let style=Mark.textStyle mark
         let anchor=match orientation with AxisOrientation.Left -> "end" | AxisOrientation.Right -> "start" | _ -> "middle"
         Mark.withTextStyle {style with Anchor=anchor;Baseline=(if orientation=AxisOrientation.Left || orientation=AxisOrientation.Right then "middle" else "alphabetic")} mark
 
+    /// <summary>Builds a domain line over (start, finish) plus one tick and label per (key, position, label),
+    /// with mark keys derived from each semantic key. Throws <c>ArgumentException</c> for duplicate keys or non-finite coordinates.</summary>
     let values prefix orientation origin (start,finish) (positions:(string * float * string) list) =
         Check.finite "origin" origin
         Check.finite "start" start

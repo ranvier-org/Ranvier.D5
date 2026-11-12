@@ -8,6 +8,7 @@ type PieSlice<'T> = { Data:'T; Value:float; StartAngle:float; EndAngle:float }
 /// <summary>A stacked series with independent lower and upper boundaries per observation.</summary>
 type StackLayer<'Key> = { Key:'Key; Values:(float*float) list }
 
+/// <summary>Pie and stack layouts over in-memory observations; invalid input throws <c>ArgumentException</c>.</summary>
 [<RequireQualifiedAccess>]
 module Layout =
     /// <summary>Allocates an angular interval proportionally to nonnegative finite weights, preserving input order.</summary>
@@ -52,6 +53,7 @@ type HierarchyBox<'Id> = { Id:'Id; Parent:'Id option; Depth:int; Bounds:Bounds }
 /// <summary>A hierarchy node positioned in scene coordinates.</summary>
 type HierarchyPoint<'Id> = { Id:'Id; Parent:'Id option; Depth:int; Point:Point }
 
+/// <summary>Construction, traversal and simple layouts for <c>HierarchyNode</c> trees.</summary>
 [<RequireQualifiedAccess>]
 module Hierarchy =
     /// <summary>Creates an immutable node; weights must be finite and nonnegative.</summary>
@@ -59,8 +61,11 @@ module Hierarchy =
         Check.finite "weight" weight
         if weight<0. then invalidArg "weight" "Hierarchy weight must be nonnegative."
         {Identity=id;Weight=weight;Children=children}
+    /// <summary>Returns the node's identity.</summary>
     let id node = node.Identity
+    /// <summary>Returns the node's own weight, excluding its descendants.</summary>
     let weight node = node.Weight
+    /// <summary>Returns the node's children in their original order.</summary>
     let children node = node.Children
     let private build virtualRoot key parent weightOf data =
         let rows=List.toArray data

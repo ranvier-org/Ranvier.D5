@@ -13,6 +13,8 @@ type Transition<'T> = private {
     Target: 'T
 }
 
+/// <summary>Creates, samples and retargets <c>Transition</c> segments;
+/// non-finite times or a negative duration throw <c>ArgumentException</c>.</summary>
 [<RequireQualifiedAccess>]
 module Transition =
     /// <summary>Starts a segment using an Anime easing and an application-specific interpolator.</summary>
@@ -37,6 +39,7 @@ module Transition =
     let retarget now target segment =
         start now segment.Duration segment.Ease segment.Interpolate (sample now segment) target
 
+/// <summary>Ranvier helpers that create memos in the current reactive owner.</summary>
 [<RequireQualifiedAccess>]
 module Reactive =
     /// <summary>Derives an owned Ranvier memo from reactive inputs in the current graph.</summary>
@@ -61,10 +64,12 @@ module Reactive =
 /// <summary>A uniform scale and translation for reversible pan and zoom.</summary>
 type Zoom = private { Scale: float; X: float; Y: float }
 
+/// <summary>Creates and applies <c>Zoom</c> viewports; non-finite values or a non-positive scale throw <c>ArgumentException</c>.</summary>
 [<RequireQualifiedAccess>]
 module Zoom =
     /// <summary>The unchanged viewport.</summary>
     let identity = { Scale = 1.; X = 0.; Y = 0. }
+    /// <summary>Returns the viewport's uniform scale factor, always positive.</summary>
     let scaleValue zoom = zoom.Scale
 
     /// <summary>Creates a finite viewport with a strictly positive scale.</summary>
@@ -93,6 +98,7 @@ module Zoom =
     /// <summary>Converts the viewport into an affine scene transform.</summary>
     let transform zoom = Transform.create zoom.Scale 0. 0. zoom.Scale zoom.X zoom.Y
 
+/// <summary>Brush selection geometry.</summary>
 [<RequireQualifiedAccess>]
 module Brush =
     /// <summary>Normalizes a rectangular selection drawn in either direction.</summary>

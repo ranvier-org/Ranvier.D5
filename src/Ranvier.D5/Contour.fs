@@ -1,14 +1,22 @@
 namespace Ranvier.D5
 
+/// <summary>A region where values are at or above Threshold, in grid-bounds coordinates. Rings are closed by repeating the first point; Outer has
+/// positive signed area and each hole negative.</summary>
 type ContourPolygon = { Threshold:float; Outer:Point list; Holes:Point list list }
+/// <summary>Contour settings: unique finite thresholds, linear interpolation of crossings (otherwise edge midpoints), and budgets for grid cells,
+/// output vertices, polygons and stitching work.</summary>
 type ContourConfig =
     { Thresholds:float list; Interpolate:bool; MaxCells:int; MaxVertices:int; MaxPolygons:int; MaxWork:int64 }
 
+/// <summary>Default contour configuration.</summary>
 [<RequireQualifiedAccess>]
 module ContourConfig =
+    /// <summary>Creates an interpolating configuration with budgets of 1,048,576 cells, 2,000,000 vertices, 250,000 polygons and 100,000,000 work
+    /// units.</summary>
     let create thresholds =
         {Thresholds=thresholds;Interpolate=true;MaxCells=1048576;MaxVertices=2000000;MaxPolygons=250000;MaxWork=100000000L}
 
+/// <summary>Marching-squares contour polygons over density grids.</summary>
 [<RequireQualifiedAccess>]
 module Contour =
     exception private ContourAbort of LayoutError
@@ -43,6 +51,9 @@ module Contour =
             if not between || Predicates.orient2d previous current next<>0 then kept.Add current
         if kept.Count<3 then [] else List.ofSeq kept @ [kept[0]]
 
+    /// <summary>Traces regions at or above each threshold through cell centers, treating missing cells as below every threshold, and returns polygons
+    /// by ascending threshold. Returns Error for invalid thresholds or budgets, exceeded budgets or degenerate topology; cancellation raises
+    /// OperationCanceledException.</summary>
     let computeWithCancellation (token:System.Threading.CancellationToken) (config:ContourConfig) (grid:DensityGrid) : Result<ContourPolygon list,LayoutError list> =
         token.ThrowIfCancellationRequested()
         let columns,rows=DensityGrid.columns grid,DensityGrid.rows grid
@@ -203,4 +214,5 @@ module Contour =
             token.ThrowIfCancellationRequested()
             Ok(List.ofSeq output)
           with ContourAbort error -> Error [error]
+    /// <summary>Runs <c>computeWithCancellation</c> without cancellation.</summary>
     let compute config grid = computeWithCancellation System.Threading.CancellationToken.None config grid

@@ -2,16 +2,22 @@ namespace Ranvier.D5.Charts
 
 open Ranvier.D5
 
+/// <summary>A chart whose marks each aggregate many observations; Membership maps each mark's semantic key (its only DataIds entry) to the source observation IDs.</summary>
 type AggregateChartOutput = { Chart:ChartOutput; Membership:Map<string,string list> }
+/// <summary>Aggregate density chart specification: Color maps a weight or density to paint, Selected holds mark keys to outline, and MaxMarks caps visible marks.</summary>
 type DensityChartSpec = { Frame:ChartFrame; Color:float -> Paint; Selected:Set<string>; MaxMarks:int }
 
+/// <summary>Defaults for density chart specifications.</summary>
 [<RequireQualifiedAccess>]
 module DensityChartSpec =
+    /// <summary>Creates a specification with no selection and a 100000-mark budget.</summary>
     let create frame color = {Frame=frame;Color=color;Selected=Set.empty;MaxMarks=100000}
 
+/// <summary>Hexbin and grid heatmap charts over aggregated observations.</summary>
 [<RequireQualifiedAccess>]
 module DensityChart =
     let private number (value:float)=value.ToString("R",System.Globalization.CultureInfo.InvariantCulture)
+    /// <summary>As hexbin, but checks the token during aggregation and composition and throws OperationCanceledException when it is cancelled.</summary>
     let hexbinWithCancellation (token:System.Threading.CancellationToken) (spec:DensityChartSpec) (config:HexbinConfig) points : Result<AggregateChartOutput,LayoutError list> =
         token.ThrowIfCancellationRequested()
         if spec.MaxMarks<1 then Error [InvalidObservation "Mark budget must be positive."]
@@ -49,6 +55,7 @@ module DensityChart =
                     {Chart=Recipe.output spec.Frame bounds (cells |> List.map(fun (_,_,m,_,_) -> m)) (cells |> List.map(fun (_,_,_,s,_) -> s)) (cells |> List.map(fun (_,_,_,_,h) -> h)) []
                      Membership=cells |> List.map(fun (key,members,_,_,_) -> key,members) |> Map.ofList}))
 
+    /// <summary>As heatmap, but checks the token while counting and composing cells and throws OperationCanceledException when it is cancelled.</summary>
     let heatmapWithCancellation (token:System.Threading.CancellationToken) (spec:DensityChartSpec) (grid:DensityGrid) : Result<AggregateChartOutput,LayoutError list> =
         token.ThrowIfCancellationRequested()
         let columns,rows=DensityGrid.columns grid,DensityGrid.rows grid
@@ -84,5 +91,7 @@ module DensityChart =
             {Chart=Recipe.output spec.Frame bounds (cells |> List.map(fun (_,_,m,_,_) -> m)) (cells |> List.map(fun (_,_,_,s,_) -> s)) (cells |> List.map(fun (_,_,_,_,h) -> h)) []
              Membership=cells |> List.map(fun (key,members,_,_,_) -> key,members) |> Map.ofList})
 
+    /// <summary>Draws one rectangle per grid cell with a value, stretched to fill the plot area; more valued cells than MaxMarks is a BudgetExceeded error.</summary>
     let heatmap spec grid = heatmapWithCancellation System.Threading.CancellationToken.None spec grid
+    /// <summary>Aggregates points into hexagons (at most MaxMarks bins) fitted uniformly into the plot area, each with a polygon hit region; geometry that collapses at screen precision is a typed error.</summary>
     let hexbin spec config points = hexbinWithCancellation System.Threading.CancellationToken.None spec config points

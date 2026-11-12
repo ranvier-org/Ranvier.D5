@@ -2,22 +2,30 @@ namespace Ranvier.D5.Charts
 
 open Ranvier.D5
 
+/// <summary>Chord diagram specification: layout options, labels and colors by domain ID, selected group IDs to outline, and whether to draw group labels.</summary>
 type ChordSpec =
     { Frame:ChartFrame; Layout:ChordConfig; Label:string->string; Color:string->Paint; Selected:Set<string>; ShowLabels:bool }
 
+/// <summary>Defaults for chord specifications.</summary>
 [<RequireQualifiedAccess>]
 module ChordSpec =
+    /// <summary>Creates a specification with the default chord layout, identity labels, one blue color, no selection and labels shown.</summary>
     let create frame = {Frame=frame;Layout=ChordConfig.defaultValue;Label=id;Color=(fun _ -> Paint.rgb 40 120 200);Selected=Set.empty;ShowLabels=true}
 
+/// <summary>Sankey and alluvial specification: labels and colors by node ID, selected node IDs to outline, link opacity in [0,1], and whether to draw node labels.</summary>
 type FlowSpec =
     { Frame:ChartFrame; Label:string->string; Color:string->Paint; Selected:Set<string>; LinkOpacity:float; ShowLabels:bool }
 
+/// <summary>Defaults for flow specifications.</summary>
 [<RequireQualifiedAccess>]
 module FlowSpec =
+    /// <summary>Creates a specification with identity labels, one blue color, no selection, 0.4 link opacity and labels shown.</summary>
     let create frame = {Frame=frame;Label=id;Color=(fun _ -> Paint.rgb 40 120 200);Selected=Set.empty;LinkOpacity=0.4;ShowLabels=true}
 
+/// <summary>Chord, Sankey and alluvial flow charts.</summary>
 [<RequireQualifiedAccess>]
 module FlowChart =
+    /// <summary>Draws a chord diagram of a square flow matrix with one ID per row, centered in the plot area; group arcs are hit targets and ribbons are semantics carrying both endpoint IDs, and an ID count that differs from the matrix size is InvalidTopology.</summary>
     let chord (spec:ChordSpec) (ids:string list) (matrix:float list list) : Result<ChartOutput,LayoutError list> =
         if ids.Length<>matrix.Length then Error [InvalidTopology "Chord domain IDs must match the matrix dimension."]
         else
@@ -61,6 +69,7 @@ module FlowChart =
                     let flowMarks,flowSemantics=List.unzip flows
                     let marks,semantics,hits=List.unzip3 groups
                     Recipe.output spec.Frame bounds (flowMarks@marks@labels) (flowSemantics@semantics) hits [])
+    /// <summary>Renders a precomputed Sankey layout in its own screen coordinates; nodes are hit targets, links are semantics with source and target IDs, and an invalid graph, flow values or opacity are typed errors.</summary>
     let sankey (spec:FlowSpec) (layout:SankeyLayout) : Result<ChartOutput,LayoutError list> =
         let graph=FlowGraph.create (layout.Nodes |> List.map(fun node -> node.Id))
                       (layout.Links |> List.map(fun edge -> {FlowLink.Id=edge.Id;Source=edge.Source;Target=edge.Target;Value=edge.Value}))
@@ -97,6 +106,7 @@ module FlowChart =
                 let linkMarks,linkSemantics=List.unzip links
                 let marks,semantics,hits=List.unzip3 nodes
                 Recipe.output spec.Frame bounds (linkMarks@marks@labels) (linkSemantics@semantics) hits [])
+    /// <summary>Lays out a staged flow graph inside the frame's plot area, overriding the config bounds, then renders it as sankey.</summary>
     let alluvial (spec:FlowSpec) (config:SankeyConfig) (stages:Map<string,int>) (graph:FlowGraph) : Result<ChartOutput,LayoutError list> =
         match ChartLayout.plot spec.Frame with
         | Error errors -> Error errors

@@ -1,13 +1,20 @@
 namespace Ranvier.D5
 
+/// <summary>Many-body force settings: finite strength (negative repels, positive attracts), nonnegative Barnes–Hut theta (0 is exact pairwise),
+/// positive minimum softening distance and a maximum interaction distance no smaller than it.</summary>
 type ManyBodyConfig = { Strength:float; Theta:float; MinDistance:float; MaxDistance:float }
+/// <summary>Constructors for <c>ManyBodyConfig</c>.</summary>
 [<RequireQualifiedAccess>]
 module ManyBodyConfig =
+    /// <summary>Creates a configuration with theta 0.8, minimum distance 1 and unbounded maximum distance.</summary>
     let create strength = {Strength=strength;Theta=0.8;MinDistance=1.;MaxDistance=infinity}
 
+/// <summary>Collision force settings: strength in [0,1] scales overlap correction, applied over a positive number of iterations per tick.</summary>
 type CollisionConfig = { Strength:float; Iterations:int }
+/// <summary>Constructors for <c>CollisionConfig</c>.</summary>
 [<RequireQualifiedAccess>]
 module CollisionConfig =
+    /// <summary>Creates a configuration with one iteration per tick.</summary>
     let create strength = {Strength=strength;Iterations=1}
 
 module internal ForceKernels =

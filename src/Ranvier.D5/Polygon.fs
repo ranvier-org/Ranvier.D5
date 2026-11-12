@@ -1,6 +1,7 @@
 namespace Ranvier.D5
 open System.Numerics
 
+/// <summary>Area, centroid, containment and convex hull of polygons given as vertex lists, using exact arithmetic.</summary>
 [<RequireQualifiedAccess>]
 module Polygon =
     let private coordinates points =
@@ -16,6 +17,8 @@ module Polygon =
             x<-x+(v[2*i]+v[2*j])*cross
             y<-y+(v[2*i+1]+v[2*j+1])*cross
         area,x,y,exponent
+    /// <summary>Returns the signed area of the closed polygon, positive for counterclockwise vertices in y-up coordinates. Raises ArgumentException
+    /// for non-finite coordinates or an area outside the finite range.</summary>
     let area points =
         let mutable eligible=true
         let mutable largest=0.
@@ -41,6 +44,8 @@ module Polygon =
                 let j=(i+1)%count
                 area<-area+values[2*i]*values[2*j+1]-values[2*j]*values[2*i+1]
             ExactDyadic.ratio area (BigInteger 2) (2*exponent)
+    /// <summary>Returns the area centroid, or None when the signed area is zero. Raises ArgumentException for non-finite coordinates or
+    /// results.</summary>
     let centroid points =
         let area,x,y,exponent=moments points
         if area.IsZero then None else
@@ -59,11 +64,15 @@ module Polygon =
             elif a.Y>point.Y && b.Y<=point.Y && orientation<0 then winding<-winding-1
         boundary || winding<>0
 
+    /// <summary>Tests whether the point lies inside the polygon by the nonzero winding rule; boundary points count as inside. Raises
+    /// ArgumentException for non-finite coordinates.</summary>
     let contains (point:Point) points =
         Check.finite "x" point.X;Check.finite "y" point.Y
         let vertices=List.toArray points
         for vertex in vertices do Check.finite "x" vertex.X;Check.finite "y" vertex.Y
         containsArrayWithCancellation System.Threading.CancellationToken.None point vertices
+    /// <summary>Returns the convex hull without duplicate or collinear points, counterclockwise in y-up coordinates from the lowest-x, then lowest-y
+    /// point. Raises ArgumentException for non-finite coordinates.</summary>
     let hull points =
         for point in points do Check.finite "x" point.X;Check.finite "y" point.Y
         let ordered=List.toArray points

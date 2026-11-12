@@ -24,6 +24,7 @@ module internal ExactDyadic =
         Check.finite "result" result
         result
 
+/// <summary>Exact geometric predicates that are not affected by floating-point rounding.</summary>
 [<RequireQualifiedAccess>]
 module Predicates =
     // Floating filters: robust-predicates 3.0.2 / Shewchuk (Unlicense).
@@ -32,6 +33,8 @@ module Predicates =
     let private safe value = value=0. || (abs value>=1e-50 && abs value<=1e50)
     let private integerCoordinate value = abs value<=16777216. && Double.IsInteger value
     let private integerPoint (p:Point) = integerCoordinate p.X && integerCoordinate p.Y
+    /// <summary>Returns the exact sign of the orientation of a, b, c: positive when they turn counterclockwise in y-up coordinates, negative when
+    /// clockwise, zero when collinear. Raises ArgumentException for non-finite coordinates.</summary>
     let orient2d (a:Point) (b:Point) (c:Point) =
         let acx,acy,bcx,bcy=a.X-c.X,a.Y-c.Y,b.X-c.X,b.Y-c.Y
         let left,right=acx*bcy,acy*bcx
@@ -42,6 +45,8 @@ module Predicates =
         if integerPoint a && integerPoint b && integerPoint c then sign determinant else
         let v,_=ExactDyadic.integers [|a.X;a.Y;b.X;b.Y;c.X;c.Y|]
         ((v[0]-v[4])*(v[3]-v[5])-(v[1]-v[5])*(v[2]-v[4])).Sign
+    /// <summary>Returns the exact sign of the incircle test: positive when d lies inside the circle through counterclockwise a, b, c (y-up), negative
+    /// outside, zero on it. Raises ArgumentException for non-finite coordinates.</summary>
     let incircle (a:Point) (b:Point) (c:Point) (d:Point) =
         let ax,ay,bx,by,cx,cy=a.X-d.X,a.Y-d.Y,b.X-d.X,b.Y-d.Y,c.X-d.X,c.Y-d.Y
         let al,bl,cl=ax*ax+ay*ay,bx*bx+by*by,cx*cx+cy*cy

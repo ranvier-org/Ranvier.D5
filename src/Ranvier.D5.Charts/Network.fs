@@ -2,16 +2,20 @@ namespace Ranvier.D5.Charts
 
 open Ranvier.D5
 
+/// <summary>Network chart specification: labels and colors by node ID, selected node IDs to outline, link stroke paint and width in pixels, and whether links merge into one path mark.</summary>
 type NetworkSpec =
     { Frame:ChartFrame; Label:string -> string; Color:string -> Paint
       Selected:Set<string>; LinkColor:Paint; LinkWidth:float; AggregateLinks:bool }
 
+/// <summary>Defaults for network specifications.</summary>
 [<RequireQualifiedAccess>]
 module NetworkSpec =
+    /// <summary>Creates a specification with identity labels, blue nodes, separate grey 1 px links and no selection.</summary>
     let create frame =
         {Frame=frame;Label=id;Color=fun _ -> Paint.rgb 40 120 200
          Selected=Set.empty;LinkColor=Paint.rgb 160 170 185;LinkWidth=1.;AggregateLinks=false}
 
+/// <summary>Charts of force simulation snapshots; node positions are used as screen coordinates unchanged.</summary>
 [<RequireQualifiedAccess>]
 module NetworkChart =
     let private unitCircle=Shape.symbol Symbol.Circle System.Math.PI
@@ -56,10 +60,12 @@ module NetworkChart =
                 let linkMarks,linkSemantics=List.unzip linkEntries
                 Recipe.output spec.Frame bounds (linkMarks@nodeMarks) (linkSemantics@nodeSemantics) hits [])
 
+    /// <summary>Draws the graph's links as straight lines and the snapshot's nodes as circles with disc hit targets; snapshot node IDs that differ from the graph's are InvalidTopology.</summary>
     let network (spec:NetworkSpec) (graph:GraphData) (snapshot:ForceSnapshot) : Result<ChartOutput,LayoutError list> =
         let expected=System.Collections.Generic.HashSet<string>(GraphData.nodes graph |> Seq.map(fun node -> node.Id),System.StringComparer.Ordinal)
         if not(expected.SetEquals(snapshot.Nodes |> Seq.map(fun node -> node.Id))) then Error [InvalidTopology "Snapshot nodes do not match the graph."]
         else build spec (GraphData.links graph) snapshot
 
+    /// <summary>Draws only the snapshot's nodes as circles with disc hit targets, without links.</summary>
     let bubbles (spec:NetworkSpec) (snapshot:ForceSnapshot) : Result<ChartOutput,LayoutError list> =
         build spec [] snapshot

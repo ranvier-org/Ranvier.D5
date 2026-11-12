@@ -1,10 +1,15 @@
 namespace Ranvier.D5
 
+/// <summary>A directed link between two node IDs; Value must be finite and nonnegative.</summary>
 type FlowLink = { Id:string; Source:string; Target:string; Value:float }
+/// <summary>A validated flow graph with unique node and link IDs, created by FlowGraph.create.</summary>
 type FlowGraph = private { NodeIds:string list; Edges:FlowLink list }
 
+/// <summary>Validation of and access to flow graphs.</summary>
 [<RequireQualifiedAccess>]
 module FlowGraph =
+    /// <summary>Validates nodes and links and returns every error found: empty or duplicate IDs, missing endpoints and negative or non-finite values.
+    /// Cycles are not checked here.</summary>
     let create (nodes:string list) (links:FlowLink list) : Result<FlowGraph,LayoutError list> =
         let errors=ResizeArray<LayoutError>()
         let nodeIds=System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
@@ -21,28 +26,43 @@ module FlowGraph =
         if errors.Count>0 then Error(List.ofSeq errors) else
         Ok {NodeIds=nodes |> List.sortWith(fun a b -> System.StringComparer.Ordinal.Compare(a,b))
             Edges=links |> List.sortWith(fun a b -> System.StringComparer.Ordinal.Compare(a.Id,b.Id))}
+    /// <summary>Returns node IDs in ordinal order.</summary>
     let nodes graph = graph.NodeIds
+    /// <summary>Returns links in ordinal ID order.</summary>
     let links graph = graph.Edges
 
+/// <summary>Column assignment for unstaged layouts. Left uses depth from sources; Right uses distance to sinks; Center moves pure sources next to
+/// their nearest target; Justify moves sinks to the last column.</summary>
 [<RequireQualifiedAccess>]
 type SankeyAlignment = Left | Right | Center | Justify
 
+/// <summary>Sankey settings: node width and vertical padding in layout units, 0 to 256 relaxation iterations, unstaged alignment, and node and link
+/// budgets.</summary>
 type SankeyConfig =
     { Bounds:Bounds; NodeWidth:float; NodePadding:float; Iterations:int
       Alignment:SankeyAlignment; MaxNodes:int; MaxLinks:int }
 
+/// <summary>Default Sankey configuration.</summary>
 [<RequireQualifiedAccess>]
 module SankeyConfig =
+    /// <summary>Creates a configuration with 24-unit nodes, 8-unit padding, 6 iterations, Justify alignment and budgets of 100,000 nodes and
+    /// 1,000,000 links.</summary>
     let create bounds =
         {Bounds=bounds;NodeWidth=24.;NodePadding=8.;Iterations=6
          Alignment=SankeyAlignment.Justify;MaxNodes=100000;MaxLinks=1000000}
 
+/// <summary>A positioned node with its column Layer, total Inflow and Outflow, Value as the larger of the two, and Imbalance as outflow minus
+/// inflow.</summary>
 type SankeyNode =
     { Id:string; Layer:int; Bounds:Bounds; Inflow:float; Outflow:float; Value:float; Imbalance:float }
+/// <summary>A positioned link band of the given Width; Start lies on the source node's right edge and Finish on the target node's left
+/// edge.</summary>
 type SankeyLink =
     { Id:string; Source:string; Target:string; Value:float; Width:float; Start:Point; Finish:Point }
+/// <summary>Positioned nodes and links, each in ordinal ID order.</summary>
 type SankeyLayout = { Nodes:SankeyNode list; Links:SankeyLink list }
 
+/// <summary>Sankey layout of acyclic flow graphs within configured bounds.</summary>
 [<RequireQualifiedAccess>]
 module Sankey =
     let private layoutCore (token:System.Threading.CancellationToken) (stages:Map<string,int> option) (config:SankeyConfig) (graph:FlowGraph) : Result<SankeyLayout,LayoutError list> =
@@ -211,12 +231,21 @@ module Sankey =
                                            Finish=Point.create (left+x targets[e]) (top+finishY[e])}]
                             token.ThrowIfCancellationRequested()
                             Ok {Nodes=resultNodes;Links=resultLinks}
+    /// <summary>Assigns columns by alignment, sizes nodes by their larger flow and relaxes vertical positions. Returns Error for invalid settings,
+    /// exceeded budgets, a cycle (including zero-valued links) or bounds too small for the columns and padding; cancellation raises
+    /// OperationCanceledException.</summary>
     let layoutWithCancellation token config graph = layoutCore token None config graph
+    /// <summary>Runs <c>layoutWithCancellation</c> without cancellation.</summary>
     let layout config graph = layoutWithCancellation System.Threading.CancellationToken.None config graph
 
+    /// <summary>Like <c>layoutWithCancellation</c>, but takes each node's column from <c>stages</c>, which must map every node ID to a nonnegative
+    /// stage below MaxNodes. Returns InvalidTopology when stages miss a node or a link does not advance to a later stage.</summary>
     let layoutStagedWithCancellation token config stages graph = layoutCore token (Some stages) config graph
+    /// <summary>Runs <c>layoutStagedWithCancellation</c> without cancellation.</summary>
     let layoutStaged config stages graph = layoutStagedWithCancellation System.Threading.CancellationToken.None config stages graph
 
+    /// <summary>Moves a node's top edge toward <c>top</c>, clamped between its column neighbours plus padding and the bounds, and shifts its link
+    /// endpoints. Returns MissingEndpoint for an unknown ID and InvalidObservation for non-finite input or no feasible slot.</summary>
     let moveNode (config:SankeyConfig) (id:string) (top:float) (layout:SankeyLayout) : Result<SankeyLayout,LayoutError list> =
         if not(System.Double.IsFinite top && System.Double.IsFinite config.NodePadding) || config.NodePadding<0. then
             Error [InvalidObservation "Node position and padding must be finite; padding must be nonnegative."]

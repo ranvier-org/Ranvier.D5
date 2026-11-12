@@ -7,6 +7,7 @@ open Ranvier.D5
 open Ranvier.View
 open Ranvier.View.Sugar
 
+/// <summary>Retained keyed SVG components that render D5 scenes through Ranvier.View.</summary>
 [<RequireQualifiedAccess>]
 module Renderer =
     let private number (value: float) = value.ToString("G17", CultureInfo.InvariantCulture)
@@ -191,7 +192,8 @@ module Renderer =
                     if Scene.isComposed scene
                     then t.arm composed value else t.arm flat value)|])
 
-    /// <summary>A reusable scene component without event handlers.</summary>
+    /// <summary>A reusable scene component that forwards each mark event to dispatch with the leaf mark key and event name; group scopes are dropped.</summary>
     let create dispatch = createScoped (fun path name event -> dispatch (List.last path) name event)
 
+    /// <summary>A shared renderer component that ignores mark events.</summary>
     let passive = create (fun _ _ _ -> ())

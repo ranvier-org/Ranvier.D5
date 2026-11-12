@@ -3,6 +3,7 @@ namespace Ranvier.D5
 /// <summary>A clipped unique-site cell with every original input identity; vertices have no repeated closing point.</summary>
 type VoronoiCell = { Site:int; InputIndices:int list; Vertices:Point list }
 
+/// <summary>Voronoi cells derived from a Delaunay <c>Triangulation</c>.</summary>
 [<RequireQualifiedAccess>]
 module Voronoi =
     let private exactSide (a:Point) (b:Point) (p:Point) =

@@ -5,6 +5,8 @@ open System
 /// <summary>Iterative Buchheim tidy-tree layout, adapted from d3-hierarchy 3.1.2; see packaged license.</summary>
 [<RequireQualifiedAccess>]
 module Tree =
+    /// <summary>Positions every node in preorder within <c>config.Bounds</c>, with depth increasing downward from the root at the top edge.
+    /// Returns <c>Error [InvalidObservation]</c> for duplicate identities or a non-positive separation.</summary>
     let layout config root =
         HierarchyIndex.protect(fun () ->
             let index=HierarchyIndex.create root
@@ -84,8 +86,11 @@ module Tree =
             let depth=index.Items |> Array.maxBy(fun item -> item.Depth) |> fun item -> max 1 item.Depth
             TreeCoordinates.points config.Bounds index (xs |> Array.map(fun x -> (x-first)/(last-first))) (index.Items |> Array.map(fun item -> float item.Depth/float depth)))
 
+/// <summary>Dendrogram layout that aligns all leaves on the bottom edge of the bounds.</summary>
 [<RequireQualifiedAccess>]
 module Cluster =
+    /// <summary>Positions every node in preorder: leaves are spaced by separation along the bottom edge and parents sit at their children's mean x,
+    /// one level per subtree height. Returns <c>Error [InvalidObservation]</c> for duplicate identities or a non-positive separation.</summary>
     let layout config root =
         HierarchyIndex.protect(fun () ->
             let index=HierarchyIndex.create root

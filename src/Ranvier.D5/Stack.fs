@@ -2,13 +2,19 @@ namespace Ranvier.D5
 
 open System
 
+/// <summary>Series stacking order: input, reversed, by ascending or descending sum, by index of peak value, or inside-out by peak index.</summary>
 [<RequireQualifiedAccess>]
 type StackOrder = Input | Reverse | Ascending | Descending | Appearance | InsideOut
+/// <summary>Stack baseline: zero, normalized to [0,1] per observation, centered, minimized wiggle, or separate positive and negative stacks.
+/// Only <c>Diverging</c> accepts negative values.</summary>
 [<RequireQualifiedAccess>]
 type StackOffset = Zero | Expand | Silhouette | Wiggle | Diverging
+/// <summary>Stack layout settings.</summary>
 type StackConfig = { Order:StackOrder; Offset:StackOffset }
+/// <summary>A named series of observations; all series in one stack must be the same length, with nonempty unique keys and finite values.</summary>
 type Series = { Key:string; Values:float list }
 
+/// <summary>d3-style stack layout returning typed <c>LayoutError</c> results instead of throwing.</summary>
 [<RequireQualifiedAccess>]
 module Stack =
     /// <summary>Returns layers in stack order. Negative observations require Diverging; all buffers stay private.</summary>

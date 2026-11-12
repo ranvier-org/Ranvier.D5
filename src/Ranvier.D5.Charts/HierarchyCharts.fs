@@ -3,11 +3,14 @@ open System
 open System.Collections.Generic
 open Ranvier.D5
 
+/// <summary>Hierarchy chart specification: labels and colors by node ID, Padding in pixels, collapsed node IDs drawn as leaves with their subtree total, an optional Focus root ID, and selected IDs to outline.</summary>
 type HierarchySpec =
     { Frame:ChartFrame; Label:string -> string; Color:string -> Paint; Padding:float
       Collapsed:Set<string>; Focus:string option; Selected:Set<string> }
+/// <summary>Defaults for hierarchy specifications.</summary>
 [<RequireQualifiedAccess>]
 module HierarchySpec =
+    /// <summary>Creates a specification with identity labels, category10 colors hashed from the node ID, 2 px padding, and nothing collapsed, focused or selected.</summary>
     let create frame =
         let palette=Array.init 10 (fun i -> Chromatic.categorical Chromatic.category10 i |> Chromatic.paint Ranvier.Anime.GamutPolicy.Clip)
         {Frame=frame;Label=id;Padding=2.;Collapsed=Set.empty;Focus=None;Selected=Set.empty
@@ -16,6 +19,7 @@ module HierarchySpec =
             for c in key do hash<-hash*31u+uint32 c
             palette[int(hash%10u)]}
 
+/// <summary>Tree, partition, treemap and pack charts of a string-keyed hierarchy; every node is a hit target keyed by its ID, and an unknown Focus, negative padding or layout failure is a typed error.</summary>
 [<RequireQualifiedAccess>]
 module HierarchyChart =
     let private unwrap = function Ok value -> value | Error errors -> invalidArg "hierarchy" (sprintf "%A" errors)
@@ -97,23 +101,29 @@ module HierarchyChart =
                 if radial then mark |> Mark.withTransform(Transform.translate cx cy) else mark))
             output spec bounds entries links)
 
+    /// <summary>A top-down cluster layout with leaves aligned, node circles and vertical links.</summary>
     let dendrogram spec root = points false spec root
+    /// <summary>A tidy tree laid out in polar coordinates around the plot center with radial links.</summary>
     let radialTree spec root = points true spec root
+    /// <summary>A rectangular partition with one rectangle per node, depth increasing down the plot.</summary>
     let icicle spec root =
         run HierarchySumPolicy.IncludeOwnWeight spec root (fun bounds visible ->
             Partition.layout {Bounds=bounds;Padding=spec.Padding} visible |> unwrap
             |> List.map(fun cell -> entry spec cell.Id (HitBounds cell.Bounds) (fun key -> Shape.rectangle cell.Bounds |> Mark.path key))
             |> fun entries -> output spec bounds entries [])
+    /// <summary>A treemap with one rectangle per node, nested with the spec padding.</summary>
     let treemap spec root =
         run HierarchySumPolicy.IncludeOwnWeight spec root (fun bounds visible ->
             Treemap.layout {TreemapConfig.create bounds with Padding=spec.Padding} visible |> unwrap
             |> List.map(fun cell -> entry spec cell.Id (HitBounds cell.Bounds) (fun key -> Shape.rectangle cell.Bounds |> Mark.path key))
             |> fun entries -> output spec bounds entries [])
+    /// <summary>Circle packing with one circle per node; collapsed totals count leaf weights only.</summary>
     let packedBubbles spec root =
         run HierarchySumPolicy.LeavesOnly spec root (fun bounds visible ->
             Pack.layout {PackConfig.create bounds with Padding=spec.Padding} visible |> unwrap
             |> List.map(fun circle -> entry spec circle.Id (HitPoint(circle.Center,circle.Radius)) (fun key -> Shape.symbol Symbol.Circle (Math.PI*circle.Radius*circle.Radius) |> Mark.path key |> Mark.withTransform(Transform.translate circle.Center.X circle.Center.Y)))
             |> fun entries -> output spec bounds entries [])
+    /// <summary>A polar partition with one annular sector per node, depth increasing outward; padding shrinks each sector.</summary>
     let sunburst spec root =
         run HierarchySumPolicy.IncludeOwnWeight spec root (fun bounds visible ->
             let center=Point.create (Bounds.x bounds+Bounds.width bounds/2.) (Bounds.y bounds+Bounds.height bounds/2.)

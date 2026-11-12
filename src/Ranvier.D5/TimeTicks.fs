@@ -2,8 +2,10 @@ namespace Ranvier.D5
 
 open System
 
+/// <summary>A tick interval of Step multiples of Unit; tick generation requires Step in [1,10000].</summary>
 type TimeIntervalSpec = { Unit:TimeInterval; Step:int }
 
+/// <summary>Calendar-aligned tick generation for instant domains, in UTC or an explicit timezone.</summary>
 [<RequireQualifiedAccess>]
 module TimeTicks =
     let private duration = function
@@ -15,6 +17,8 @@ module TimeTicks =
         | TimeInterval.Month -> 2629800.
         | TimeInterval.Year -> 31557600.
 
+    /// <summary>Chooses the standard interval, from one second to 1,000 years, whose length is closest on a log scale to the domain span divided by
+    /// <c>count</c>. Raises ArgumentException unless <c>count</c> is in [1,10000].</summary>
     let choose count (first:DateTimeOffset,last:DateTimeOffset) =
         if count<1 || count>10000 then invalidArg "count" "Expected a tick count in [1,10000]."
         let target=max 1. (abs((last-first).TotalSeconds)/float count)
@@ -78,4 +82,5 @@ module TimeTicks =
         let ordered=result |> Seq.distinct |> Seq.sort |> Seq.toList
         if first>last then List.rev ordered else ordered
 
+    /// <summary>Calendar ticks in UTC; equivalent to <c>inZone TimeZoneInfo.Utc</c>.</summary>
     let utc spec domain = inZone TimeZoneInfo.Utc spec domain

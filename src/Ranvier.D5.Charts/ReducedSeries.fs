@@ -2,21 +2,28 @@ namespace Ranvier.D5.Charts
 
 open Ranvier.D5
 
+/// <summary>Downsampling algorithm for reduced series: MinMax keeps bucket extremes, Lttb uses largest-triangle-three-buckets.</summary>
 [<RequireQualifiedAccess>]
 type SeriesReduction = MinMax | Lttb
+/// <summary>Reduced line chart specification for one series: Key names the series, Selected holds sample IDs to outline, and PointRadius is in pixels.</summary>
 type ReducedSeriesSpec =
     { Frame:ChartFrame; Key:string; Sampling:SamplingConfig; Reduction:SeriesReduction
       XDomain:DomainPolicy; YDomain:DomainPolicy; Color:Paint; Selected:Set<string>; PointRadius:float }
+/// <summary>The reduced chart with the full source samples, the visible reduced samples, and a summary of every source Y value.</summary>
 type ReducedSeriesOutput = { Chart:ChartOutput; Source:SeriesSample list; Visible:SeriesSample list; Summary:ObservationSummary }
 
+/// <summary>Defaults for reduced series specifications.</summary>
 [<RequireQualifiedAccess>]
 module ReducedSeriesSpec =
+    /// <summary>Creates a MinMax specification targeting the given sample count, with key "series", automatic domains, 2 px points and no selection.</summary>
     let create frame target =
         {Frame=frame;Key="series";Sampling=SamplingConfig.create target;Reduction=SeriesReduction.MinMax
          XDomain=Auto;YDomain=Auto;Color=Paint.rgb 45 110 180;Selected=Set.empty;PointRadius=2.}
 
+/// <summary>Line charts of downsampled series.</summary>
 [<RequireQualifiedAccess>]
 module ReducedSeriesChart =
+    /// <summary>As build, but checks the token throughout and throws OperationCanceledException when it is cancelled.</summary>
     let buildWithCancellation (token:System.Threading.CancellationToken) (spec:ReducedSeriesSpec) (source:SeriesSample list) : Result<ReducedSeriesOutput,LayoutError list> =
         token.ThrowIfCancellationRequested()
         let reduce=match spec.Reduction with SeriesReduction.MinMax -> Sampling.minMaxWithCancellation | SeriesReduction.Lttb -> Sampling.lttbWithCancellation
@@ -53,4 +60,5 @@ module ReducedSeriesChart =
                 let output={Chart=chart;Source=source;Visible=visible;Summary=summary}
                 token.ThrowIfCancellationRequested()
                 output))
+    /// <summary>Reduces the source and draws a line through the visible samples with a hit point per sample with a Y; domains span the full source so reduction does not move the axes, and sampling errors, a blank Key or an invalid PointRadius are typed errors.</summary>
     let build spec source = buildWithCancellation System.Threading.CancellationToken.None spec source

@@ -8,15 +8,29 @@ open Ranvier.D5
 /// <summary>Post is thread-safe and queues to the graph thread; RequestFrame queues to its next host frame. Neither callback may execute inline.</summary>
 type HostDispatcher = {Post:(unit->unit)->unit;RequestFrame:(unit->unit)->unit}
 
+/// <summary>Progress of a ReactiveLayout or ReactiveForce worker. Each request takes a new generation, and results of superseded generations are never published.</summary>
 [<RequireQualifiedAccess>]
-type WorkState<'T> = Idle | Running of generation:int64 | Ready of generation:int64 * value:'T | Failed of generation:int64 * errors:LayoutError list
+type WorkState<'T> =
+    /// <summary>No work state has been published yet.</summary>
+    | Idle
+    /// <summary>The request with this generation is queued or running on the thread pool.</summary>
+    | Running of generation:int64
+    /// <summary>The kernel completed this generation with a value, which also becomes LastGood.</summary>
+    | Ready of generation:int64 * value:'T
+    /// <summary>The kernel for this generation returned errors or threw; LastGood keeps the previous value.</summary>
+    | Failed of generation:int64 * errors:LayoutError list
 
+/// <summary>Handle to a background layout worker created by ReactiveLayout.create. Dispose it on the graph thread, or dispose the owner current at creation, to cancel running work and drop pending and unpublished results.</summary>
 type OwnedLayout<'T> internal (read:unit->WorkState<'T>,lastGood:unit->'T option,retry:unit->unit,dispose:unit->unit) =
+    /// <summary>The latest published work state; a tracked signal read, updated at host frames on the graph thread.</summary>
     member _.State=read()
+    /// <summary>The value of the most recent Ready publication, retained while later work runs or fails; a tracked signal read.</summary>
     member _.LastGood=lastGood()
+    /// <summary>Re-reads the input and requests a new generation, cancelling any running kernel; call on the graph thread. Ignored after disposal.</summary>
     member _.Retry()=retry()
     interface IDisposable with member _.Dispose()=dispose()
 
+/// <summary>Runs pure layout kernels on the thread pool and publishes their results to signals on the graph thread.</summary>
 [<RequireQualifiedAccess>]
 module ReactiveLayout =
     /// <summary>Snapshots immutable inputs on the owner thread, runs one cancellable kernel with one latest pending request, and publishes only current results at host frames.</summary>
