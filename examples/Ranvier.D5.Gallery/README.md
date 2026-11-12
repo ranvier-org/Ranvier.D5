@@ -2,6 +2,13 @@
 
 Every image below comes from a working native WebCore view.
 
+## Planar geometry
+
+![Native hull, centroid and containment](../../docs/images/planar.png)
+
+Run `--planar`; capture with `--capture-planar artifacts/planar.bmp`.
+[Source](PlanarGallery.fs) · [Numeric and boundary contracts](../../docs/planar.md).
+
 ## Hierarchy chart family and explorer
 
 ![Native hierarchy charts](../../docs/images/hierarchy-charts.png)
