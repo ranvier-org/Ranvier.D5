@@ -34,6 +34,7 @@
     <Compile Include="Delaunay.fs" />
     <Compile Include="Voronoi.fs" />
     <Compile Include="GraphData.fs" />
+    <Compile Include="ForceKernels.fs" />
     <Compile Include="Force.fs" />
     <Compile Include="Reactive.fs" />
     <Compile Include="KeyedTransition.fs" />

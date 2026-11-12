@@ -68,6 +68,15 @@ let tests = testList "Quadtree" [
             true) tree
         Expect.equal count data.Length "all exponent bands retained"
         for point in data do Expect.equal (Quadtree.nearest point 0. tree) (Some point) "exact lookup at every scale"
+    testCase "cancellation interrupts coordinate capture at a bounded checkpoint" <| fun _ ->
+        use source=new System.Threading.CancellationTokenSource()
+        let mutable calls=0
+        Expect.throwsT<OperationCanceledException> (fun () ->
+            Quadtree.buildWithCancellation source.Token (fun i ->
+                calls<-calls+1
+                if calls=100 then source.Cancel()
+                p (float i) 0.) (fun _ -> 1.) (seq{0..99999}) |> ignore) "cancelled during build"
+        Expect.isLessThanOrEqual calls 164 "at most64 further accessor calls"
     testCase "invalid masses and inverted extents are rejected" <| fun _ ->
         Expect.throws (fun () -> Quadtree.build id (fun _ -> -1.) [p 0. 0.] |> ignore) "negative mass"
         Expect.throws (fun () -> Quadtree.build id (fun _ -> Double.NaN) [p 0. 0.] |> ignore) "nonfinite mass"

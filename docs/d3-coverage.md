@@ -67,8 +67,8 @@ The table above records baseline and planned ownership, not exhaustive parity.
 See [release validation](release-alpha.2.md) for tested scope and deliberate
 policies for alpha.2. The current hierarchy milestone adds task 5 construction,
 layouts and recipes, with [native snapshots and explicit limitations](hierarchy-charts.md).
-Task 6 now includes robust planar predicates/polygon operations and an immutable quadtree with aggregate traversal; see [planar contracts](planar.md) and [quadtree contracts](quadtree.md). Task 6 also adds [Delaunay triangulation, clipped Voronoi and native picking](spatial.md), with explicit extreme-input fallback and degeneracy policies. Task 7 now includes [deterministic immutable force state and basic forces](force.md); collision/many-body kernels and worker/drag network recipes remain open. Tasks 8–11 remain open. Full locale/time parsers, all D3 palette tables,
-geographic pipelines, spatial triangulation, forces, contours and flow layouts
+Task 6 now includes robust planar predicates/polygon operations and an immutable quadtree with aggregate traversal; see [planar contracts](planar.md) and [quadtree contracts](quadtree.md). Task 6 also adds [Delaunay triangulation, clipped Voronoi and native picking](spatial.md), with explicit extreme-input fallback and degeneracy policies. Task 7 now includes [deterministic immutable force state, collision and Barnes–Hut forces](force.md); worker/drag network recipes remain open. Tasks 8–11 remain open. Full locale/time parsers, all D3 palette tables,
+geographic pipelines, complete network recipes, contours and flow layouts
 are not claimed by this milestone.
 
 Reference fixtures: `tests/fixtures/manifest.json`, exact npm lockfile and copied licenses in `tools/reference-fixtures/`. Generation is development-only. Numeric tolerance and coordinate conventions travel with the fixtures. Native ownership, topology errors and missing-data behavior are tested as D5 contracts rather than copied blindly from JavaScript.
