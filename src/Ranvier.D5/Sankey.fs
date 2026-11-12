@@ -211,22 +211,6 @@ module Sankey =
                                            Finish=Point.create (left+x targets[e]) (top+finishY[e])}]
                             token.ThrowIfCancellationRequested()
                             Ok {Nodes=resultNodes;Links=resultLinks}
-    let linkPath (link:SankeyLink) : Path =
-        if not(System.Double.IsFinite link.Width) || link.Width<0. then invalidArg "link" "Width must be finite and nonnegative."
-        if link.Width=0. then Path.empty else
-        let half=link.Width/2.
-        let middle=link.Start.X/2.+link.Finish.X/2.
-        let upperStart=Point.create link.Start.X (link.Start.Y-half)
-        let upperEnd=Point.create link.Finish.X (link.Finish.Y-half)
-        let lowerStart=Point.create link.Start.X (link.Start.Y+half)
-        let lowerEnd=Point.create link.Finish.X (link.Finish.Y+half)
-        Path.ofCommands
-            [MoveTo upperStart
-             CubicTo(Point.create middle upperStart.Y,Point.create middle upperEnd.Y,upperEnd)
-             LineTo lowerEnd
-             CubicTo(Point.create middle lowerEnd.Y,Point.create middle lowerStart.Y,lowerStart)
-             Close]
-
     let layoutWithCancellation token config graph = layoutCore token None config graph
     let layout config graph = layoutWithCancellation System.Threading.CancellationToken.None config graph
 

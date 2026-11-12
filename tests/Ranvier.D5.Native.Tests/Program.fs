@@ -67,7 +67,9 @@ let acceptance () =
         Expect.equal (retained.getAttribute "fill") "#00ff00" "paint updated"
         Expect.equal (retained.getAttribute "stroke") "#010203" "stroke updated"
         Expect.equal (retained.getAttribute "stroke-width") "2" "stroke width updated"
-        Expect.equal (retained.getAttribute "opacity") "0.75" "opacity updated"
+        Expect.isFalse (retained.hasAttribute "opacity") "wrapper does not create an opacity group"
+        Expect.equal ((retained.querySelector "path").getAttribute "opacity") "0.75" "path opacity updated"
+        Expect.equal ((retained.querySelector "text").getAttribute "opacity") "0.75" "text opacity ready for geometry changes"
         Expect.equal (retained.getAttribute "font-size") "18" "font size updated"
         Expect.equal (retained.getAttribute "font-family") "serif" "font family updated"
         Expect.equal (retained.getAttribute "font-weight") "700" "font weight updated"
@@ -77,6 +79,19 @@ let acceptance () =
         let after = Array.zeroCreate<byte> before.Length
         host.Paint after
         Expect.isFalse (before = after) "native pixels changed"
+        retained.setAttribute("opacity","0.75")
+        (retained.querySelector "path").setAttribute("opacity","1")
+        (retained.querySelector "text").setAttribute("opacity","1")
+        host.Cycle()
+        host.Frame()
+        let reference=Array.zeroCreate<byte> after.Length
+        host.Paint reference
+        let maxDifference=Array.map2(fun a b -> abs(int a-int b)) after reference |> Array.max
+        Expect.isLessThanOrEqual maxDifference 1 "visible-element opacity preserves filled/stroked pixel compositing"
+        retained.removeAttribute "opacity"
+        (retained.querySelector "path").setAttribute("opacity","0.75")
+        (retained.querySelector "text").setAttribute("opacity","0.75")
+        host.Cycle()
         host.Click(40, 40) |> ignore
         Expect.isTrue (events.Contains ("a", "click")) "retained mark receives pointer event"
         let svg=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement

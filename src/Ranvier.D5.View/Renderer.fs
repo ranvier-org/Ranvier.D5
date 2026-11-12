@@ -39,6 +39,7 @@ module Renderer =
             let path =
                 t.element (HtmlTag "path")
                     [|
+                        appearance "opacity" (fun style -> style.Opacity)
                         attribute "d" (fun mark -> match Mark.geometry mark with PathGeometry path -> Path.toSvg path | _ -> "")
                         attribute "display" (fun mark -> match Mark.geometry mark with PathGeometry _ -> "inline" | _ -> "none")
                     |]
@@ -46,6 +47,7 @@ module Renderer =
             let text =
                 t.element (HtmlTag "text")
                     [|
+                        appearance "opacity" (fun style -> style.Opacity)
                         attribute "x" (fun mark -> match Mark.geometry mark with TextGeometry(point, _) -> number point.X | _ -> "0")
                         attribute "y" (fun mark -> match Mark.geometry mark with TextGeometry(point, _) -> number point.Y | _ -> "0")
                         attribute "display" (fun mark -> match Mark.geometry mark with TextGeometry _ -> "inline" | _ -> "none")
@@ -57,7 +59,6 @@ module Renderer =
                 appearance "fill" (fun style -> style.Fill)
                 appearance "stroke" (fun style -> style.Stroke)
                 appearance "stroke-width" (fun style -> style.StrokeWidth)
-                appearance "opacity" (fun style -> style.Opacity)
                 appearance "font-size" (fun style -> style.FontSize)
                 appearance "font-family" (fun style -> style.Family)
                 appearance "font-weight" (fun style -> style.Weight)
