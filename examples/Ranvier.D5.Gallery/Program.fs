@@ -63,6 +63,18 @@ let capture kind path =
             input.Send(InputEvent.Key "Enter")
             if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Flow keyboard selection failed."
             owner :> IDisposable
+        elif kind="contour" then
+            let owner,multiplier,worker=ContourGallery.mount host graph
+            graph.Run(fun () -> multiplier.Value<-1.25)
+            let timer=Stopwatch.StartNew()
+            let ready ()=graph.Run(fun () -> worker.LastGood |> Option.exists(fun (factor,polygons) ->
+                factor=1.25 && not polygons.IsEmpty && polygons |> List.forall(fun p -> p.Outer.Head=List.last p.Outer)))
+            while not(ready()) && timer.Elapsed.TotalSeconds<10. do
+                host.Cycle()
+                host.Frame()
+                System.Threading.Thread.Yield() |> ignore
+            if not(ready()) then failwith "Contour worker failed to publish the latest closed polygons."
+            owner :> IDisposable
         elif kind="density" then
             let owner,bandwidth,worker=DensityGallery.mount host graph
             graph.Run(fun () -> bandwidth.Value<-3.)
@@ -177,6 +189,13 @@ let main args =
         let kind=args |> Array.find(fun arg -> arg.StartsWith "--flow-") |> fun arg -> arg.Substring 7
         use window=Window.Create("Ranvier.D5 interactive flow recipes",820,590)
         let owner,_,_=FlowGallery.mount kind window.Host window.Graph
+        while window.Step() do ()
+        owner.Dispose()
+    elif args.Length=2 && args[0]="--capture-contour" then
+        capture "contour" args[1]
+    elif Array.contains "--contour" args then
+        use window=Window.Create("Ranvier.D5 contour topology",820,590)
+        let owner,_,_=ContourGallery.mount window.Host window.Graph
         while window.Step() do ()
         owner.Dispose()
     elif args.Length=2 && args[0]="--capture-density" then

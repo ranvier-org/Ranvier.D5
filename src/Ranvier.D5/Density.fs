@@ -34,6 +34,7 @@ module DensityGrid =
                 Observed=values |> List.map Option.isSome |> List.toArray
                 Membership=Array.create (int count) []}
     let create bounds columns rows values = createWithBudget 1048576 bounds columns rows values
+    let internal copySamples grid = Array.copy grid.Data,Array.copy grid.Observed
     let bounds grid = grid.Extent
     let columns grid = grid.ColumnCount
     let rows grid = grid.RowCount

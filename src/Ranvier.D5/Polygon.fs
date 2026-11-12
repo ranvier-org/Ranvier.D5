@@ -17,26 +17,53 @@ module Polygon =
             y<-y+(v[2*i+1]+v[2*j+1])*cross
         area,x,y,exponent
     let area points =
-        let area,_,_,exponent=moments points
-        ExactDyadic.ratio area (BigInteger 2) (2*exponent)
+        let mutable eligible=true
+        let mutable largest=0.
+        for point in points do
+            let x,y=point.X*2.,point.Y*2.
+            if not(System.Double.IsFinite x && System.Double.IsFinite y) || floor x<>x || floor y<>y then eligible<-false
+            largest<-max largest (max (abs x) (abs y))
+        if eligible && 2.*float(List.length points)*largest*largest<=4503599627370496. then
+            match points with
+            | [] -> 0.
+            | first::rest ->
+                let mutable previous=first
+                let mutable twiceScaledArea=0.
+                for current in rest do
+                    twiceScaledArea<-twiceScaledArea+(previous.X*2.)*(current.Y*2.)-(current.X*2.)*(previous.Y*2.)
+                    previous<-current
+                (twiceScaledArea+(previous.X*2.)*(first.Y*2.)-(first.X*2.)*(previous.Y*2.))/8.
+        else
+            let values,exponent=coordinates points
+            let count=values.Length/2
+            let mutable area=BigInteger.Zero
+            for i in 0..count-1 do
+                let j=(i+1)%count
+                area<-area+values[2*i]*values[2*j+1]-values[2*j]*values[2*i+1]
+            ExactDyadic.ratio area (BigInteger 2) (2*exponent)
     let centroid points =
         let area,x,y,exponent=moments points
         if area.IsZero then None else
         let denominator=BigInteger 3*area
         Some(Point.create (ExactDyadic.ratio x denominator exponent) (ExactDyadic.ratio y denominator exponent))
-    let contains (point:Point) points =
-        Check.finite "x" point.X;Check.finite "y" point.Y
-        let vertices=List.toArray points
-        for vertex in vertices do Check.finite "x" vertex.X;Check.finite "y" vertex.Y
+    let internal containsArrayWithCancellation (token:System.Threading.CancellationToken) (point:Point) (vertices:Point array) =
+        token.ThrowIfCancellationRequested()
         let mutable winding=0
         let mutable boundary=false
         for i in 0..vertices.Length-1 do
+            if i%1024=0 then token.ThrowIfCancellationRequested()
             let a,b=vertices[i],vertices[(i+1)%vertices.Length]
             let orientation=Predicates.orient2d a b point
             if orientation=0 && point.X>=min a.X b.X && point.X<=max a.X b.X && point.Y>=min a.Y b.Y && point.Y<=max a.Y b.Y then boundary<-true
             elif a.Y<=point.Y && b.Y>point.Y && orientation>0 then winding<-winding+1
             elif a.Y>point.Y && b.Y<=point.Y && orientation<0 then winding<-winding-1
         boundary || winding<>0
+
+    let contains (point:Point) points =
+        Check.finite "x" point.X;Check.finite "y" point.Y
+        let vertices=List.toArray points
+        for vertex in vertices do Check.finite "x" vertex.X;Check.finite "y" vertex.Y
+        containsArrayWithCancellation System.Threading.CancellationToken.None point vertices
     let hull points =
         for point in points do Check.finite "x" point.X;Check.finite "y" point.Y
         let ordered=List.toArray points
