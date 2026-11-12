@@ -45,6 +45,13 @@ let capture kind path =
             host.Click(clickX,clickY) |> ignore
             if graph.Run(fun () -> not(state.Value.Selected.Contains "Scene")) then failwith "Native transition selection did not toggle back."
             owner :> IDisposable
+        elif kind="spatial" then
+            let owner,selected=SpatialGallery.mount host graph
+            host.Cycle()
+            host.Frame()
+            host.Click(48,118) |> ignore
+            if graph.Run(fun () -> selected.Value<>Some 0) then failwith "Native nearest-site picking failed."
+            owner :> IDisposable
         elif kind="linked" then
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
@@ -96,6 +103,13 @@ let main args =
         capture "planar" args[1]
     elif args.Length=2 && args[0]="--capture-quadtree" then
         capture "quadtree" args[1]
+    elif args.Length=2 && args[0]="--capture-spatial" then
+        capture "spatial" args[1]
+    elif Array.contains "--spatial" args then
+        use window=Window.Create("Ranvier.D5 spatial picking",820,590)
+        let owner,_=SpatialGallery.mount window.Host window.Graph
+        while window.Step() do ()
+        owner.Dispose()
     elif Array.contains "--quadtree" args then
         use window=Window.Create("Ranvier.D5 quadtree",820,590)
         let query=window.Graph.Run(fun () -> Api.createSignal(Point.create 410. 265.))

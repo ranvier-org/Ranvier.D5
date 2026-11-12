@@ -5,6 +5,12 @@ open Ranvier.D5
 
 let private p=Point.create
 let tests=testList "Robust planar geometry" [
+    testCase "bounded integer filters distinguish exact zero from nearby noninteger input" <| fun _ ->
+        let p=Point.create
+        Expect.equal (Predicates.incircle (p 0. 0.) (p 1024. 0.) (p 0. 1024.) (p 1024. 1024.)) 0 "integer cocircular"
+        Expect.equal (Predicates.incircle (p 0. 0.) (p 1024. 0.) (p 0. 1024.) (p 1024. (System.Math.BitIncrement 1024.))) -1 "outside by one ULP"
+        Expect.equal (Predicates.orient2d (p -16777216. -16777216.) (p 16777216. 16777216.) (p 0. System.Double.Epsilon)) 1 "noninteger subnormal offset must use fallback"
+
     testCase "predicates and polygon moments match pinned reference fixtures" <| fun _ ->
         use fixture=System.Text.Json.JsonDocument.Parse(System.IO.File.ReadAllText(System.IO.Path.Combine(AppContext.BaseDirectory,"fixtures","planar.json")))
         let points (row:System.Text.Json.JsonElement)=row.GetProperty("points").EnumerateArray() |> Seq.map(fun point -> p (point[0].GetDouble()) (point[1].GetDouble())) |> Seq.toArray
