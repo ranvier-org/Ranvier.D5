@@ -205,6 +205,8 @@ module Projection =
         | ProjectionKind.ConicConformal _ | ProjectionKind.ConicEqualArea _ | ProjectionKind.ConicEquidistant _ -> true
         | _ -> false
 
+    /// <summary>Returns the validated configuration, including the scale and translation a fit chose.</summary>
+    let config projection = projection.Config
     let internal kind projection = projection.Config.Kind
     let internal scale projection = projection.Config.Scale
     /// Angular radius in radians, sine and cosine of the visible cap, for projections clipped by a small circle.
