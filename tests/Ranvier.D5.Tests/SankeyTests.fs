@@ -150,6 +150,18 @@ let tests = testList "Sankey" [
         Expect.isTrue (Bounds.y b.Bounds+Bounds.height b.Bounds+config.NodePadding<=Bounds.y c.Bounds+1e-9) "cannot cross neighbor"
         Expect.isError (Sankey.moveNode config "missing" 0. initial) "missing identity"
         Expect.isError (Sankey.moveNode config "d" nan initial) "finite position"
+    testCase "filled flow bands retain endpoint widths and finite cubic boundaries" <| fun _ ->
+        let edge={SankeyLink.Id="edge";Source="a";Target="b";Value=1.;Width=4.;Start=Point.create 10. 20.;Finish=Point.create 50. 40.}
+        match Sankey.linkPath edge |> Path.commands with
+        | [MoveTo first;CubicTo(a,b,last);LineTo lower;CubicTo(c,d,back);Close] ->
+            Expect.equal first (Point.create 10. 18.) "upper source"
+            Expect.equal last (Point.create 50. 38.) "upper target"
+            Expect.equal lower (Point.create 50. 42.) "lower target"
+            Expect.equal back (Point.create 10. 22.) "lower source"
+            Expect.equal [a.X;b.X;c.X;d.X] [30.;30.;30.;30.] "shared horizontal controls"
+        | commands -> failtestf "Unexpected flow band: %A" commands
+        Expect.isEmpty (Sankey.linkPath {edge with Width=0.} |> Path.commands) "zero flow has no painted band"
+        Expect.throwsT<ArgumentException> (fun () -> Sankey.linkPath {edge with Width=nan} |> ignore) "invalid width"
     testCase "pre-cancelled layout never publishes" <| fun _ ->
         use cancel=new Threading.CancellationTokenSource()
         cancel.Cancel()

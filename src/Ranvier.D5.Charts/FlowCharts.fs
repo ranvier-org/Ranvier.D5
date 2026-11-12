@@ -77,8 +77,8 @@ module FlowChart =
                     if not(finiteNonnegative edge.Width) then invalidArg "layout" "Link width must be finite and nonnegative."
                     let key=Recipe.key ["link";edge.Id]
                     let label=spec.Label edge.Source+" → "+spec.Label edge.Target
-                    let mark=Shape.linkHorizontal edge.Start edge.Finish |> Mark.path key |> Mark.withFill Paint.none
-                             |> Mark.withStroke (spec.Color edge.Source) edge.Width |> Mark.withOpacity spec.LinkOpacity |> Mark.withLabel(Some label)
+                    let mark=Sankey.linkPath edge |> Mark.path key |> Mark.withFill(spec.Color edge.Source)
+                             |> Mark.withOpacity spec.LinkOpacity |> Mark.withLabel(Some label)
                     mark,Recipe.semantic key [edge.Source;edge.Target] label)
                 let nodes=layout.Nodes |> List.map(fun node ->
                     let key=Recipe.key ["node";node.Id]

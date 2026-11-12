@@ -3,11 +3,17 @@
 ![Native Sankey recipe after a real pointer drag](images/flow-sankey.png)
 
 `FlowChart.sankey spec layout` composes an immutable `SankeyLayout` into a
-`ChartOutput`. It draws one cubic path per link with the layout's width, and one
+`ChartOutput`. It draws one filled cubic band per link with the layout's width, and one
 rectangle and hit target per node. Parallel edges keep separate keys; node and link
 key spaces are distinct. Labels and colors come from callbacks, while `Selected`
 adds an outline. Coordinates are retained from the layout and clipped to the chart's
 plot bounds. Use `ChartLayout.plot spec.Frame` when creating the layout configuration.
+
+`Sankey.linkPath` uses upper and lower cubic boundaries separated vertically by the
+link width. This keeps endpoint attachments and the vertical flow thickness explicit
+and avoids the cost of stroking hundreds of long curves on native backends. It is a
+filled flow band, not a constant-normal-distance SVG stroke. Zero-width links retain
+their semantic identities but have empty painted geometry.
 
 ![Native staged alluvial recipe](images/flow-alluvial.png)
 
@@ -67,9 +73,13 @@ incident paths. Gates are 2 ms/256 KB for movement, 10 ms/8 MB for recipe constr
 and 100 ms/32 MB for native update and paint. These bounds detect regressions; they
 are not a guarantee of 60 fps on dense SVG scenes.
 
-Local Windows Traced Release measurements were 0.024 ms/55 KB for movement,
+Initial stroked-path Windows Traced Release measurements were 0.024 ms/55 KB for movement,
 0.565 ms/1.70 MB for recipe construction, and 18.57 ms median (28.32 ms p95)/5.77 MB
 for native update and paint. The pure operation fits comfortably within a frame;
 the complete dense native repaint still exceeds the 16.7 ms frame target.
 The normal build measured 0.017 ms for movement, 0.393 ms for recipe construction,
 and 16.66 ms median (22.56 ms p95)/3.32 MB for native update and paint.
+However, macOS CI measured 133.74 ms p95 normal and 179.31 ms p95 Traced for those
+stroked paths, failing the unchanged 100 ms gate. Filled bands are being qualified
+against that gate. Their local normal measurement is 22.94 ms median/29.67 ms p95
+and 3.76 MB; the geometry change is not a uniform Windows speedup.
