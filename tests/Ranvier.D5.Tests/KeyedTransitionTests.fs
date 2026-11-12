@@ -1,6 +1,7 @@
 module Ranvier.D5.Tests.KeyedTransitionTests
 
 open Expecto
+open Ranvier
 open Ranvier.D5
 
 let mark x=Shape.rectangle(Bounds.create x 0. 10. 10.) |> Mark.path "a"
