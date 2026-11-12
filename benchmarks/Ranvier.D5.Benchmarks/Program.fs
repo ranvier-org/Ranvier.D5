@@ -56,6 +56,22 @@ let main args =
         results.Add(measure "pack-wide-10000" 150. 15000000L (fun () -> Pack.layout (PackConfig.create(Bounds.create 0. 0. 800. 600.)) wideHierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
         let hierarchySpec=Ranvier.D5.Charts.HierarchySpec.create (Ranvier.D5.Charts.ChartFrame.create 800. 600. "Hierarchy")
         results.Add(measure "hierarchy-chart-10000" 180. 48000000L (fun () -> Ranvier.D5.Charts.HierarchyChart.treemap hierarchySpec hierarchy |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+        let normalDistribution=Distribution.normal 0. 1. |> Result.defaultWith(fun e -> failwithf "%A" e)
+        let poissonDistribution=Distribution.poisson 250. |> Result.defaultWith(fun e -> failwithf "%A" e)
+        results.Add(measure "random-normal-100000" 60. 1000000L (fun () ->
+            Distribution.samples 100000 normalDistribution (RandomState.create 7UL) |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+        results.Add(measure "random-poisson-250-100000" 30. 1000000L (fun () ->
+            Distribution.samples 100000 poissonDistribution (RandomState.create 7UL) |> Result.defaultWith(fun e -> failwithf "%A" e) |> ignore))
+        let dsvText=Dsv.format DsvConfig.csv {Header=[for column in 0..9 -> sprintf "c%d" column];Rows=[for row in 0..9999 -> [for column in 0..9 -> if column%3=0 then sprintf "\"q%d, %d\"" row column else string(row*column)]]}
+        results.Add(measure "dsv-parse-10000x10" 120. 12000000L (fun () ->
+            let table=Dsv.parse DsvConfig.csv dsvText |> Result.defaultWith(fun e -> failwithf "%A" e)
+            if table.Rows.Length<>10000 then failwith "DSV row count"))
+        let swarmSpec={Ranvier.D5.Charts.BeeswarmSpec.Frame=Ranvier.D5.Charts.ChartFrame.create 960. 400. "Swarm";Key=fst;X=Ranvier.D5.Charts.Encoding.create "x" (snd >> Some)
+                       Radius=2.;Color=(fun _ -> Paint.currentColor);XDomain=Ranvier.D5.Charts.Auto}
+        let swarmData=[for index in 0..1999 -> string index,sin(float index*12.9898)*43758.5453 % 1.]
+        results.Add(measure "beeswarm-2000" 150. 24000000L (fun () ->
+            let output=Ranvier.D5.Charts.Chart.beeswarm swarmSpec swarmData |> Result.defaultWith(fun e -> failwithf "%A" e)
+            if output.HitTargets.Length<>2000 then failwith "Beeswarm placement count"))
         results.Add(measure "orientation-100000" 10. 1000000L (fun () -> for i in 0..99999 do Predicates.orient2d points[i%9998] points[i%9998+1] (Point.create 200. 300.) |> ignore))
         results.Add(measure "orientation-exact-10000" 30. 10000000L (fun () -> for _ in 0..9999 do Predicates.orient2d (Point.create 0. 0.) (Point.create 1e-300 0.) (Point.create 0. 1e-300) |> ignore))
         results.Add(measure "polygon-hull-10000" 60. 20000000L (fun () -> Polygon.hull (Array.toList points) |> ignore))

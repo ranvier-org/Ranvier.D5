@@ -29,6 +29,14 @@ Every panel is fitted by `ProjectionFit` and rotated by one signal; the capture 
 holes and Albers USA insets in native pixels at two phases.
 [Source](ProjectionFamiliesGallery.fs) · [Contracts](../../docs/geographic-projections.md).
 
+## Advanced recipes
+
+![Native connected scatter, slope, bump, horizon, beeswarm and adjacency matrix](../../docs/images/advanced.png)
+
+Run `--advanced`; capture with `--capture-advanced artifacts/advanced.bmp`. Six pure recipes in one
+facet grid, moved by a signal; the capture checks that every pickable dot and matrix cell paints.
+[Source](AdvancedRecipesGallery.fs) · [Contracts and extension guide](../../docs/advanced-charts.md).
+
 ## Planar geometry
 
 ![Native hull, centroid and containment](../../docs/images/planar.png)

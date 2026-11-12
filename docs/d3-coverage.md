@@ -13,7 +13,7 @@ Baseline: alpha.1 / 52ef102. This ledger separates algorithms from native infras
 | delaunay | Absent; k-d lookup already present | Task 6 |
 | dispatch | Native View events/Ranvier effects replace infrastructure | Task 4 typed input messages; no global dispatcher |
 | drag | Native pointer events available | Task 4 |
-| dsv | Absent | Task 11 optional adapter |
+| dsv | Absent | Task 11 [strict RFC 4180 parse/format, typed conversion and async reading](dsv.md) implemented in core |
 | ease | Ranvier.Anime.Ease | Reuse; no new easing implementation |
 | fetch | .NET/toolkit async IO | Reuse; no network engine |
 | force | Absent | Task 7 |
@@ -24,13 +24,13 @@ Baseline: alpha.1 / 52ef102. This ledger separates algorithms from native infras
 | path | Immutable SVG commands | Task 2 shapes use existing paths |
 | polygon | Absent | Task 6 |
 | quadtree | Absent; immutable k-d tree is a different algorithm | Task 6 |
-| random | Anime seeded closure available | Task 11 explicit-state distributions; no hidden random use now |
+| random | Anime seeded closure available | Task 11 [explicit-state distributions](random.md) implemented: immutable xoshiro256** state and the d3-random distribution set |
 | scale | Partial continuous/categorical/threshold/quantile/UTC | Task 2 ticks, piecewise, inversion extents |
 | scale-chromatic | Absent beyond user colors | Task 2 palettes with upstream attribution |
 | selection | View keyed regions plus immutable Scene/Data.join | Reuse; task 1 groups/definitions, no mutable selection DSL |
 | shape | Partial paths/line/area/arc/link/symbol/pie/stack | Task 2 extended curves, symbols, arc policies, orders/offsets |
 | time | Explicit basic UTC calendar ticks | Task 2 interval selection/multiples and explicit zones |
-| time-format | Caller formatting | Task 2 explicit formatting; full parser utility later task 11 |
+| time-format | Caller formatting | Task 2 explicit formatting; task 11 [strict number/time parsing with explicit DST policies](dsv.md) implemented |
 | timer | Host frame clock/Anime | Reuse; no private timer |
 | transition | Pure sampled/retargetable D5 transitions | Task 4 owned keyed lifecycle |
 | zoom | Pure viewport math | Task 4 input adapter, extent clamp, capture, pinch |

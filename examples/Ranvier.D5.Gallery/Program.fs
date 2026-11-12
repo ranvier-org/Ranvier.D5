@@ -296,6 +296,35 @@ let capture kind path =
             if Object.ReferenceEquals(before,graph.Run current) then failwith "Map rotation signal did not update the chart."
             verify "rotated" |> ignore
             owner :> IDisposable
+        elif kind="advanced" then
+            let phase=graph.Run(fun () -> Api.createSignal 0.)
+            let scene=graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) AdvancedRecipesGallery.scene)
+            let mounted=mount host graph (fun () -> scene.Value)
+            // Every dot and matrix cell that picks only itself must paint over the white page.
+            let verify value =
+                host.Cycle()
+                host.Frame()
+                let struct(w,h)=host.PaintSize
+                let pixels=Array.zeroCreate<byte>(w*h*4)
+                host.Paint pixels
+                let output=AdvancedRecipesGallery.chart value
+                let candidates=output.HitTargets |> List.choose(fun hit ->
+                    match hit.Geometry with
+                    | Ranvier.D5.Charts.HitPoint(point,radius) when radius>=3. -> Some(hit,point)
+                    | Ranvier.D5.Charts.HitBounds bounds when hit.MarkPath |> List.exists(fun part -> part.Contains "cell") ->
+                        Some(hit,Point.create (Bounds.x bounds+Bounds.width bounds/2.) (Bounds.y bounds+Bounds.height bounds/2.))
+                    | _ -> None)
+                let targets=candidates |> List.filter(fun (hit,point) -> Ranvier.D5.Charts.HitTest.at point output |> List.map(fun target -> target.DataIds) = [hit.DataIds])
+                if targets.Length<100 then failwithf "Advanced gallery exposed only %d cleanly pickable marks." targets.Length
+                for hit,point in targets do
+                    let x,y=int(Math.Round point.X)+8,int(Math.Round point.Y)+8
+                    let i=(y*w+x)*4
+                    if int pixels[i]>235 && int pixels[i+1]>235 && int pixels[i+2]>235 then
+                        failwithf "Advanced gallery mark %A did not paint at (%d,%d) for phase %.2f." hit.DataIds x y value
+            verify 0.
+            graph.Run(fun () -> phase.Value<-0.6)
+            verify 0.6
+            {new IDisposable with member _.Dispose()=mounted.Dispose()}
         elif kind="linked" then
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
@@ -362,6 +391,16 @@ let main args =
         let timer=Stopwatch.StartNew()
         while window.Step() do window.Graph.Run(fun () -> rotation.Value<-100.-timer.Elapsed.TotalSeconds*8.)
         owner.Dispose()
+    elif args.Length=2 && args[0]="--capture-advanced" then
+        capture "advanced" args[1]
+    elif Array.contains "--advanced" args then
+        use window=Window.Create("Ranvier.D5 advanced recipes",820,590)
+        let phase=window.Graph.Run(fun () -> Api.createSignal 0.)
+        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) AdvancedRecipesGallery.scene)
+        let mounted=mount window.Host window.Graph (fun () -> scene.Value)
+        let timer=Stopwatch.StartNew()
+        while window.Step() do window.Graph.Run(fun () -> phase.Value<-timer.Elapsed.TotalSeconds*0.2)
+        mounted.Dispose()
     elif args.Length=2 && args[0]="--capture-linked" then
         capture "linked" args[1]
     elif args.Length=2 && args[0]="--capture-hierarchy" then

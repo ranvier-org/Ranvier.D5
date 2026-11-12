@@ -18,3 +18,15 @@ module Chart =
     let radar spec data = Radial.radar spec data
     let parallelCoordinates spec data = Radial.parallelCoordinates spec data
     let calendar spec data = Radial.calendar spec data
+    /// <summary>Points joined in Order; missing coordinates break the trail.</summary>
+    let connectedScatter spec data = AdvancedCharts.connectedScatter spec data
+    /// <summary>Before/after slopes between two shared vertical axes.</summary>
+    let slope spec data = AdvancedCharts.slope spec data
+    /// <summary>Per-period ranks joined by bump curves; ties break by ordinal series ID.</summary>
+    let bump spec data = AdvancedCharts.bump spec data
+    /// <summary>One folded band row per series, negatives mirrored.</summary>
+    let horizon spec data = AdvancedCharts.horizon spec data
+    /// <summary>Non-overlapping circles dodged from a centre line in X order.</summary>
+    let beeswarm spec data = AdvancedCharts.beeswarm spec data
+    /// <summary>A network as matrix cells; unknown endpoints and duplicate IDs are typed errors.</summary>
+    let adjacencyMatrix spec = AdvancedCharts.adjacencyMatrix spec
