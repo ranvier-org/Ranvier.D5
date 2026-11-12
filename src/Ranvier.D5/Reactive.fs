@@ -65,6 +65,7 @@ type Zoom = private { Scale: float; X: float; Y: float }
 module Zoom =
     /// <summary>The unchanged viewport.</summary>
     let identity = { Scale = 1.; X = 0.; Y = 0. }
+    let scaleValue zoom = zoom.Scale
 
     /// <summary>Creates a finite viewport with a strictly positive scale.</summary>
     let create scale x y =
