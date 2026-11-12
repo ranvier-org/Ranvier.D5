@@ -82,7 +82,7 @@ module GeoPath =
             | Error errors -> raise(Rejected errors.Head)
 
     /// <summary>Projects geometry with cooperative cancellation and atomic result publication.</summary>
-    /// <remarks>Sphere emits the complete equirectangular rectangle, orthographic disk, or canonical Mercator square (raw coordinates bounded by pi), intersected with ClipExtent. PointRadius affects point symbols only.</remarks>
+    /// <remarks>Sphere emits the complete equirectangular rectangle, the projected clip circle of orthographic and azimuthal kinds, or the canonical Mercator square (raw coordinates bounded by pi), intersected with ClipExtent. PointRadius affects point symbols only.</remarks>
     let projectWithCancellation (options:GeoPathOptions) (token:CancellationToken) projection geometry : Result<Path list,LayoutError list> =
         token.ThrowIfCancellationRequested()
         if not(ProjectedPath.validOptions options) then
@@ -112,7 +112,7 @@ module GeoPath =
                         | Error errors -> raise(Rejected errors.Head)
                     let scale=Projection.scale projection
                     match Projection.kind projection with
-                    | ProjectionKind.Orthographic -> circle scale origin
+                    | _ when (Projection.clipCircle projection).IsSome -> circle (scale*Projection.clipPlaneRadius projection) origin
                     | kind ->
                         let halfWidth=scale*Math.PI
                         let halfHeight=if kind=ProjectionKind.Mercator then halfWidth else halfWidth/2.
@@ -255,7 +255,11 @@ module GeoPath =
                             lineInput.Add position
                         else
                             let rotated=Projection.rotate projection position
-                            if Projection.kind projection<>ProjectionKind.Mercator || abs rotated.Latitude<=GeoPreclip.mercatorLatitude then
+                            let insideCap =
+                                match Projection.clipCircle projection with
+                                | ValueSome struct(_,_,cosine) -> let struct(x,_,_)=GeoMath.vector rotated in x>=cosine
+                                | ValueNone -> true
+                            if insideCap && (Projection.kind projection<>ProjectionKind.Mercator || abs rotated.Latitude<=GeoPreclip.mercatorLatitude) then
                                 match Projection.projectRotatedValue projection rotated with
                                 | ValueSome point -> circle options.PointRadius point
                                 | ValueNone -> ()

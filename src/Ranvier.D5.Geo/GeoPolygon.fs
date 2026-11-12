@@ -68,18 +68,20 @@ module internal GeoPolygon =
                 match Projection.projectRotatedValue projection point with
                 | ValueSome value -> value
                 | ValueNone -> raise(Rejected(InvalidObservation "Polygon preclipping left an undefined projected vertex."))
-            let orthographic=Projection.kind projection=ProjectionKind.Orthographic
+            let cap=Projection.clipCircle projection
+            let circular=cap.IsSome
+            let struct(_,capSine,capCosine)=cap |> ValueOption.defaultValue struct(0.,0.,0.)
             let origin=screen(position 0. 0.)
             let scale=Projection.scale projection
-            let period=if orthographic then 2.*Math.PI else 4.
+            let period=if circular then 2.*Math.PI else 4.
             let normalize value =
                 let result=value%period
                 if result<0. then result+period else result
             let boundaryPosition amount =
                 let t=normalize amount
-                if orthographic then
+                if circular then
                     let sine,cosine=sin t,cos t
-                    GeoMath.position(struct(0.,sine,cosine))
+                    GeoMath.position(struct(capCosine,capSine*sine,capSine*cosine))
                 elif t<=1. then position (-180.+360.*t) (latitude halfHeight)
                 elif t<=2. then position 180. (latitude(halfHeight-2.*halfHeight*(t-1.)))
                 elif t<=3. then position (180.-360.*(t-2.)) (latitude -halfHeight)
@@ -87,13 +89,15 @@ module internal GeoPolygon =
             let boundaryPoint amount = boundaryPosition amount |> screen
             let parameter (point:Point) =
                 let x,y=(point.X-origin.X)/scale,(origin.Y-point.Y)/scale
-                if orthographic then normalize(atan2 x y)
+                if circular then normalize(atan2 x y)
                 elif abs(abs x-Math.PI)<=abs(abs y-halfHeight) then
                     if x>=0. then 1.+Math.Clamp((halfHeight-y)/(2.*halfHeight),0.,1.)
                     else normalize(3.+Math.Clamp((y+halfHeight)/(2.*halfHeight),0.,1.))
                 elif y>=0. then Math.Clamp((x+Math.PI)/(2.*Math.PI),0.,1.)
                 else 2.+Math.Clamp((Math.PI-x)/(2.*Math.PI),0.,1.)
-            let maxAngle=4.*asin(sqrt(min 0.5 (precision/scale/2.)))
+            // Boundary chords of a screen circle with this radius stay within precision.
+            let boundaryRadius=if circular then scale*Projection.clipPlaneRadius projection else scale
+            let maxAngle=4.*asin(sqrt(min 0.5 (precision/boundaryRadius/2.)))
             let checkBuffer count =
                 if count>maxBuffer then raise(Rejected(BudgetExceeded "Polygon clipping exceeds its vertex buffer budget."))
             let boundaryBetween fromPoint toPoint direction whole emit =
@@ -103,7 +107,7 @@ module internal GeoPolygon =
                 elif direction>0 then
                     if last<first then last<-last+period
                 elif last>first then last<-last-period
-                if orthographic then
+                if circular then
                     let required=ceil(abs(last-first)/maxAngle)
                     if not(Double.IsFinite required) || required>float maxBuffer || required>4.*pown 2. maxDepth then
                         raise(Rejected(BudgetExceeded "Polygon boundary precision exceeds its buffer or subdivision budget."))
@@ -175,7 +179,7 @@ module internal GeoPolygon =
             // Rings lying wholly on the cut, such as the GeoJSON world box, enclose zero spherical area. Their planar
             // longitude/latitude winding decides instead: clockwise covers the world and the reverse covers nothing.
             let onCut (point:GeoPosition)=abs point.Longitude=180. || abs point.Latitude=90.
-            let wholeCut=not orthographic && rotated |> Array.exists(fun ring -> ring.Length>0) && rotated |> Array.forall(Array.forall onCut)
+            let wholeCut=not circular && rotated |> Array.exists(fun ring -> ring.Length>0) && rotated |> Array.forall(Array.forall onCut)
             let coversWorld=
                 wholeCut &&
                 (rotated |> Array.sumBy(fun ring ->
