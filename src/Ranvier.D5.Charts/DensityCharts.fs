@@ -27,14 +27,15 @@ module DensityChart =
                     let cells=bins |> List.map(fun bin ->
                         token.ThrowIfCancellationRequested()
                         let struct(q,r)=bin.Key
-                        let key=Recipe.key [scope;string q;string r]
+                        let qText,rText=q.ToString(System.Globalization.CultureInfo.InvariantCulture),r.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        let key=Recipe.key [scope;qText;rText]
                         let vertices=Hexbin.polygon bin |> List.map project
                         let mutable remaining=vertices
                         while not remaining.IsEmpty do
                             if List.contains remaining.Head remaining.Tail then invalidArg "frame" "Hexagon geometry collapses at the requested coordinate precision."
                             remaining<-remaining.Tail
                         let path=Path.ofCommands(MoveTo vertices.Head::(vertices.Tail |> List.map LineTo)@[Close])
-                        let label=sprintf "Hexagon %d, %d: %s (%d observations)" q r (Recipe.number bin.Weight) bin.Members.Length
+                        let label=System.String.Concat [|"Hexagon ";qText;", ";rText;": ";bin.Weight.ToString("F3",System.Globalization.CultureInfo.InvariantCulture);" (";bin.Members.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);" observations)"|]
                         let mark=Mark.path key path |> Mark.withFill(spec.Color bin.Weight) |> Mark.withLabel(Some label)
                         let mark=if spec.Selected.Contains key then Mark.withStroke (Paint.rgb 20 20 20) 2. mark else mark
                         let region=HitRegion([{Outer=vertices;Holes=[]}],[],project bin.Center)

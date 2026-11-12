@@ -244,4 +244,7 @@ let main args =
     let directory = Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore
     File.WriteAllText(output, JsonSerializer.Serialize(results, JsonSerializerOptions(WriteIndented=true)))
-    if results |> Seq.exists(fun r -> r.P95Ms > r.LimitMs || r.MedianBytes > r.LimitBytes) then 1 else 0
+    let failures=results |> Seq.filter(fun r -> r.P95Ms > r.LimitMs || r.MedianBytes > r.LimitBytes) |> Seq.toArray
+    for result in failures do
+        eprintfn "FAIL %s: p95 %.3f ms (limit %.3f); allocation %d bytes (limit %d)" result.Name result.P95Ms result.LimitMs result.MedianBytes result.LimitBytes
+    if failures.Length>0 then 1 else 0

@@ -10,12 +10,13 @@ module HexbinConfig =
 [<RequireQualifiedAccess>]
 module Hexbin =
     exception private HexbinAbort of LayoutError
+    let private unitCorners=Array.init 6 (fun i ->
+        let angle= -System.Math.PI/2.+float i*System.Math.PI/3.
+        Point.create (cos angle) (sin angle))
     let private vertices center radius =
         Check.finite "radius" radius
         if radius<=0. then invalidArg "radius" "Hexagon radius must be positive."
-        let points=Array.init 6 (fun i ->
-            let angle= -System.Math.PI/2.+float i*System.Math.PI/3.
-            Point.create (center.X+radius*cos angle) (center.Y+radius*sin angle))
+        let points=unitCorners |> Array.map(fun offset -> Point.create (center.X+radius*offset.X) (center.Y+radius*offset.Y))
         for i in 0..5 do
             for j in 0..i-1 do
                 if points[i]=points[j] then invalidArg "radius" "Hexagon corners collapse at this coordinate precision."

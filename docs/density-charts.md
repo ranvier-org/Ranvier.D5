@@ -71,7 +71,7 @@ Local Windows Release measurements (60 samples, including allocations):
 | Operation | Median | p95 | Allocated |
 |---|---:|---:|---:|
 | 4,096-cell heatmap composition | 15.43 ms | 33.04 ms | 17.99 MB |
-| 100,000-point hexbin aggregation + composition | 92.41 ms | 124.52 ms | 56.95 MB |
+| 100,000-point hexbin aggregation + composition | 77.71 ms | 104.69 ms | 54.00 MB |
 | 100 pointer queries over the hexbin chart | 13.10 ms | 16.98 ms | 19.76 KB |
 | 256² grid, three isobands | 9.29 ms | 14.12 ms | 15.28 MB |
 | 1024² grid, three isobands | 60.40 ms | 81.42 ms | 74.72 MB |
