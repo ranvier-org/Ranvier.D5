@@ -89,6 +89,17 @@ let main args =
         let sankeyConfig={SankeyConfig.create(Bounds.create 0. 0. 800. 500.) with NodePadding=1.}
         results.Add(measure "sankey-1000-nodes-2000-links" 25. 8000000L (fun () ->
             Sankey.layout sankeyConfig flowGraph |> Result.defaultWith(fun errors -> failwithf "%A" errors) |> ignore))
+        let nextDensity=Ranvier.Anime.Utils.createSeededRandom (Some 42.) (Some 0.) (Some 1.) (Some 12)
+        let densityPoints=[for i in 0..99999 ->
+                                {WeightedPoint.Id=string i;Position=Point.create (nextDensity None None None*1024.) (nextDensity None None None*1024.);Weight=1.}]
+        for size,limit,bytes in [256,125.,24000000L;1024,250.,80000000L] do
+            let cfg={DensityConfig.create (Bounds.create 0. 0. 1024. 1024.) size size with Bandwidth=2.*1024./float size}
+            results.Add(measure (sprintf "density-100000-grid-%d" size) limit bytes (fun () ->
+                let grid=Density.grid cfg densityPoints |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+                if DensityGrid.columns grid<>size || DensityGrid.rows grid<>size then failwith "Density output exceeds requested bounds."))
+        let kdeSamples=[for i in 0..999 -> float i,1.]
+        let kdeQueries=[for i in 0..511 -> float i*2.]
+        results.Add(measure "density-kde-1000-by-512" 30. 1000000L (fun () -> Density.kde1d 10. kdeSamples kdeQueries |> Result.defaultWith(fun errors -> failwithf "%A" errors) |> ignore))
         let curvePoints=points |> Array.map Some |> Array.toList
         results.Add(measure "natural-10000" 100. 16000000L (fun () -> Curves.line CurveSpec.Natural curvePoints |> ignore))
         let chartData=[0..999]

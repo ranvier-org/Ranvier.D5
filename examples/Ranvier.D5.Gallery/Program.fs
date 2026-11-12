@@ -63,6 +63,19 @@ let capture kind path =
             input.Send(InputEvent.Key "Enter")
             if graph.Run(fun () -> input.Selection.Selected.IsEmpty) then failwith "Flow keyboard selection failed."
             owner :> IDisposable
+        elif kind="density" then
+            let owner,bandwidth,worker=DensityGallery.mount host graph
+            graph.Run(fun () -> bandwidth.Value<-3.)
+            let timer=Stopwatch.StartNew()
+            let ready ()=graph.Run(fun () -> worker.LastGood |> Option.exists(fun (width,grid) ->
+                width=3. && DensityGrid.columns grid=32 && DensityGrid.rows grid=24 &&
+                abs((DensityGrid.values grid |> List.choose id |> List.sum)-100000.)<0.001))
+            while not(ready()) && timer.Elapsed.TotalSeconds<10. do
+                host.Cycle()
+                host.Frame()
+                System.Threading.Thread.Yield() |> ignore
+            if not(ready()) then failwith "Density worker failed to publish the latest bounded, mass-conserving grid."
+            owner :> IDisposable
         elif kind="hierarchy-explorer" then
             let owner,tick,state,worker=HierarchyExplorer.mount host graph
             graph.Run(fun () -> state.Value<-{state.Value with Collapsed=set ["Signals"];Selected=set ["Scene"]})
@@ -164,6 +177,13 @@ let main args =
         let kind=args |> Array.find(fun arg -> arg.StartsWith "--flow-") |> fun arg -> arg.Substring 7
         use window=Window.Create("Ranvier.D5 interactive flow recipes",820,590)
         let owner,_,_=FlowGallery.mount kind window.Host window.Graph
+        while window.Step() do ()
+        owner.Dispose()
+    elif args.Length=2 && args[0]="--capture-density" then
+        capture "density" args[1]
+    elif Array.contains "--density" args then
+        use window=Window.Create("Ranvier.D5 density foundations",820,590)
+        let owner,_,_=DensityGallery.mount window.Host window.Graph
         while window.Step() do ()
         owner.Dispose()
     elif args.Length=2 && args[0]="--capture-sankey" then

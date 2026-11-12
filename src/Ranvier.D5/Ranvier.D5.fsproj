@@ -15,6 +15,7 @@
     <Compile Include="Chord.fs" />
     <Compile Include="Ribbon.fs" />
     <Compile Include="Sankey.fs" />
+    <Compile Include="Density.fs" />
     <Compile Include="Predicates.fs" />
     <Compile Include="Polygon.fs" />
     <Compile Include="Mark.fs" />
