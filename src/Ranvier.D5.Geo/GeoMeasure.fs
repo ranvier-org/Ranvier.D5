@@ -6,6 +6,11 @@ open Ranvier.D5
 
 /// <summary>Spherical measurements in angular radians and steradians, using bounded geographic traversal.</summary>
 module GeoMeasure =
+    /// <summary>Circular longitude and latitude bounds in degrees. West greater than East crosses the dateline; -180 to 180 covers all longitudes.</summary>
+    [<Struct>]
+    type Bounds = { West: float; South: float; East: float; North: float }
+
+
     [<Struct>]
     type private LengthState =
         { Sum: float; Correction: float
@@ -202,3 +207,152 @@ module GeoMeasure =
 
     /// <summary>Computes a spherical centroid without cancellation.</summary>
     let centroid config geometry = centroidWithCancellation config CancellationToken.None geometry
+
+    exception private BoundsBudget
+
+    /// <summary>Returns spherical bounds including arc extrema, pole interiors and dateline wrapping; empty geometry returns None.</summary>
+    /// <remarks>Uses O(n) storage and O(n log n) longitude merging. Traversal and merging each receive MaxWork.
+    /// Exact antipodal edges require an intermediate point. Pole-only geometry uses all longitudes.</remarks>
+    let boundsWithCancellation (config: GeoStreamConfig) (token: CancellationToken) (geometry: GeoGeometry) : Result<Bounds option,LayoutError list> =
+        let ranges=ResizeArray<struct(float*float)>()
+        let mutable south=Double.PositiveInfinity
+        let mutable north=Double.NegativeInfinity
+        let mutable allLongitudes=false
+        let mutable inLine=false
+        let mutable inPolygon=false
+        let mutable first=ValueNone
+        let mutable previous=ValueNone
+        let mutable seamWinding=0
+        let mutable northBoundary=false
+        let mutable southBoundary=false
+        let mutable areaState={Total=0.;TotalCorrection=0.;HalfPolygon=0.;PolygonCorrection=0.;First=ValueNone;Previous=ValueNone;InPolygon=false}
+        let latitude value =
+            south <- min south value
+            north <- max north value
+            if inPolygon then
+                if value=90. then northBoundary <- true
+                if value = -90. then southBoundary <- true
+        let point (position:GeoPosition) =
+            latitude position.Latitude
+            if abs position.Latitude<90. && not allLongitudes then
+                ranges.Add(struct(position.Longitude,position.Longitude))
+        let edge (from:GeoPosition) (destination:GeoPosition) =
+            if from.Latitude = -destination.Latitude && (abs(from.Longitude-destination.Longitude)=180. || abs from.Latitude=90.) then
+                raise(AmbiguousArc "Spherical bounds require an explicit intermediate point on antipodal edges.")
+            let delta=destination.Longitude-from.Longitude
+            if inPolygon then
+                if delta>180. then seamWinding <- seamWinding+1
+                elif delta < -180. then seamWinding <- seamWinding-1
+            let struct(angle,east,bearingNorth)=GeoMath.arc from destination
+            let magnitude=Double.Hypot(east,bearingNorth)
+            if angle>0. && magnitude>0. then
+                let struct(sin0,cos0)=GeoMath.sinCosDegrees from.Latitude
+                let tangentZ=cos0*(bearingNorth/magnitude)
+                let peak=Math.Atan2(tangentZ,sin0)
+                let maximum=if peak<0. then peak+2.*Math.PI else peak
+                let minimum=if maximum>=Math.PI then maximum-Math.PI else maximum+Math.PI
+                let extreme=Math.Atan2(Double.Hypot(sin0,tangentZ),abs(cos0*(east/magnitude)))*180./Math.PI
+                if maximum>0. && maximum<angle then latitude extreme
+                if minimum>0. && minimum<angle then latitude (-extreme)
+            if not allLongitudes && abs from.Latitude<90. && abs destination.Latitude<90. && abs delta<>180. then
+                let low,high=min from.Longitude destination.Longitude,max from.Longitude destination.Longitude
+                if abs delta<180. then ranges.Add(struct(low,high))
+                else
+                    ranges.Add(struct(-180.,low))
+                    ranges.Add(struct(high,180.))
+        let folder () event =
+            match event with
+            | GeoStreamEvent.PolygonStart ->
+                inPolygon <- true
+                seamWinding <- 0
+                northBoundary <- false
+                southBoundary <- false
+            | GeoStreamEvent.PolygonEnd ->
+                // Signed seam crossings distinguish polar caps; raw area alone confuses a north cap with its complement.
+                let southInside=seamWinding<0 || (seamWinding=0 && areaState.HalfPolygon<0.)
+                let northInside=southInside <> (abs seamWinding%2=1)
+                if southInside && not southBoundary then south <- -90.;allLongitudes <- true
+                if northInside && not northBoundary then north <- 90.;allLongitudes <- true
+                inPolygon <- false
+            | GeoStreamEvent.LineStart -> inLine <- true;first <- ValueNone;previous <- ValueNone
+            | GeoStreamEvent.Point source ->
+                let position=GeoPosition.normalize source
+                point position
+                if inLine then
+                    match previous with
+                    | ValueSome prior -> edge prior position
+                    | ValueNone -> first <- ValueSome position
+                    previous <- ValueSome position
+            | GeoStreamEvent.LineEnd ->
+                if inPolygon then
+                    match previous,first with
+                    | ValueSome prior,ValueSome start -> edge prior start
+                    | _ -> ()
+                inLine <- false;first <- ValueNone;previous <- ValueNone
+            | GeoStreamEvent.Sphere -> south <- -90.;north <- 90.;allLongitudes <- true
+            areaState <- areaEvent areaState event
+        let longitudeBounds () =
+            if allLongitudes || ranges.Count=0 then struct(-180.,180.)
+            else
+                let mutable source=ranges.ToArray()
+                let mutable target=Array.zeroCreate source.Length
+                let mutable work=0L
+                let tick () =
+                    token.ThrowIfCancellationRequested()
+                    if work>=config.MaxWork then raise BoundsBudget
+                    work <- work+1L
+                let mutable width=1
+                while width<source.Length do
+                    let mutable offset=0
+                    while offset<source.Length do
+                        let middle=min (offset+width) source.Length
+                        let finish=min (middle+width) source.Length
+                        let mutable left=offset
+                        let mutable right=middle
+                        for index in offset..finish-1 do
+                            tick()
+                            let takeLeft=
+                                if right=finish then true
+                                elif left=middle then false
+                                else
+                                    let struct(leftStart,leftEnd)=source[left]
+                                    let struct(rightStart,rightEnd)=source[right]
+                                    leftStart<rightStart || (leftStart=rightStart && leftEnd<=rightEnd)
+                            if takeLeft then target[index]<-source[left];left<-left+1
+                            else target[index]<-source[right];right<-right+1
+                        offset <- finish
+                    let swap=source
+                    source <- target
+                    target <- swap
+                    width <- if width>source.Length/2 then source.Length else width*2
+                let struct(start,initialEnd)=source[0]
+                let mutable finish=initialEnd
+                let mutable gap= -1.
+                let mutable west=start
+                let mutable east=initialEnd
+                for index in 1..source.Length-1 do
+                    tick()
+                    let struct(nextStart,nextEnd)=source[index]
+                    if nextStart>finish then
+                        if nextStart-finish>gap then
+                            gap <- nextStart-finish
+                            west <- nextStart
+                            east <- finish
+                        finish <- nextEnd
+                    else finish <- max finish nextEnd
+                if start+360.-finish>gap then west<-start;east<-finish
+                if finish-start=360. && gap<0. then struct(-180.,180.)
+                else struct(west,east)
+        try
+            GeoStream.foldWithCancellation config token folder () geometry
+            |> Result.map(fun () ->
+                if Double.IsPositiveInfinity south then None
+                else
+                    let struct(west,east)=longitudeBounds()
+                    Some {West=west;South=south;East=east;North=north})
+        with
+        | AmbiguousArc message -> Error [InvalidObservation message]
+        | BoundsBudget -> Error [BudgetExceeded "Geographic bounds exceed their longitude merging budget."]
+
+    /// <summary>Returns spherical bounds with default cancellation, retaining the supplied traversal limits.</summary>
+    let bounds config geometry = boundsWithCancellation config CancellationToken.None geometry

@@ -35,6 +35,90 @@ let private centroidNear geometry expected =
     | None -> failtest "Expected a defined centroid"
 
 let tests = testList "GeoMeasure" [
+    testCase "bounds agree with references except the independently corrected north cap" <| fun _ ->
+        use fixture=JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"fixtures","spherical.json")))
+        for item in fixture.RootElement.GetProperty("geometries").EnumerateArray() do
+            let name=item.GetProperty("name").GetString()
+            let actual=GeoMeasure.bounds GeoStreamConfig.defaultValue (referenceGeometry(item.GetProperty("geometry"))) |> ok
+            let expected=item.GetProperty("bounds")
+            if expected.[0].[0].ValueKind=JsonValueKind.Null then Expect.isNone actual name
+            else
+                let value=Option.get actual
+                near value.West (expected.[0].[0].GetDouble()) 1e-9
+                near value.East (expected.[1].[0].GetDouble()) 1e-9
+                near value.South (if name="north-cap" then 80. else expected.[0].[1].GetDouble()) 1e-9
+                near value.North (expected.[1].[1].GetDouble()) 1e-9
+    testCase "arc bounds enclose interpolated interiors across hemispheres" <| fun _ ->
+        let pairs=[for lon in [-170.;-80.;20.;170.] do for lat in [-80.;-30.;0.;50.;80.] -> p lon lat,p (lon+135.) (-lat/2.+10.)]
+        for a,b in pairs do
+            let extent=GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.LineString[a;b]) |> ok |> Option.get
+            for step in 0..100 do
+                let point=Geodesic.interpolate (float step/100.) a b |> ok
+                Expect.isGreaterThanOrEqual (point.Latitude+1e-10) extent.South "Lower arc bound"
+                Expect.isLessThanOrEqual (point.Latitude-1e-10) extent.North "Upper arc bound"
+                let longitude=point.Longitude
+                let inside=if extent.West<=extent.East then longitude>=extent.West-1e-10 && longitude<=extent.East+1e-10 else longitude>=extent.West-1e-10 || longitude<=extent.East+1e-10
+                Expect.isTrue inside "Circular longitude enclosure"
+    testCase "bounds preserve south caps and equivalent pole representations" <| fun _ ->
+        let cap=[p -120. -80.;p 0. -80.;p 120. -80.;p -120. -80.]
+        let extent=GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.Polygon[cap]) |> ok |> Option.get
+        Expect.equal (extent.West,extent.South,extent.East) (-180.,-90.,180.) "South pole interior"
+        near extent.North -80. 1e-12
+        let ring=[p 0. 0.;p 0. 90.;p 90. 90.;p 90. 0.;p 0. 0.]
+        for coordinates in [ring;List.rev ring] do
+            let value=GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.Polygon[coordinates]) |> ok |> Option.get
+            Expect.equal value.North 90. "Pole boundary survives"
+            Expect.isLessThanOrEqual value.West 0. "First meridian"
+            Expect.isGreaterThanOrEqual value.East 90. "Last meridian"
+
+    testCase "bounds longitude sorting avoids per-comparison allocation" <| fun _ ->
+        let geometry=GeoGeometry.MultiPoint[for i in 0..9999 -> p (float((i*7919)%36000)/100.-180.) 0.]
+        for _ in 1..3 do GeoMeasure.bounds GeoStreamConfig.defaultValue geometry |> ok |> ignore
+        let before=GC.GetAllocatedBytesForCurrentThread()
+        let result=GeoMeasure.bounds GeoStreamConfig.defaultValue geometry
+        let allocated=GC.GetAllocatedBytesForCurrentThread()-before
+        Expect.isSome (result |> ok) "Points have bounds"
+        Expect.isLessThan allocated 1000000L "Only the bounded range buffers should allocate"
+
+    testCase "bounds limit longitude merging work and observe cancellation" <| fun _ ->
+        let points=GeoGeometry.MultiPoint[for i in 0..99 -> p (float i) 0.]
+        Expect.isError (GeoMeasure.bounds {GeoStreamConfig.defaultValue with MaxWork=500L} points) "Sorting has its own finite work budget"
+        use cancelled=new CancellationTokenSource()
+        cancelled.Cancel()
+        Expect.throwsT<OperationCanceledException> (fun () -> GeoMeasure.boundsWithCancellation GeoStreamConfig.defaultValue cancelled.Token points |> ignore) "Cancellation propagates"
+
+    testCase "bounds include curved edge extrema and dateline intervals" <| fun _ ->
+        let bounds geometry=GeoMeasure.bounds GeoStreamConfig.defaultValue geometry |> ok |> Option.get
+        let wrapped=bounds(GeoGeometry.LineString[p 170. 30.;p -170. 30.])
+        near wrapped.West 170. 1e-12
+        near wrapped.East -170. 1e-12
+        near wrapped.South 30. 1e-12
+        near wrapped.North (atan(tan(Math.PI/6.)/cos(Math.PI/18.))*180./Math.PI) 1e-12
+        let southern=bounds(GeoGeometry.LineString[p -45. -45.;p 45. -45.])
+        near southern.South (-atan(sqrt 2.)*180./Math.PI) 1e-12
+        near southern.North -45. 1e-12
+    testCase "bounds distinguish polar caps from their complements and holes" <| fun _ ->
+        let bounds rings=GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.Polygon rings) |> ok |> Option.get
+        let cap latitude=[p -120. latitude;p 120. latitude;p 0. latitude;p -120. latitude]
+        let small=bounds [cap 80.]
+        near small.South 80. 1e-12
+        near small.North 90. 1e-12
+        Expect.equal (small.West,small.East) (-180.,180.) "North cap covers all longitudes"
+        let complement=bounds [List.rev(cap 80.)]
+        near complement.South -90. 1e-12
+        Expect.isLessThan complement.North 90. "Reversing the cap excludes the north pole"
+        let annulus=bounds [cap 70.;List.rev(cap 80.)]
+        near annulus.South 70. 1e-12
+        Expect.isLessThan annulus.North 90. "A polar hole removes the pole"
+    testCase "bounds handle empty sphere disconnected points and invalid routes" <| fun _ ->
+        Expect.equal (GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.Point None) |> ok) None "Empty has no bounds"
+        let sphere=GeoMeasure.bounds GeoStreamConfig.defaultValue GeoGeometry.Sphere |> ok |> Option.get
+        Expect.equal (sphere.West,sphere.South,sphere.East,sphere.North) (-180.,-90.,180.,90.) "Sphere"
+        let points=GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.MultiPoint[p -170. 0.;p 175. 10.;p 170. -10.]) |> ok |> Option.get
+        Expect.equal (points.West,points.East) (170.,-170.) "Smallest circular longitude interval"
+        Expect.isError (GeoMeasure.bounds GeoStreamConfig.defaultValue (GeoGeometry.LineString[p 0. 0.;p 180. 0.])) "Antipodal route requires an intermediate point"
+        Expect.isError (GeoMeasure.bounds {GeoStreamConfig.defaultValue with MaxPoints=1} (GeoGeometry.MultiPoint[p 0. 0.;p 1. 0.])) "Budget"
+
     testCase "centroids agree with the pinned point line and polygon references" <| fun _ ->
         use fixture=JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"fixtures","spherical.json")))
         for item in fixture.RootElement.GetProperty("geometries").EnumerateArray() do
