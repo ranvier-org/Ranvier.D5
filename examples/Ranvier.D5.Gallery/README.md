@@ -10,6 +10,13 @@ Run with `--hierarchy`; capture with `--capture-hierarchy artifacts/hierarchy.bm
 The example composes pure tidy-tree, cluster and partition outputs into retained
 SVG marks. [Source](HierarchyGallery.fs) · [Contracts](../../docs/hierarchy.md).
 
+## Treemaps and packing
+
+![Native tiling and circle packing](../../docs/images/tiling.png)
+
+Run with `--tiling`; capture with `--capture-tiling artifacts/tiling.bmp`.
+[Source](TilingGallery.fs) · [Contracts and limitations](../../docs/tiling.md).
+
 ## Linked selection
 
 ![Native linked scatter and line views](../../docs/images/linked.png)
