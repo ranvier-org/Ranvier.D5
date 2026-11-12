@@ -3,9 +3,12 @@ namespace Ranvier.D5.Charts
 open System
 open Ranvier.D5
 
+/// <summary>One categorical legend entry; Id is the semantic ID shared with the chart series, and an invisible entry is dimmed rather than removed.</summary>
 type LegendItem = {Id:string;Label:string;Color:Paint;Visible:bool}
+/// <summary>A horizontal gradient legend: Color is sampled at normalized positions in [0,1], and axis ticks over Domain are labelled with Format.</summary>
 type ContinuousLegendSpec = {Frame:ChartFrame;Domain:float*float;Color:float->Paint;Format:float->string}
 
+/// <summary>Categorical and continuous legend charts.</summary>
 [<RequireQualifiedAccess>]
 module Legend =
     /// <summary>Visibility changes opacity without removing category identity; applications filter source series using the same IDs.</summary>
@@ -23,6 +26,7 @@ module Legend =
             let marks,semantics,hits=List.unzip3 entries
             Recipe.output frame bounds (List.concat marks) semantics hits [])
 
+    /// <summary>Draws a gradient bar up to 20 px tall across the plot width with a tick axis over Domain; it has no hit targets, and an invalid frame is a typed error.</summary>
     let continuous spec =
         Recipe.run spec.Frame id [] (fun bounds ->
             let scale=Scale.linear spec.Domain (Bounds.x bounds,Bounds.x bounds+Bounds.width bounds)

@@ -1,12 +1,18 @@
 namespace Ranvier.D5
 
+/// <summary>Hexagonal binning settings: bounds that must contain every point, the hexagon circumradius in layout units, and point and bin
+/// budgets.</summary>
 type HexbinConfig = { Bounds:Bounds; Radius:float; MaxPoints:int; MaxBins:int }
+/// <summary>One occupied hexagon: its axial lattice key, center, circumradius, total member weight and member IDs in ordinal order.</summary>
 type HexBin = { Key:struct(int64*int64); Center:Point; Radius:float; Weight:float; Members:string list }
 
+/// <summary>Default hexbin configuration.</summary>
 [<RequireQualifiedAccess>]
 module HexbinConfig =
+    /// <summary>Creates a configuration with budgets of 1,000,000 points and 1,000,000 bins.</summary>
     let create bounds radius = {Bounds=bounds;Radius=radius;MaxPoints=1000000;MaxBins=1000000}
 
+/// <summary>Hexagonal binning of weighted points on a pointy-top lattice anchored at the bounds origin.</summary>
 [<RequireQualifiedAccess>]
 module Hexbin =
     exception private HexbinAbort of LayoutError
@@ -22,6 +28,9 @@ module Hexbin =
                 if points[i]=points[j] then invalidArg "radius" "Hexagon corners collapse at this coordinate precision."
         points
 
+    /// <summary>Assigns each point to its nearest hexagon center and returns occupied bins sorted by key. Returns Error for invalid settings, the
+    /// first invalid point (empty or duplicate ID, invalid weight, outside the bounds) or an exceeded budget; cancellation raises
+    /// OperationCanceledException.</summary>
     let aggregateWithCancellation (token:System.Threading.CancellationToken) (config:HexbinConfig) (points:WeightedPoint list) : Result<HexBin list,LayoutError list> =
         token.ThrowIfCancellationRequested()
         if not(System.Double.IsFinite config.Radius) || config.Radius<=0. || Bounds.width config.Bounds<=0. || Bounds.height config.Bounds<=0.
@@ -79,8 +88,12 @@ module Hexbin =
           with
           | HexbinAbort error -> Error [error]
           | :? System.ArgumentException -> Error [InvalidObservation "Hexbin geometry exceeds the finite coordinate range."]
+    /// <summary>Runs <c>aggregateWithCancellation</c> without cancellation.</summary>
     let aggregate config points = aggregateWithCancellation System.Threading.CancellationToken.None config points
+    /// <summary>Returns the six corners starting at the top and proceeding clockwise in y-down coordinates. Raises ArgumentException for a
+    /// nonpositive radius or corners that collapse at coordinate precision.</summary>
     let polygon (bin:HexBin) = vertices bin.Center bin.Radius |> Array.toList
+    /// <summary>Returns the hexagon as a closed path; raises as <c>polygon</c> does.</summary>
     let path (bin:HexBin) =
         let points=polygon bin
         Path.ofCommands(MoveTo points.Head::(points.Tail |> List.map LineTo) @ [Close])

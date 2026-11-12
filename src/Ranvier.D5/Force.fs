@@ -1,27 +1,40 @@
 namespace Ranvier.D5
 
+/// <summary>An opaque seed for the deterministic per-ID initial positions and jitter of a force simulation.</summary>
 type Seed = private Seed of uint32
+/// <summary>Constructors for <c>Seed</c>.</summary>
 [<RequireQualifiedAccess>]
 module Seed =
+    /// <summary>Wraps a 32-bit seed value.</summary>
     let create value = Seed value
 
+/// <summary>Force simulation settings: cooling and velocity decay in [0,1], centering, optional axis, radial, many-body and collision forces,
+/// initial placement radius and a positive step budget. <c>Force.initialize</c> reports invalid values as <c>InvalidObservation</c> errors.</summary>
 type ForceConfig = {
     AlphaDecay:float; AlphaMin:float; VelocityDecay:float; InitialAlpha:float
     Center:Point; CenterStrength:float; X: (float*float) option; Y: (float*float) option
     Radial:(Point*float*float) option; InitialRadius:float; MaxSteps:int
     ManyBody:ManyBodyConfig option; Collision:CollisionConfig option
 }
+/// <summary>Constructors for <c>ForceConfig</c>.</summary>
 [<RequireQualifiedAccess>]
 module ForceConfig =
+    /// <summary>Creates d3-like defaults around a center point: alpha decay 0.0228, minimum alpha 0.001, velocity decay 0.4, center strength 0.05,
+    /// initial radius 100, 1000 steps and no optional forces.</summary>
     let create center = {AlphaDecay=0.0228;AlphaMin=0.001;VelocityDecay=0.4;InitialAlpha=1.;Center=center;CenterStrength=0.05;X=None;Y=None;Radial=None;InitialRadius=100.;MaxSteps=1000;ManyBody=None;Collision=None}
 
+/// <summary>A simulated node's position and per-tick velocity in scene units, with its pin, radius and mass.</summary>
 type ForceNodeState = { Id:string; Position:Point; Velocity:Point; Pinned:Point option; Radius:float; Mass:float }
+/// <summary>An immutable view of a simulation: nodes in ordinal ID order, current alpha, steps taken in the current budget,
+/// and completion flags.</summary>
 type ForceSnapshot = { Nodes:ForceNodeState list; Alpha:float; Iteration:int; Converged:bool; Finished:bool }
+/// <summary>Opaque, immutable force-simulation state; every operation returns a new value.</summary>
 type ForceState = private {
     Config:ForceConfig; Seed:Seed; Graph:GraphData; Values:ForceNodeState[]
     Edges:struct(int*int*float*float)[]; Alpha:float; Iteration:int
 }
 
+/// <summary>A deterministic, immutable force-directed simulation over <c>GraphData</c>.</summary>
 [<RequireQualifiedAccess>]
 module Force =
     let private zero=Point.create 0. 0.
@@ -77,6 +90,7 @@ module Force =
                 Ok {Config=config;Seed=seed;Graph=graph;Values=values;Edges=edges;Alpha=(if values.Length=0 then 0. else config.InitialAlpha);Iteration=0}
             with :? System.ArgumentException as error -> Error [InvalidObservation error.Message]
 
+    /// <summary>Returns true when the graph is empty, alpha has cooled below <c>AlphaMin</c>, or the step budget is exhausted.</summary>
     let isFinished state = state.Values.Length=0 || state.Alpha<state.Config.AlphaMin || state.Iteration>=state.Config.MaxSteps
     /// <summary>Copies the node sequence into an immutable public snapshot. Finished includes budget exhaustion; Converged means cooling reached the threshold.</summary>
     let snapshot state =
@@ -168,6 +182,7 @@ module Force =
         token.ThrowIfCancellationRequested()
         {state with Values=nodes;Alpha=alpha;Iteration=iteration}
 
+    /// <summary>Advances up to <c>count</c> ticks without cancellation, stopping early once finished. Throws <c>ArgumentException</c> for a negative count.</summary>
     let step count state = stepWithCancellation System.Threading.CancellationToken.None count state
 
     /// <summary>Starts a fresh iteration budget and raises alpha to at least the requested value.</summary>

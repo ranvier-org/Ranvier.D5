@@ -26,10 +26,14 @@ module internal HierarchyIndex =
     let protect action =
         try Ok(action()) with :? ArgumentException as error -> Error [InvalidObservation error.Message]
 
+/// <summary>Tree and cluster layout settings: target bounds in scene coordinates and a separation function between adjacent nodes,
+/// which must return finite positive values.</summary>
 type TreeConfig<'Id> = {Bounds:Bounds;Separation:HierarchyItem<'Id>->HierarchyItem<'Id>->float}
 
+/// <summary>Constructors for <c>TreeConfig</c>.</summary>
 [<RequireQualifiedAccess>]
 module TreeConfig =
+    /// <summary>Creates a configuration with d3's default separation: 1 between siblings and 2 between nodes with different parents.</summary>
     let create bounds = {Bounds=bounds;Separation=fun a b -> if a.Parent=b.Parent then 1. else 2.}
 
 module internal TreeCoordinates =

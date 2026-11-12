@@ -4,10 +4,13 @@ open System
 open Ranvier
 open Ranvier.D5
 
+/// <summary>Handle to native listeners attached by InputAdapter.attach. Dispose it on the graph thread, or dispose the owner current at attach time, to cancel the gesture, remove the listeners and release pointer captures.</summary>
 type OwnedInput internal (send:InputEvent->unit,dispose:unit->unit) =
+    /// <summary>Feeds an event through the gesture state machine under the attaching owner and applies its commands; call on the graph thread. Ignored after disposal.</summary>
     member _.Send event=send event
     interface IDisposable with member _.Dispose()=dispose()
 
+/// <summary>Translates native SVG pointer, wheel and keyboard events into gesture events for a graph owner.</summary>
 [<RequireQualifiedAccess>]
 module InputAdapter =
     /// <summary>Converts CSS client coordinates using the actual SVG screen matrix, including viewBox, ancestors and device scaling.</summary>

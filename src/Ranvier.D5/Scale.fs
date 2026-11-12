@@ -12,9 +12,10 @@ type Continuous = private {
     Clamped: bool
 }
 
-/// <summary>Immutable category positions and positive band width.</summary>
+/// <summary>Immutable, strictly monotone domain and range knots of equal count, created by Scale.piecewise; mapping interpolates linearly between knots and is reversible.</summary>
 type Piecewise = private { Knots:float array; Outputs:float array }
 
+/// <summary>Immutable category positions and a shared band width, created by Scale.band or Scale.point.</summary>
 type Band<'Key when 'Key: comparison> = private { Positions: Map<'Key,float>; Width: float }
 
 /// <summary>UTC calendar units used to align ticks.</summary>
@@ -83,6 +84,7 @@ module Scale =
         let signedPow power x = if x < 0. then -Math.Pow(-x,power) else Math.Pow(x,power)
         create (signedPow exponent) (signedPow (1./exponent)) (fun _ -> true) domain range
 
+    /// <summary>Creates a sign-preserving square-root scale; equivalent to <c>power 0.5</c>.</summary>
     let sqrt domain range = power 0.5 domain range
 
     /// <summary>Creates a reversible piecewise scale with strictly monotone domains and ranges.</summary>
@@ -113,7 +115,11 @@ module Scale =
         Check.finite "value" result
         result
 
+    /// <summary>Maps a value by linear interpolation between the enclosing domain knots, extrapolating from the end segments. Raises
+    /// ArgumentException for a non-finite value or result.</summary>
     let piecewiseMap scale value = piecewiseValue scale.Knots scale.Outputs value
+    /// <summary>Maps a range value back to the domain by linear interpolation between the enclosing range knots, extrapolating from the end segments.
+    /// Raises ArgumentException for a non-finite value or result.</summary>
     let piecewiseInvert scale value = piecewiseValue scale.Outputs scale.Knots value
 
     /// <summary>Creates a symmetric logarithmic scale with a positive linear-region constant.</summary>

@@ -1,17 +1,26 @@
 namespace Ranvier.D5
 
+/// <summary>A force-graph node: optional initial position, optional fixed pin position, nonnegative collision radius
+/// and positive mass, in scene units.</summary>
 type GraphNode = { Id:string; Position:Point option; Pinned:Point option; Radius:float; Mass:float }
+/// <summary>A force-graph link between node IDs with a nonnegative target distance in scene units and nonnegative spring strength.</summary>
 type GraphLink = { Id:string; Source:string; Target:string; Distance:float; Strength:float }
 
+/// <summary>Constructors for <c>GraphNode</c>.</summary>
 [<RequireQualifiedAccess>]
 module GraphNode =
+    /// <summary>Creates an unpinned node without an initial position, with radius 4 and mass 1.</summary>
     let create id = {Id=id;Position=None;Pinned=None;Radius=4.;Mass=1.}
+/// <summary>Constructors for <c>GraphLink</c>.</summary>
 [<RequireQualifiedAccess>]
 module GraphLink =
+    /// <summary>Creates a link with target distance 30 and strength 0.1.</summary>
     let create id source target = {Id=id;Source=source;Target=target;Distance=30.;Strength=0.1}
 
+/// <summary>A validated, immutable graph whose nodes and links are each sorted by ordinal ID.</summary>
 type GraphData = private { NodeData:GraphNode[]; LinkData:GraphLink[] }
 
+/// <summary>Validation and access for <c>GraphData</c>; invalid input yields typed <c>LayoutError</c> results.</summary>
 [<RequireQualifiedAccess>]
 module GraphData =
     /// <summary>Validates node/link IDs, endpoints and physical parameters, then captures deterministic ordinal ID order. Self-links and parallel links are retained.</summary>
@@ -41,5 +50,7 @@ module GraphData =
         if errors.Count>0 then Error(List.ofSeq errors) else
         Ok {NodeData=nodes |> List.sortWith(fun a b -> System.StringComparer.Ordinal.Compare(a.Id,b.Id)) |> List.toArray
             LinkData=links |> List.sortWith(fun a b -> System.StringComparer.Ordinal.Compare(a.Id,b.Id)) |> List.toArray}
+    /// <summary>Returns the nodes in ordinal ID order.</summary>
     let nodes graph = Array.toList graph.NodeData
+    /// <summary>Returns the links in ordinal ID order.</summary>
     let links graph = Array.toList graph.LinkData

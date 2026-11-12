@@ -1,22 +1,36 @@
 namespace Ranvier.D5
 
+/// <summary>How matrix cells become chord arcs. Undirected sizes each group by its row sum; Directed adds incoming flow so each flow appears at both
+/// ends; Transposed is Undirected over the transposed matrix.</summary>
 [<RequireQualifiedAccess>]
 type ChordMode = Undirected | Directed | Transposed
+/// <summary>Sort order for groups, subgroups or flows by value; ties keep input order.</summary>
 [<RequireQualifiedAccess>]
 type ChordOrder = Input | Ascending | Descending
+/// <summary>Chord layout settings. PadAngle is the gap between groups in radians, at most 2π divided by the group count; MaxCells bounds the matrix
+/// cell count.</summary>
 type ChordConfig =
     { Mode:ChordMode; PadAngle:float; GroupOrder:ChordOrder
       SubgroupOrder:ChordOrder; FlowOrder:ChordOrder; MaxCells:int }
+/// <summary>Default chord configuration.</summary>
 [<RequireQualifiedAccess>]
 module ChordConfig =
+    /// <summary>Undirected mode, no padding, input order throughout and a budget of 1,000,000 cells.</summary>
     let defaultValue={Mode=ChordMode.Undirected;PadAngle=0.;GroupOrder=ChordOrder.Input
                       SubgroupOrder=ChordOrder.Input;FlowOrder=ChordOrder.Input;MaxCells=1000000}
+/// <summary>An angular span of a group or subgroup in radians, measured clockwise from twelve o'clock, with its group index and value.</summary>
 type ChordArc = { Index:int; StartAngle:float; EndAngle:float; Value:float }
+/// <summary>A ribbon between two subgroup arcs. Id is the (source, target) group pair; in undirected modes it lists the smaller index first and
+/// Source is the side with the larger value.</summary>
 type ChordFlow = { Id:struct(int*int); Source:ChordArc; Target:ChordArc }
+/// <summary>Group arcs in matrix index order and flows in the configured flow order.</summary>
 type ChordLayout = { Groups:ChordArc list; Flows:ChordFlow list }
 
+/// <summary>Chord diagram layout from a square, nonnegative flow matrix.</summary>
 [<RequireQualifiedAccess>]
 module Chord =
+    /// <summary>Lays out groups and flows around one full turn; an all-zero matrix yields evenly spaced empty groups. Returns Error for a non-square,
+    /// negative or non-finite matrix, invalid padding or an exceeded cell budget; cancellation raises OperationCanceledException.</summary>
     let layoutWithCancellation (token:System.Threading.CancellationToken) (config:ChordConfig) (matrix:float list list) : Result<ChordLayout,LayoutError list> =
         token.ThrowIfCancellationRequested()
         let n=matrix.Length
@@ -113,4 +127,5 @@ module Chord =
                         else 0,total)
                 token.ThrowIfCancellationRequested()
                 Ok {Groups=Array.toList groups;Flows=flows}
+    /// <summary>Runs <c>layoutWithCancellation</c> without cancellation.</summary>
     let layout config matrix=layoutWithCancellation System.Threading.CancellationToken.None config matrix

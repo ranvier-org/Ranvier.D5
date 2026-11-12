@@ -1,12 +1,18 @@
 namespace Ranvier.D5
 open System
 
+/// <summary>A hierarchy node placed as a circle with center and radius in scene coordinates.</summary>
 type HierarchyCircle<'Id> = { Id:'Id; Parent:'Id option; Depth:int; Center:Point; Radius:float }
+/// <summary>Circle-packing settings; padding is the approximate gap between sibling circles in scene units
+/// and must be finite and nonnegative.</summary>
 type PackConfig = { Bounds:Bounds; Padding:float; SumPolicy:HierarchySumPolicy }
+/// <summary>Constructors for <c>PackConfig</c>.</summary>
 [<RequireQualifiedAccess>]
 module PackConfig =
+    /// <summary>Creates a configuration with zero padding and <c>LeavesOnly</c> sums.</summary>
     let create bounds = {Bounds=bounds;Padding=0.;SumPolicy=HierarchySumPolicy.LeavesOnly}
 
+/// <summary>Circle-packing layout of a hierarchy.</summary>
 [<RequireQualifiedAccess>]
 module Pack =
     // Front-chain placement adapted from d3-hierarchy 3.1.2 (ISC).
@@ -79,6 +85,8 @@ module Pack =
                 radius<-max radius (sqrt(x[i]*x[i]+y[i]*y[i])+r[i])
             radius
 
+    /// <summary>Returns one circle per node in preorder, with leaf area proportional to value and the root centered in the bounds with diameter
+    /// equal to their smaller side. Returns <c>Error [InvalidObservation]</c> for invalid padding or duplicate identities.</summary>
     let layout config root =
         HierarchyIndex.protect(fun () ->
             Check.finite "padding" config.Padding

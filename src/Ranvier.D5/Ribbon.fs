@@ -1,14 +1,22 @@
 namespace Ranvier.D5
 
+/// <summary>One chord ribbon: source and target arcs and radii, PadAngle in radians trimmed from each arc, and an optional ArrowHead radial length
+/// that replaces the target arc with an arrow tip.</summary>
 type RibbonSpec =
     { Source:ChordArc; Target:ChordArc; SourceRadius:float; TargetRadius:float
       PadAngle:float; ArrowHead:float option }
+/// <summary>RibbonSpec construction.</summary>
 [<RequireQualifiedAccess>]
 module RibbonSpec =
+    /// <summary>Creates an unpadded ribbon without an arrow head for a chord flow, using one radius at both ends.</summary>
     let create radius (flow:ChordFlow) =
         {Source=flow.Source;Target=flow.Target;SourceRadius=radius;TargetRadius=radius;PadAngle=0.;ArrowHead=None}
+/// <summary>SVG path generation for chord ribbons.</summary>
 [<RequireQualifiedAccess>]
 module Ribbon =
+    /// <summary>Builds a closed ribbon path around the origin, with zero angle at twelve o'clock and angles increasing clockwise; zero radii give an
+    /// empty path. Raises ArgumentException for negative or non-finite sizes, an arrow head longer than the target radius, or an arc that descends or
+    /// exceeds one turn.</summary>
     let path (spec:RibbonSpec) =
         let tau=2.*System.Math.PI
         let nonnegative name value=

@@ -3,12 +3,18 @@ namespace Ranvier.D5.Charts
 open System
 open Ranvier.D5
 
+/// <summary>Pie or donut specification: values must be finite and nonnegative, InnerRatio is in [0,1), and MeasureLabel sizes slice labels in pixels so overlapping ones are skipped.</summary>
 type PieSpec<'T> = {Frame:ChartFrame;Key:'T->string;Value:Encoding<'T,float option>;Label:'T->string;Color:string->Paint;InnerRatio:float;MeasureLabel:string->TextSize}
+/// <summary>How a radial bar's value maps to its outer radius: proportional to Radius length or to annular Area.</summary>
 [<RequireQualifiedAccess>]
 type RadiusEncoding = Radius | Area
+/// <summary>Radial bar specification with one equal-angle sector per datum scaled to the largest value; InnerRatio and Padding are fractions in [0,1).</summary>
 type RadialBarSpec<'T> = {Frame:ChartFrame;Key:'T->string;Value:Encoding<'T,float option>;Color:string->Paint;Encoding:RadiusEncoding;InnerRatio:float;Padding:float}
+/// <summary>Radar specification with at least three dimensions and exactly one domain policy per dimension.</summary>
 type RadarSpec<'T> = {Frame:ChartFrame;Key:'T->string;Dimensions:Encoding<'T,float option> list;Domains:DomainPolicy list;Color:string->Paint}
+/// <summary>Parallel coordinates specification with at least two dimensions and exactly one domain policy per dimension.</summary>
 type ParallelSpec<'T> = {Frame:ChartFrame;Key:'T->string;Dimensions:Encoding<'T,float option> list;Domains:DomainPolicy list;Color:string->Paint}
+/// <summary>Calendar heatmap specification with one square per date in weekday rows and week columns; dates must be unique.</summary>
 type CalendarSpec<'T> = {Frame:ChartFrame;Key:'T->string;Date:Encoding<'T,DateOnly>;Value:Encoding<'T,float option>;Color:float->Paint;WeekStartsOn:DayOfWeek}
 
 module internal Radial =

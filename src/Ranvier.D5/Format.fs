@@ -3,21 +3,30 @@ namespace Ranvier.D5
 open System
 open System.Globalization
 
+/// <summary>Culture- and zone-explicit formatting; nothing reads the machine culture or timezone.</summary>
 [<RequireQualifiedAccess>]
 module Format =
     let private digits precision =
         if precision<0 || precision>15 then invalidArg "precision" "Precision must be in [0,15]."
         "F"+string precision
+    /// <summary>Formats a finite value with fixed-point precision of 0 to 15 decimal digits in the culture. Raises ArgumentNullException for a null
+    /// culture and ArgumentException for a non-finite value or out-of-range precision.</summary>
     let number (culture:CultureInfo) precision (value:float) =
         if isNull culture then nullArg "culture"
         Check.finite "value" value
         value.ToString(digits precision,culture)
+    /// <summary>Formats the value multiplied by 100 as <c>number</c> does, followed by the culture's percent symbol; fails as <c>number</c>
+    /// does.</summary>
     let percent culture precision value = number culture precision (value*100.)+culture.NumberFormat.PercentSymbol
+    /// <summary>Formats a finite value scaled by the largest SI prefix from y (10^-24) to Y (10^24) not exceeding its magnitude, as <c>number</c>
+    /// does; zero has no prefix.</summary>
     let si culture precision value =
         Check.finite "value" value
         let prefixes=[|"y";"z";"a";"f";"p";"n";"µ";"m";"";"k";"M";"G";"T";"P";"E";"Z";"Y"|]
         let exponent=if value=0. then 0 else int(Math.Clamp(floor(Math.Log10(abs value)/3.),-8.,8.))
         number culture precision (value/Math.Pow(1000.,float exponent))+prefixes[exponent+8]
+    /// <summary>Converts the instant to the zone and formats it with a .NET date and time pattern in the culture. Raises ArgumentNullException for a
+    /// null culture or zone and FormatException for an invalid pattern.</summary>
     let time (culture:CultureInfo) (zone:TimeZoneInfo) pattern (instant:DateTimeOffset) =
         if isNull culture then nullArg "culture"
         if isNull zone then nullArg "zone"

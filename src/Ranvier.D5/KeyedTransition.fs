@@ -4,8 +4,11 @@ open System
 open Ranvier
 
 type private MarkSegment = {Layer:int64;From:Mark;Target:Mark;Started:float;Duration:float;Ease:float->float;Exiting:bool}
+/// <summary>Opaque, immutable per-key mark transition state, including crossfade layers for exiting and incompatible marks.</summary>
 type KeyedTransitionState = private {Order:string list;Segments:Map<string,MarkSegment list>;Generation:int64}
 
+/// <summary>Key-matched mark transitions that interpolate compatible marks and crossfade the rest;
+/// invalid input throws <c>ArgumentException</c>.</summary>
 [<RequireQualifiedAccess>]
 module KeyedTransition =
     let private lerp a b t =
@@ -53,6 +56,7 @@ module KeyedTransition =
     let private validate now marks =
         Check.finite "now" now
         Data.join Mark.key [] marks |> ignore
+    /// <summary>Creates a settled state holding <c>marks</c> in order with no animation pending. Throws <c>ArgumentException</c> for a non-finite time or duplicate mark keys.</summary>
     let start now marks =
         validate now marks
         {Order=List.map Mark.key marks;Generation=0L

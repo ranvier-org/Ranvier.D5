@@ -16,6 +16,7 @@ type GraticuleConfig =
 
 /// <summary>Conventional ten-degree grid with ninety-degree major meridians.</summary>
 module GraticuleConfig =
+    /// <summary>Ten-degree minor lines to ±80 degrees, ninety-degree major meridians to the poles, 2.5-degree sampling, one million points and two million work units.</summary>
     let defaultValue =
         { MajorExtent={West = -180.; South = -89.999999; East=180.; North=89.999999}
           MinorExtent={West = -180.; South = -80.000001; East=180.; North=80.000001}

@@ -2,15 +2,22 @@ namespace Ranvier.D5
 
 open System
 
+/// <summary>Spline end handling: <c>Clamped</c> passes through both endpoints, <c>Open</c> omits the end segments,
+/// <c>Closed</c> wraps into a loop.</summary>
 [<RequireQualifiedAccess>]
 type CurveBoundary = Clamped | Open | Closed
 
+/// <summary>A curve interpolation for <c>Curves.line</c> and <c>Curves.area</c>, following d3-shape's curve family.</summary>
 [<RequireQualifiedAccess>]
 type CurveSpec =
     | Linear | StepBefore | StepAfter | StepMiddle | MonotoneX | MonotoneY | Natural | BumpX | BumpY
+    /// <summary>A uniform cubic B-spline with the given boundary handling.</summary>
     | Basis of CurveBoundary
+    /// <summary>A cardinal spline; tension must be in [0,1], where 1 yields straight segments.</summary>
     | Cardinal of tension:float * CurveBoundary
+    /// <summary>A Catmull–Rom spline; alpha must be in [0,1], where 0.5 is centripetal.</summary>
     | CatmullRom of alpha:float * CurveBoundary
+    /// <summary>A clamped B-spline straightened toward the chord between the endpoints; beta must be in [0,1], where 0 is a straight line.</summary>
     | Bundle of beta:float
 
 /// <summary>Pure spline kernels. Formulas adapted from d3-shape 3.2.0; see tools/reference-fixtures/licenses/d3-shape.txt.</summary>
@@ -188,9 +195,13 @@ module Curves =
         | CurveSpec.Cardinal(value,_) | CurveSpec.CatmullRom(value,_) | CurveSpec.Bundle value ->
             if not(Double.IsFinite value) || value<0. || value>1. then invalidArg "curve" "Curve parameter must be in [0,1]."
         | _ -> ()
+    /// <summary>Builds a path through the points, where each <c>None</c> breaks the line into separate subpaths.
+    /// Throws <c>ArgumentException</c> when a curve parameter is outside [0,1].</summary>
     let line curve points =
         validate curve
         runs points |> List.collect (fun run -> segment curve (List.toArray run)) |> Path.ofCommands
+    /// <summary>Builds a closed area per run of (lower, upper) point pairs: the curve along the upper points, then back along the lower points.
+    /// Each <c>None</c> starts a new run; throws <c>ArgumentException</c> for an invalid curve parameter.</summary>
     let area curve points =
         validate curve
         let reverse=match curve with CurveSpec.StepBefore -> CurveSpec.StepAfter | CurveSpec.StepAfter -> CurveSpec.StepBefore | other -> other
@@ -203,14 +214,21 @@ module Curves =
             | _,MoveTo first::rest -> top @ (LineTo first::rest) @ [Close]
             | _ -> invalidOp "Expected initial move.") |> Path.ofCommands
 
+    /// <summary>Converts a polar coordinate to a point about the origin, with angle in radians clockwise from 12 o'clock.
+    /// Throws <c>ArgumentException</c> for a non-finite angle or a negative or non-finite radius.</summary>
     let radialPoint angle radius =
         Check.finite "angle" angle
         Check.finite "radius" radius
         if radius<0. then invalidArg "radius" "Negative radius."
         p (radius*sin angle) (-radius*cos angle)
+    /// <summary>Like <c>line</c> over (angle, radius) pairs converted with <c>radialPoint</c>; <c>None</c> breaks the line.</summary>
     let radialLine curve points = points |> List.map (Option.map (fun (angle,radius) -> radialPoint angle radius)) |> line curve
+    /// <summary>Like <c>area</c> over (angle, inner radius, outer radius) triples converted with <c>radialPoint</c>;
+    /// <c>None</c> breaks the area.</summary>
     let radialArea curve points = points |> List.map (Option.map (fun (angle,inner,outer) -> radialPoint angle inner,radialPoint angle outer)) |> area curve
+    /// <summary>Builds a cubic link from <c>a</c> to <c>b</c> whose tangents are vertical at both ends.</summary>
     let linkVertical a b = line CurveSpec.BumpY [Some a;Some b]
+    /// <summary>Builds a cubic link between two (angle, radius) polar points with control points at the mean radius, about the origin.</summary>
     let linkRadial (angleA,radiusA) (angleB,radiusB) =
         let middle=Check.lerp radiusA radiusB 0.5
         Path.ofCommands [MoveTo(radialPoint angleA radiusA);CubicTo(radialPoint angleA middle,radialPoint angleB middle,radialPoint angleB radiusB)]

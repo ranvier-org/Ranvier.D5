@@ -3,10 +3,13 @@ namespace Ranvier.D5.Charts
 open System
 open Ranvier.D5
 
+/// <summary>Whether facet cells share one domain computed over all groups or compute one domain per group.</summary>
 [<RequireQualifiedAccess>]
 type FacetDomains = Shared | Independent
+/// <summary>Facet grid specification: 1 to 1000 Columns, a nonnegative Gap in pixels, a domain function, and a builder called with each cell's frame, domain and group data.</summary>
 type FacetSpec<'T,'Domain> = {Frame:ChartFrame;Columns:int;Gap:float;Domains:FacetDomains;Domain:'T list->'Domain;Build:ChartFrame->'Domain->'T list->Result<ChartOutput,LayoutError list>}
 
+/// <summary>Small-multiple composition of chart builders.</summary>
 [<RequireQualifiedAccess>]
 module Facet =
     /// <summary>Builds chart values in a grid. Shared domains are computed once over all input; each cell namespaces definitions and semantic paths.</summary>

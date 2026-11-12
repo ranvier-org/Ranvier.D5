@@ -3,16 +3,26 @@ namespace Ranvier.D5.Charts
 open System
 open Ranvier.D5
 
+/// <summary>Histogram specification: present values are binned by Bins and each bin's semantic IDs are its members' keys.</summary>
 type HistogramSpec<'T> = {Frame:ChartFrame;Key:'T->string;Value:Encoding<'T,float option>;Bins:BinRule;Color:Paint}
+/// <summary>Box plot whisker reach: Extent spans the minimum and maximum; Tukey spans values within the multiplier times the interquartile range of the quartiles.</summary>
 [<RequireQualifiedAccess>]
 type WhiskerPolicy = Extent | Tukey of multiplier:float
+/// <summary>Box plot specification with one box per datum whose sample list is nonempty; values beyond the whiskers draw as outliers.</summary>
 type BoxPlotSpec<'T> = {Frame:ChartFrame;Key:'T->string;Samples:Encoding<'T,float list>;Whiskers:WhiskerPolicy;Color:Paint}
+/// <summary>An explicit interval; error bars require finite values with Lower &lt;= Estimate &lt;= Upper.</summary>
 type IntervalObservation = {Lower:float;Upper:float;Estimate:float}
+/// <summary>Error bar specification placing one interval per datum at a numeric X.</summary>
 type ErrorBarSpec<'T> = {Frame:ChartFrame;Key:'T->string;X:Encoding<'T,float>;Interval:Encoding<'T,IntervalObservation>;Color:Paint}
+/// <summary>Waterfall specification: values accumulate in input order, and a total datum draws from zero to its own value and resets the running total.</summary>
 type WaterfallSpec<'T> = {Frame:ChartFrame;Key:'T->string;Value:Encoding<'T,float>;IsTotal:'T->bool;PositiveColor:Paint;NegativeColor:Paint}
+/// <summary>Bullet chart specification with one horizontal row per datum; Ranges are shared qualitative thresholds that must be finite, nonnegative and strictly increasing.</summary>
 type BulletSpec<'T> = {Frame:ChartFrame;Key:'T->string;Measure:Encoding<'T,float>;Target:Encoding<'T,float>;Ranges:float list;Color:Paint}
+/// <summary>Lollipop specification with a stem from zero and a head per datum with a value; Category labels the mark.</summary>
 type LollipopSpec<'T> = {Frame:ChartFrame;Key:'T->string;Category:Encoding<'T,string>;Value:Encoding<'T,float option>;Color:Paint}
+/// <summary>Open, high, low and close prices; charts require finite values with Low and High enclosing Open and Close.</summary>
 type Ohlc = {Open:float;High:float;Low:float;Close:float}
+/// <summary>OHLC specification drawing ticks or, when Candlestick is true, candle bodies; UpColor applies when Close &gt;= Open.</summary>
 type OhlcSpec<'T> = {Frame:ChartFrame;Key:'T->string;X:Encoding<'T,float>;Values:Encoding<'T,Ohlc>;Candlestick:bool;UpColor:Paint;DownColor:Paint}
 
 module internal Distribution =

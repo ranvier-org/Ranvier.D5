@@ -2,9 +2,12 @@ namespace Ranvier.D5
 
 open System
 
+/// <summary>How histogram chooses its bin count. Count must be in [1,10000]; Scott and FreedmanDiaconis fall back to Sturges when their spread
+/// estimate is zero.</summary>
 [<RequireQualifiedAccess>]
 type BinRule = Sturges | Scott | FreedmanDiaconis | Count of int
 
+/// <summary>Sample statistics, cumulative sums, grouping, bisection and histograms. Numeric summaries ignore NaN and infinite observations.</summary>
 [<RequireQualifiedAccess>]
 module Statistics =
     let private finite values = values |> Seq.filter Double.IsFinite |> Seq.toArray
@@ -28,6 +31,8 @@ module Statistics =
                 Check.finite "values" result
                 Some result
 
+    /// <summary>Returns the compensated running total after each observation; a non-finite observation adds nothing but still yields an entry.
+    /// Overflow raises ArgumentException.</summary>
     let cumulativeSum values =
         let mutable total=0.
         let mutable correction=0.
@@ -41,6 +46,7 @@ module Statistics =
             Check.finite "values" result
             yield result]
 
+    /// <summary>Groups values by key in first-occurrence order and reduces each group, preserving value order within the group.</summary>
     let rollup key reduce values = values |> Seq.groupBy key |> Seq.map (fun (key,items) -> key,reduce items) |> Seq.toList
 
     /// <summary>Insertion before equal values in an ascending array.</summary>

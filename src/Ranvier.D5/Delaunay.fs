@@ -6,6 +6,7 @@ type Triangulation = private {
     Neighbors:int[][]; Search:Quadtree<int>
 }
 
+/// <summary>Builds and queries <c>Triangulation</c> meshes; non-finite points throw <c>ArgumentException</c>.</summary>
 [<RequireQualifiedAccess>]
 module Delaunay =
     /// <summary>Builds a deterministic Cartesian CCW triangulation without jitter. Exact duplicates share a site; collinear sites form a chain.</summary>

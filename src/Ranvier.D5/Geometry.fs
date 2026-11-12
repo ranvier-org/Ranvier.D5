@@ -8,6 +8,7 @@ open System.Text
 [<Struct>]
 type Point = { X: float; Y: float }
 
+/// <summary>Point construction and distance.</summary>
 [<RequireQualifiedAccess>]
 module Point =
     /// <summary>Creates a point with finite coordinates.</summary>
@@ -21,6 +22,7 @@ module Point =
 /// <summary>A finite axis-aligned rectangle with nonnegative dimensions.</summary>
 type Bounds = private { Left:float; Top:float; Width:float; Height:float }
 
+/// <summary>Construction, accessors and tests for Bounds.</summary>
 [<RequireQualifiedAccess>]
 module Bounds =
     /// <summary>Creates a rectangle; coordinates and its far edges must be finite.</summary>
@@ -30,9 +32,13 @@ module Bounds =
         Check.finite "bounds" (x+width); Check.finite "bounds" (y+height)
         if width<0. || height<0. then invalidArg "bounds" "Dimensions must be nonnegative."
         { Left=x; Top=y; Width=width; Height=height }
+    /// <summary>Returns the left edge.</summary>
     let x bounds = bounds.Left
+    /// <summary>Returns the top edge.</summary>
     let y bounds = bounds.Top
+    /// <summary>Returns the nonnegative width.</summary>
     let width bounds = bounds.Width
+    /// <summary>Returns the nonnegative height.</summary>
     let height bounds = bounds.Height
     /// <summary>Tests inclusive edges; non-finite points are outside.</summary>
     let contains point bounds =
@@ -48,6 +54,7 @@ type Transform = private { A:float; B:float; C:float; D:float; E:float; F:float 
 module internal Number =
     let format (value:float) = if value=0. then "0" else value.ToString("G17",CultureInfo.InvariantCulture)
 
+/// <summary>Affine transform construction, composition, application, inversion and SVG serialization.</summary>
 [<RequireQualifiedAccess>]
 module Transform =
     /// <summary>Creates a finite affine matrix.</summary>
@@ -55,8 +62,11 @@ module Transform =
         [a;b;c;d;e;f] |> List.iter (Check.finite "matrix")
         { A=a; B=b; C=c; D=d; E=e; F=f }
     let internal coefficients matrix = matrix.A,matrix.B,matrix.C,matrix.D,matrix.E,matrix.F
+    /// <summary>The identity transform.</summary>
     let identity = create 1. 0. 0. 1. 0. 0.
+    /// <summary>Creates a translation; raises ArgumentException for non-finite offsets.</summary>
     let translate x y = create 1. 0. 0. 1. x y
+    /// <summary>Creates an axis-aligned scale; raises ArgumentException for non-finite factors.</summary>
     let scale x y = create x 0. 0. y 0. 0.
     /// <summary>Rotates by an angle in radians.</summary>
     let rotate angle =
@@ -99,18 +109,27 @@ module Transform =
 
 /// <summary>Immutable SVG path instructions; arc rotation is in degrees.</summary>
 type PathCommand =
+    /// <summary>Starts a new subpath at the point.</summary>
     | MoveTo of Point
+    /// <summary>Draws a straight segment to the point.</summary>
     | LineTo of Point
+    /// <summary>Draws a cubic Bezier segment through two control points to the final point.</summary>
     | CubicTo of Point * Point * Point
+    /// <summary>Draws a quadratic Bezier segment through one control point to the final point.</summary>
     | QuadraticTo of Point * Point
+    /// <summary>Draws an elliptical arc to the destination with SVG large-arc and sweep flags; radii must be nonnegative and rotation is in
+    /// degrees.</summary>
     | ArcTo of radiusX:float * radiusY:float * rotation:float * large:bool * clockwise:bool * destination:Point
+    /// <summary>Closes the current subpath with a straight segment to its start.</summary>
     | Close
 
 /// <summary>A validated immutable path; each drawable subpath starts with MoveTo.</summary>
 type Path = private Path of PathCommand list
 
+/// <summary>Construction, inspection and SVG serialization of paths.</summary>
 [<RequireQualifiedAccess>]
 module Path =
+    /// <summary>A path with no commands; it serializes to an empty string.</summary>
     let empty = Path []
     /// <summary>Validates finite coordinates, nonnegative radii and a leading MoveTo.</summary>
     let ofCommands commands =
@@ -129,6 +148,7 @@ module Path =
                 validate point
             | Close -> ()
         Path commands
+    /// <summary>Returns the commands in drawing order.</summary>
     let commands (Path commands) = commands
     /// <summary>Concatenates independent subpaths.</summary>
     let concat paths = paths |> List.collect commands |> ofCommands
@@ -157,6 +177,7 @@ type Curve = Linear | StepBefore | StepAfter | CatmullRom of tension:float
 [<RequireQualifiedAccess>]
 type Symbol = Circle | Square | Diamond | Triangle
 
+/// <summary>Path generators for lines, areas, arcs, rectangles, symbols and links.</summary>
 [<RequireQualifiedAccess>]
 module Shape =
     let private validateCurve curve =

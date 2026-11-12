@@ -2,11 +2,15 @@ namespace Ranvier.D5
 
 open System
 
+/// <summary>An annular sector about the origin: radii and corner radius in scene units, angles in radians clockwise from 12 o'clock.
+/// Radii and padding must be nonnegative with <c>OuterRadius</c> at least <c>InnerRadius</c>.</summary>
 type ArcSpec = { InnerRadius:float; OuterRadius:float; StartAngle:float; EndAngle:float; PadAngle:float; CornerRadius:float }
 
+/// <summary>A d3-shape symbol type; <c>Plus</c>, <c>Times</c> and <c>Asterisk</c> are open line segments; the rest are closed outlines.</summary>
 [<RequireQualifiedAccess>]
 type SymbolSpec = Circle | Square | Diamond | Triangle | Cross | Star | Wye | Plus | Times | Asterisk | Diamond2 | Square2 | Triangle2 | TriangleDown
 
+/// <summary>Arc and symbol path generators centered on the origin; invalid input throws <c>ArgumentException</c>.</summary>
 [<RequireQualifiedAccess>]
 module Shapes =
     /// <summary>Circular corner fillets with angular padding. Corners clamp to ring thickness and available angular span; complete rings ignore padding and corners.</summary>

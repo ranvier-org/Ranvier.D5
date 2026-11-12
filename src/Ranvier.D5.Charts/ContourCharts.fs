@@ -2,6 +2,7 @@ namespace Ranvier.D5.Charts
 
 open Ranvier.D5
 
+/// <summary>Filled contour and isoband charts over a density grid.</summary>
 [<RequireQualifiedAccess>]
 module ContourChart =
     exception private CompositionAbort of LayoutError
@@ -110,7 +111,11 @@ module ContourChart =
                  Membership=Map.ofSeq membership})
             with CompositionAbort error -> Error [error])
 
+    /// <summary>As contours, but checks the token throughout and throws OperationCanceledException when it is cancelled.</summary>
     let contoursWithCancellation token spec config grid = build token false spec config grid
+    /// <summary>As isobands, but checks the token throughout and throws OperationCanceledException when it is cancelled.</summary>
     let isobandsWithCancellation token spec config grid = build token true spec config grid
+    /// <summary>Draws one filled region per threshold covering density at or above it, stretched to the plot area; Membership lists observations in qualifying grid cells, and exceeding MaxMarks or the config work budget is BudgetExceeded.</summary>
     let contours spec config grid = contoursWithCancellation System.Threading.CancellationToken.None spec config grid
+    /// <summary>Like contours, but each band excludes the next higher threshold, so its region and Membership cover values in [level, next level).</summary>
     let isobands spec config grid = isobandsWithCancellation System.Threading.CancellationToken.None spec config grid

@@ -3,8 +3,10 @@ namespace Ranvier.D5.Charts
 open System
 open Ranvier.D5
 
+/// <summary>Validation of frames, data IDs and scale domains shared by chart recipes.</summary>
 [<RequireQualifiedAccess>]
 module ChartLayout =
+    /// <summary>Returns the plot area in screen pixels, or an InvalidObservation error when a size or margin is negative or non-finite or the margins leave no area.</summary>
     let plot frame =
         let v,m=frame.Viewport,frame.Margin
         let values=[v.Width;v.Height;m.Top;m.Right;m.Bottom;m.Left]
@@ -12,11 +14,13 @@ module ChartLayout =
         elif v.Width<=m.Left+m.Right || v.Height<=m.Top+m.Bottom then Error [InvalidObservation "Margins leave no plot area."]
         else Ok(Bounds.create m.Left m.Top (v.Width-m.Left-m.Right) (v.Height-m.Top-m.Bottom))
 
+    /// <summary>Returns one error per empty ID (InvalidObservation) and per repeated ID (DuplicateId); an empty list means every key is valid and unique.</summary>
     let validateIds key data =
         data |> List.countBy key |> List.choose (fun (id,count) ->
             if String.IsNullOrEmpty id then Some(InvalidObservation "Empty data ID.")
             elif count>1 then Some(DuplicateId id) else None)
 
+    /// <summary>Resolves a domain from the present values (missing ones are ignored; no values gives [0,1] before the policy); a zero-width domain is widened by 1 or 1% of its magnitude, and non-finite or inverted domains are typed errors.</summary>
     let domain policy values =
         let values=List.choose id values
         if values |> List.exists (Double.IsFinite >> not) then Error [InvalidObservation "Non-finite observation."]
@@ -34,6 +38,7 @@ module ChartLayout =
                 if Double.IsFinite lo && Double.IsFinite hi then Ok(lo,hi) else Error [InvalidObservation "Constant domain cannot be expanded finitely."]
             else Ok(a,b)
 
+/// <summary>Greedy, deterministic label placement within a plot area.</summary>
 [<RequireQualifiedAccess>]
 module LabelLayout =
     /// <summary>Places high-priority labels first; equal priority keeps input order. Overlapping or overflowing labels are skipped.</summary>

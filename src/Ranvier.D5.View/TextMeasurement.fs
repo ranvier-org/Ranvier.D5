@@ -5,6 +5,7 @@ open System.Collections.Generic
 open System.Globalization
 open Ranvier.D5
 
+/// <summary>Identifies one text measurement and keys TextMeasureCache; a change to any field, including FontGeneration or DeviceScale, is a cache miss.</summary>
 type TextMeasureRequest = { Text:string; FontFamily:string; FontWeight:int; FontSize:float; DeviceScale:float; FontGeneration:int64 }
 
 /// <summary>An owner-thread cache with explicit font-generation and DPI identity. Dispose with the mounted chart owner.</summary>
@@ -14,7 +15,9 @@ type TextMeasureCache(capacity:int, measure:TextMeasureRequest -> TextSize) =
     let thread=Environment.CurrentManagedThreadId
     let mutable disposed=false
     do if capacity<1 then invalidArg "capacity" "Positive cache capacity required."
+    /// <summary>The number of cached measurements, never more than the construction capacity.</summary>
     member _.Count=cache.Count
+    /// <summary>Returns the cached size for the request, or measures and caches it, evicting the oldest entry at capacity. Must be called on the constructing thread before disposal; raises on invalid requests or invalid native bounds.</summary>
     member _.Measure request =
         if disposed then raise(ObjectDisposedException(nameof TextMeasureCache))
         if Environment.CurrentManagedThreadId<>thread then invalidOp "Text measurement belongs to the owner thread."
@@ -32,6 +35,7 @@ type TextMeasureCache(capacity:int, measure:TextMeasureRequest -> TextSize) =
     interface IDisposable with
         member _.Dispose() = disposed<-true; cache.Clear(); order.Clear()
 
+/// <summary>Factories for owner-thread text measurement caches backed by native canvas metrics.</summary>
 [<RequireQualifiedAccess>]
 module TextMeasurement =
     /// <summary>Measures in SVG/CSS units using an existing host canvas. DeviceScale is a cache identity, not a second size multiplier.</summary>

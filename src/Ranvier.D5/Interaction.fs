@@ -2,26 +2,41 @@ namespace Ranvier.D5
 
 open System
 
+/// <summary>What a single-pointer drag does: pan the zoom, drag the pressed target, brush a rectangle, or draw a lasso.
+/// Two pointers always pinch-zoom.</summary>
 [<RequireQualifiedAccess>]
 type GestureMode = Pan | Drag | Rectangle | Lasso
+/// <summary>Gesture settings: positive zoom-scale limits with <c>MaxZoom</c> at least <c>MinZoom</c>, positive wheel sensitivity,
+/// and a lasso point cap in [4,100000].</summary>
 type GestureConfig = {Mode:GestureMode;MinZoom:float;MaxZoom:float;WheelSensitivity:float;MaxLassoPoints:int}
+/// <summary>A host-neutral input event in screen coordinates, fed to <c>Gesture.update</c>.</summary>
 [<RequireQualifiedAccess>]
 type InputEvent =
+    /// <summary>A pointer press, with the scene-node key path under the pointer when known.</summary>
     | Down of pointer:int * position:Point * target:string list option
+    /// <summary>A pointer move; moves of uncaptured pointers produce hover commands.</summary>
     | Move of pointer:int * position:Point
+    /// <summary>A pointer release.</summary>
     | Up of pointer:int * position:Point
+    /// <summary>A wheel step at an anchor; positive delta zooms out and negative delta zooms in.</summary>
     | Wheel of anchor:Point * delta:float
+    /// <summary>A DOM key name; arrows move focus, Enter or space selects, Escape cancels and clears selection.</summary>
     | Key of string
     | Cancel | FocusLost | Leave | Resize | NodeExit of string list
+/// <summary>A side effect requested by <c>Gesture.update</c> for the host to apply, such as pointer capture, zoom or selection.</summary>
 [<RequireQualifiedAccess>]
 type GestureCommand =
     | Capture of int | Release of int | ZoomChanged of Zoom | DragBy of string list option * Point
     | SelectRectangle of Bounds | SelectLasso of Point list | Hover of Point option
     | MoveFocus of int | SelectFocused | ClearSelection
+/// <summary>Gesture state: current zoom, active pointers (at most two), gesture start point, pressed target
+/// and lasso points in reverse order.</summary>
 type GestureState = {Zoom:Zoom;Pointers:Map<int,Point>;Start:Point option;Target:string list option;Lasso:Point list}
 
+/// <summary>A pure pointer, wheel and keyboard gesture state machine.</summary>
 [<RequireQualifiedAccess>]
 module Gesture =
+    /// <summary>The initial state: identity zoom and no active pointers.</summary>
     let empty={Zoom=Zoom.identity;Pointers=Map.empty;Start=None;Target=None;Lasso=[]}
     let private validate config =
         Check.positive "minZoom" config.MinZoom
@@ -61,6 +76,8 @@ module Gesture =
                     let points=if Double.Hypot(delta.X,delta.Y)<1. then state.Lasso else point::state.Lasso
                     let points=if points.Length>config.MaxLassoPoints then points |> List.indexed |> List.choose (fun (i,p) -> if i%2=0 || i=points.Length-1 then Some p else None) else points
                     {state with Pointers=pointers;Lasso=points},[]
+    /// <summary>Applies one event and returns the next state with the commands to perform, in order.
+    /// Throws <c>ArgumentException</c> for an invalid configuration or a non-finite pointer position.</summary>
     let update config event state =
         validate config
         match event with

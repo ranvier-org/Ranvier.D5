@@ -4,8 +4,10 @@ open Ranvier
 open Ranvier.D5
 open Ranvier.D5.Charts
 
+/// <summary>Node dragging for force-directed network charts.</summary>
 [<RequireQualifiedAccess>]
 module NetworkInteraction =
+    /// <summary>Attaches drag interaction, owned by the current owner, that pins the dragged node through the force handle and unpins it when the drag target changes or the interaction is disposed. The caller keeps ownership of the force and must dispose this interaction first, because disposal mid-drag dispatches Unpin.</summary>
     let attach element (readChart:unit->ChartOutput) (force:OwnedForce) =
         let config={Mode=GestureMode.Drag;MinZoom=1.;MaxZoom=1.;WheelSensitivity=0.01;MaxLassoPoints=4}
         Api.createRoot(fun owner ->

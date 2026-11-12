@@ -26,8 +26,11 @@ type Bin<'T> = { Lower: float; Upper: float; Values: 'T list }
 
 /// <summary>Keyed changes with source and target indices; lists follow their respective input order.</summary>
 type Join<'Key, 'T> = {
+    /// <summary>Keys only in the next input, with their index in next and their value.</summary>
     Enter: ('Key * int * 'T) list
+    /// <summary>Keys in both inputs, with the previous index, next index, previous value and next value.</summary>
     Update: ('Key * int * int * 'T * 'T) list
+    /// <summary>Keys only in the previous input, with their index in previous and their value.</summary>
     Exit: ('Key * int * 'T) list
 }
 

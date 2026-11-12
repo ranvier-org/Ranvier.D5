@@ -5,12 +5,17 @@ open Ranvier
 open Ranvier.D5
 open Ranvier.D5.Charts
 
+/// <summary>Owns a chart's gesture and selection signals, effects and input adapter. Dispose it on the graph thread, or dispose its parent owner, to release them and the native listeners.</summary>
 type OwnedChartInteraction internal (readGesture:unit->GestureState,readSelection:unit->SelectionState,input:OwnedInput,dispose:unit->unit) =
+    /// <summary>The current gesture state; a tracked signal read.</summary>
     member _.Gesture=readGesture()
+    /// <summary>The current hover, focus and selection state; a tracked signal read.</summary>
     member _.Selection=readSelection()
+    /// <summary>Sends an input event through the owned input adapter as a native listener would; call on the graph thread.</summary>
     member _.Send event=input.Send event
     interface IDisposable with member _.Dispose()=dispose()
 
+/// <summary>Hit-tested hover, focus, selection and gesture handling for a rendered chart.</summary>
 [<RequireQualifiedAccess>]
 module ChartInteraction =
     let private center = function

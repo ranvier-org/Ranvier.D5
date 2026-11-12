@@ -1,26 +1,40 @@
 namespace Ranvier.D5
 
+/// <summary>An identified point with a weight, used as density and hexbin input; IDs must be non-empty and unique, and weights finite and
+/// nonnegative.</summary>
 type WeightedPoint = { Id:string; Position:Point; Weight:float }
 
+/// <summary>How blur handles kernel weight falling outside the grid or on missing cells: Renormalize spreads it over observed cells, Drop discards
+/// it.</summary>
 [<RequireQualifiedAccess>]
 type DensityBoundary = Renormalize | Drop
+/// <summary>Mass keeps the summed weight per cell; Density divides it by the cell area in layout units.</summary>
 [<RequireQualifiedAccess>]
 type DensityNormalization = Mass | Density
 
+/// <summary>Binned density settings: grid bounds and dimensions, Gaussian Bandwidth in layout units (0 disables blur), boundary and normalization
+/// policies, and cell, kernel-radius and point budgets.</summary>
 type DensityConfig =
     { Bounds:Bounds; Columns:int; Rows:int; Bandwidth:float; Boundary:DensityBoundary
       Normalization:DensityNormalization; MaxCells:int; MaxKernelRadius:int; MaxPoints:int }
 
+/// <summary>Default density configuration.</summary>
 [<RequireQualifiedAccess>]
 module DensityConfig =
+    /// <summary>Creates a configuration without blur, with Renormalize boundary, Mass normalization and budgets of 1,048,576 cells, a 256-cell kernel
+    /// radius and 1,000,000 points.</summary>
     let create bounds columns rows =
         {Bounds=bounds;Columns=columns;Rows=rows;Bandwidth=0.;Boundary=DensityBoundary.Renormalize
          Normalization=DensityNormalization.Mass;MaxCells=1048576;MaxKernelRadius=256;MaxPoints=1000000}
 
+/// <summary>An immutable row-major grid of cell values over bounds, with missing cells and the IDs of points binned into each cell.</summary>
 type DensityGrid = private { Extent:Bounds; ColumnCount:int; RowCount:int; Data:float array; Observed:bool array; Membership:string list array }
 
+/// <summary>Construction of and access to density grids.</summary>
 [<RequireQualifiedAccess>]
 module DensityGrid =
+    /// <summary>Creates a grid from row-major values, where None marks a missing cell. Returns Error for nonpositive dimensions or budget, empty
+    /// bounds, a value count that does not match, too many cells, or a non-finite value.</summary>
     let createWithBudget (maxCells:int) (bounds:Bounds) (columns:int) (rows:int) (values:float option list) : Result<DensityGrid,LayoutError list> =
         let count=int64 columns*int64 rows
         if maxCells<=0 || columns<=0 || rows<=0 then Error [InvalidObservation "Grid dimensions and cell budget must be positive."]
@@ -33,22 +47,33 @@ module DensityGrid =
                 Data=values |> List.map(Option.defaultValue 0.) |> List.toArray
                 Observed=values |> List.map Option.isSome |> List.toArray
                 Membership=Array.create (int count) []}
+    /// <summary>Runs <c>createWithBudget</c> with a budget of 1,048,576 cells.</summary>
     let create bounds columns rows values = createWithBudget 1048576 bounds columns rows values
     let internal copySamples grid = Array.copy grid.Data,Array.copy grid.Observed
+    /// <summary>Returns the grid's layout bounds.</summary>
     let bounds grid = grid.Extent
+    /// <summary>Returns the column count.</summary>
     let columns grid = grid.ColumnCount
+    /// <summary>Returns the row count.</summary>
     let rows grid = grid.RowCount
     let private index column row grid =
         if column<0 || column>=grid.ColumnCount || row<0 || row>=grid.RowCount then invalidArg "cell" "Cell is outside the grid."
         row*grid.ColumnCount+column
+    /// <summary>Returns the cell value, or None for a missing cell; raises ArgumentException for a cell outside the grid.</summary>
     let value column row grid =
         let i=index column row grid
         if grid.Observed[i] then Some grid.Data[i] else None
+    /// <summary>Returns the IDs of points binned into the cell in input order; raises ArgumentException for a cell outside the grid.</summary>
     let members column row grid = grid.Membership[index column row grid]
+    /// <summary>Returns every cell in row-major order, with None for missing cells.</summary>
     let values grid = [for row in 0..grid.RowCount-1 do for column in 0..grid.ColumnCount-1 -> value column row grid]
 
+/// <summary>Binned density grids, Gaussian blur and one-dimensional kernel density estimation.</summary>
 [<RequireQualifiedAccess>]
 module Density =
+    /// <summary>Applies a separable Gaussian blur whose standard deviation is the bandwidth in layout units; missing cells neither emit nor receive
+    /// weight, and zero bandwidth returns the grid unchanged. Returns Error for invalid arguments, a kernel radius or work above budget, or
+    /// non-finite results.</summary>
     let blurWithCancellation (token:System.Threading.CancellationToken) (bandwidth:float) (boundary:DensityBoundary) (maxRadius:int) (grid:DensityGrid) : Result<DensityGrid,LayoutError list> =
         token.ThrowIfCancellationRequested()
         if not(System.Double.IsFinite bandwidth) || bandwidth<0. || maxRadius<0 then
@@ -102,7 +127,10 @@ module Density =
                 token.ThrowIfCancellationRequested()
                 if data |> Array.exists(System.Double.IsFinite >> not) then Error [InvalidObservation "Blur exceeds the finite numeric range."]
                 else Ok {grid with Data=data}
+    /// <summary>Runs <c>blurWithCancellation</c> without cancellation.</summary>
     let blur bandwidth boundary maxRadius grid = blurWithCancellation System.Threading.CancellationToken.None bandwidth boundary maxRadius grid
+    /// <summary>Bins weighted points into grid cells, blurs and normalizes them. Returns all point errors together (empty or duplicate IDs, invalid
+    /// weights, points outside the bounds), or one error for invalid settings, exceeded budgets or non-finite results.</summary>
     let gridWithCancellation (token:System.Threading.CancellationToken) (config:DensityConfig) (points:WeightedPoint list) : Result<DensityGrid,LayoutError list> =
         token.ThrowIfCancellationRequested()
         let count=int64 config.Columns*int64 config.Rows
@@ -151,7 +179,11 @@ module Density =
                                 value/area)
                             if normalized |> Array.exists(System.Double.IsFinite >> not) then Error [InvalidObservation "Density exceeds the finite numeric range."]
                             else Ok {grid with Data=normalized}
+    /// <summary>Runs <c>gridWithCancellation</c> without cancellation.</summary>
     let grid config points = gridWithCancellation System.Threading.CancellationToken.None config points
+    /// <summary>Evaluates a Gaussian kernel density of (position, weight) samples at each query position, normalized to unit total mass; all-zero
+    /// weights yield zeros. Returns Error for a nonpositive bandwidth, non-finite input, negative weights or more than 100,000,000 sample-query
+    /// pairs.</summary>
     let kde1dWithCancellation (token:System.Threading.CancellationToken) (bandwidth:float) (samples:(float*float) list) (positions:float list) : Result<float list,LayoutError list> =
         token.ThrowIfCancellationRequested()
         if not(System.Double.IsFinite bandwidth) || bandwidth<=0. then Error [InvalidObservation "KDE bandwidth must be finite and positive."]
@@ -188,4 +220,5 @@ module Density =
                     if sum=0. then 0. else exp(largestTerm+log sum))
                 if values |> List.exists(System.Double.IsFinite >> not) then Error [InvalidObservation "KDE density exceeds the finite numeric range."]
                 else Ok values
+    /// <summary>Runs <c>kde1dWithCancellation</c> without cancellation.</summary>
     let kde1d bandwidth samples positions = kde1dWithCancellation System.Threading.CancellationToken.None bandwidth samples positions

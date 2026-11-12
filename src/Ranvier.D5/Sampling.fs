@@ -1,12 +1,18 @@
 namespace Ranvier.D5
 
+/// <summary>A series observation with a nonempty unique ID, finite X, and a finite Y or <c>None</c> to mark a gap.</summary>
 type SeriesSample = { Id:string; X:float; Y:float option }
+/// <summary>Downsampling budgets: a nonnegative maximum output count and a positive maximum input count.</summary>
 type SamplingConfig = { TargetCount:int; MaxInput:int }
 
+/// <summary>Constructors for <c>SamplingConfig</c>.</summary>
 [<RequireQualifiedAccess>]
 module SamplingConfig =
+    /// <summary>Creates a configuration with the given output count and an input budget of one million samples.</summary>
     let create targetCount = {TargetCount=targetCount;MaxInput=1000000}
 
+/// <summary>Gap-aware series downsampling that keeps run endpoints and one sample per gap, returning typed <c>LayoutError</c> results.
+/// Input with at most <c>TargetCount</c> samples is returned unchanged.</summary>
 [<RequireQualifiedAccess>]
 module Sampling =
     exception private SamplingAbort of LayoutError
@@ -154,7 +160,15 @@ module Sampling =
           | SamplingAbort error -> Error [error]
           | :? System.ArgumentException -> Error [InvalidObservation "Sampling geometry exceeds the finite numeric range."]
 
+    /// <summary>Keeps each bucket's minimum and maximum Y in original order. Samples must have nondecreasing X;
+    /// returns <c>BudgetExceeded</c> when the input exceeds <c>MaxInput</c> or the target cannot hold every run's endpoints and extrema.
+    /// Cancellation throws <c>OperationCanceledException</c>.</summary>
     let minMaxWithCancellation token config samples = reduce token 4 minMaxRun config samples
+    /// <summary>Runs <c>minMaxWithCancellation</c> without cancellation.</summary>
     let minMax config samples = minMaxWithCancellation System.Threading.CancellationToken.None config samples
+    /// <summary>Largest-Triangle-Three-Buckets downsampling per run, with exact area ties resolved toward the earlier sample.
+    /// Samples must have nondecreasing X; returns <c>BudgetExceeded</c> as for <c>minMax</c>.
+    /// Cancellation throws <c>OperationCanceledException</c>.</summary>
     let lttbWithCancellation token config samples = reduce token 2 lttbRun config samples
+    /// <summary>Runs <c>lttbWithCancellation</c> without cancellation.</summary>
     let lttb config samples = lttbWithCancellation System.Threading.CancellationToken.None config samples

@@ -3,16 +3,24 @@ namespace Ranvier.D5
 open System
 open System.Collections.Generic
 
+/// <summary>How a node's value is aggregated: <c>IncludeOwnWeight</c> adds a branch's own weight to its children's sum,
+/// <c>LeavesOnly</c> sums leaves only.</summary>
 [<RequireQualifiedAccess>]
 type HierarchySumPolicy = IncludeOwnWeight | LeavesOnly
+/// <summary>Treemap tiling: <c>Slice</c> stacks vertically, <c>Dice</c> horizontally, <c>SliceDice</c> alternates by depth,
+/// <c>Binary</c> splits by weight halves, and <c>Squarified</c> targets the configured aspect ratio.</summary>
 [<RequireQualifiedAccess>]
 type TreemapTiling = Slice | Dice | SliceDice | Binary | Squarified
+/// <summary>Treemap settings; padding is in scene units and must be finite and nonnegative, and <c>Ratio</c> must be finite and at least 1.</summary>
 type TreemapConfig = { Bounds:Bounds; Padding:float; Tiling:TreemapTiling; Ratio:float; SumPolicy:HierarchySumPolicy }
+/// <summary>Constructors for <c>TreemapConfig</c>.</summary>
 [<RequireQualifiedAccess>]
 module TreemapConfig =
+    /// <summary>Creates a squarified configuration with zero padding, golden-ratio aspect target and <c>IncludeOwnWeight</c> sums.</summary>
     let create bounds = {Bounds=bounds;Padding=0.;Tiling=TreemapTiling.Squarified;Ratio=(1.+sqrt 5.)/2.;SumPolicy=HierarchySumPolicy.IncludeOwnWeight}
 
 type private TileRow = { First:int; Last:int; Dice:bool }
+/// <summary>Opaque squarified row decisions retained by <c>Treemap.resquarify</c> for stable relayout of an unchanged topology.</summary>
 type TreemapState<'Id> = private { Config:TreemapConfig; Topology:('Id * 'Id option * bool) list; Rows:TileRow list list }
 
 module internal HierarchyWeights =
@@ -23,6 +31,7 @@ module internal HierarchyWeights =
                 if index.Children[i].Length>0 then values[i]<-index.Children[i] |> Seq.map(fun child -> values[child]) |> Data.sum
         values
 
+/// <summary>Treemap layouts of a hierarchy; invalid configuration or duplicate identities yield <c>Error [InvalidObservation]</c>.</summary>
 [<RequireQualifiedAccess>]
 module Treemap =
     let private inset padding bounds =
@@ -152,5 +161,9 @@ module Treemap =
             let result=index.Items |> Array.mapi(fun i item -> {Id=item.Id;Parent=item.Parent;Depth=item.Depth;Bounds=boxes[i]}) |> Array.toList
             result,{Config=config;Topology=topology;Rows=Array.toList rows})
 
+    /// <summary>Returns one rectangle per node in preorder, each inset by half the padding;
+    /// all-zero siblings share their parent's space equally.</summary>
     let layout config root = compute config root None |> Result.map fst
+    /// <summary>Lays out with squarified tiling, reusing the row decisions in <c>state</c> when the configuration and topology are unchanged.
+    /// Returns the rectangles and the state to pass to the next call.</summary>
     let resquarify config root state = compute {config with Tiling=TreemapTiling.Squarified} root state
