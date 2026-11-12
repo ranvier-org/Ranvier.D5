@@ -28,7 +28,48 @@ let private referenceGeometry (value: JsonElement) =
         | kind -> failtestf "Unsupported reference geometry: %s" kind
     read value
 
+let private centroid geometry = GeoMeasure.centroid GeoStreamConfig.defaultValue geometry |> ok
+let private centroidNear geometry expected =
+    match centroid geometry with
+    | Some actual -> Expect.isLessThanOrEqual (Geodesic.distance actual expected) 1e-10 "Spherical centroid direction"
+    | None -> failtest "Expected a defined centroid"
+
 let tests = testList "GeoMeasure" [
+    testCase "centroids agree with the pinned point line and polygon references" <| fun _ ->
+        use fixture=JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"fixtures","spherical.json")))
+        for item in fixture.RootElement.GetProperty("geometries").EnumerateArray() do
+            let geometry=referenceGeometry(item.GetProperty("geometry"))
+            let expected=item.GetProperty("centroid")
+            if expected[0].ValueKind=JsonValueKind.Null then Expect.isNone (centroid geometry) (item.GetProperty("name").GetString())
+            else centroidNear geometry (p (expected[0].GetDouble()) (expected[1].GetDouble()))
+    testCase "wide spherical triangle uses full arc angles beyond ninety degrees" <| fun _ ->
+        let ring=[p 0. 0.;p 0. 90.;p 120. 0.;p 0. 0.]
+        let latitude=Math.Atan2(4.,3.*sqrt 3.)*180./Math.PI
+        centroidNear (GeoGeometry.Polygon [ring]) (p 60. latitude)
+        centroidNear (GeoGeometry.Polygon [List.rev ring]) (p -120. -latitude)
+    testCase "centroid falls back through dimensions without inventing a direction" <| fun _ ->
+        let a=p 20. 30.
+        centroidNear (GeoGeometry.Polygon [[a;a;a;a]]) a
+        centroidNear (GeoGeometry.Collection [GeoGeometry.Point(Some(p -120. -45.));GeoGeometry.LineString [p 0. 0.;p 90. 0.]]) (p 45. 0.)
+        Expect.isNone (centroid(GeoGeometry.MultiPoint [p 0. 0.;p 180. 0.])) "Opposite points are ambiguous"
+        Expect.isNone (centroid GeoGeometry.Sphere) "Sphere has no preferred direction"
+        match centroid(GeoGeometry.LineString [p 0. 0.;p 1e-200 0.]) with
+        | Some tiny ->
+            near (tiny.Longitude/5e-201) 1. 1e-14
+            Expect.equal tiny.Latitude 0. "Equatorial midpoint stays on the equator"
+        | None -> failtest "A tiny finite line has a defined midpoint"
+    testCase "centroid weight rescaling preserves unequal arcs in either order" <| fun _ ->
+        let short=[p 0. 0.;p 60. 0.]
+        let long=[p 0. 0.;p 120. 0.]
+        let expected=p (Math.Atan2(3.*sqrt 3.,5.)*180./Math.PI) 0.
+        for lines in [[short;long];[long;short]] do centroidNear (GeoGeometry.MultiLineString lines) expected
+        for lines in [[short;[p 0. 0.;p 1e-200 0.]];[[p 0. 0.;p 1e-200 0.];short]] do
+            centroidNear (GeoGeometry.MultiLineString lines) (p 30. 0.)
+    testCase "centroid rejects antipodal routes and honors traversal limits" <| fun _ ->
+        let line=GeoGeometry.LineString [p 0. 0.;p 180. 0.]
+        Expect.isError (GeoMeasure.centroid GeoStreamConfig.defaultValue line) "Antipodal route is ambiguous"
+        Expect.isError (GeoMeasure.centroid {GeoStreamConfig.defaultValue with MaxPoints=1} (GeoGeometry.MultiPoint[p 0. 0.;p 1. 0.])) "Point budget propagates"
+
     testCase "area agrees with pinned spherical fixtures without changing winding" <| fun _ ->
         use fixture=JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"fixtures","spherical.json")))
         for item in fixture.RootElement.GetProperty("geometries").EnumerateArray() do
