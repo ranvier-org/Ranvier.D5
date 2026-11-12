@@ -68,6 +68,7 @@ jobs:
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-network artifacts/network.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-bubbles artifacts/bubbles.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-chord artifacts/chord.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-sankey artifacts/sankey.bmp
       - name: Paired performance regression gate
         shell: bash
         run: |
@@ -109,6 +110,9 @@ jobs:
           Ranvier.D5.Charts.NetworkChart.network networkSpec forceGraph (Force.snapshot force) |> Result.defaultWith (fun errors -> failwithf "%A" errors) |> ignore
           let chords = Chord.layout ChordConfig.defaultValue [[1.]] |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           Ribbon.path (RibbonSpec.create 10. chords.Flows.Head) |> Path.toSvg |> ignore
+          let flowGraph = FlowGraph.create ["a";"b"] [{FlowLink.Id="ab";Source="a";Target="b";Value=1.}] |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          let flow = Sankey.layout (SankeyConfig.create(Bounds.create 0. 0. 300. 200.)) flowGraph |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if flow.Links.Length <> 1 then failwith "Packed Sankey failed"
           Ranvier.D5.View.ForceChunk.defaultValue |> ignore
           Ranvier.D5.View.Renderer.passive |> ignore
           graph.Dispose()

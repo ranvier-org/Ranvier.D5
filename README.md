@@ -80,6 +80,6 @@ python tools/snapshot-kit.py ../snapshots
 
 Snapshots are reference material; builds use a compatible published cohort: Ranvier preview.2, Anime rc.2, CSS alpha.2, View 0.1.49-rc.2 and WebCore backend rc.6 / native rc.7. Newer independent core/CSS packages are deliberately not substituted because Anime/View pin this cohort. See [design](docs/design.md).
 
-D5 provides reusable foundations, not every D3 algorithm. Spatial indexing, triangulation and force/network layouts are available; see [network examples and measured limits](docs/network.md). [Chord layouts and ribbons](docs/chord.md) provide matrix relationship geometry. Geographic clipping/projections, contours, Sankey and alluvial layouts remain planned. Large scenes need aggregation/windowing; SVG does not promise million-mark frame rates.
+D5 provides reusable foundations, not every D3 algorithm. Spatial indexing, triangulation and force/network layouts are available; see [network examples and measured limits](docs/network.md). [Chord layouts and ribbons](docs/chord.md) provide matrix relationship geometry. [DAG Sankey layouts](docs/sankey.md) support explicit flow imbalance. Geographic clipping/projections, contours and alluvial compositions remain planned. Large scenes need aggregation/windowing; SVG does not promise million-mark frame rates.
 
 MIT licensed.

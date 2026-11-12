@@ -1,0 +1,204 @@
+namespace Ranvier.D5
+
+type FlowLink = { Id:string; Source:string; Target:string; Value:float }
+type FlowGraph = private { NodeIds:string list; Edges:FlowLink list }
+
+[<RequireQualifiedAccess>]
+module FlowGraph =
+    let create (nodes:string list) (links:FlowLink list) : Result<FlowGraph,LayoutError list> =
+        let errors=ResizeArray<LayoutError>()
+        let nodeIds=System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+        let edgeIds=System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+        let identity (seen:System.Collections.Generic.HashSet<string>) id =
+            if System.String.IsNullOrWhiteSpace id then errors.Add(InvalidObservation "Flow ID must not be empty.")
+            elif not(seen.Add id) then errors.Add(DuplicateId id)
+        for id in nodes do identity nodeIds id
+        for edge in links do
+            identity edgeIds edge.Id
+            if not(nodeIds.Contains edge.Source) then errors.Add(MissingEndpoint edge.Source)
+            if not(nodeIds.Contains edge.Target) then errors.Add(MissingEndpoint edge.Target)
+            if not(System.Double.IsFinite edge.Value) || edge.Value<0. then errors.Add(InvalidObservation "Flow values must be finite and nonnegative.")
+        if errors.Count>0 then Error(List.ofSeq errors) else
+        Ok {NodeIds=nodes |> List.sortWith(fun a b -> System.StringComparer.Ordinal.Compare(a,b))
+            Edges=links |> List.sortWith(fun a b -> System.StringComparer.Ordinal.Compare(a.Id,b.Id))}
+    let nodes graph = graph.NodeIds
+    let links graph = graph.Edges
+
+[<RequireQualifiedAccess>]
+type SankeyAlignment = Left | Right | Center | Justify
+
+type SankeyConfig =
+    { Bounds:Bounds; NodeWidth:float; NodePadding:float; Iterations:int
+      Alignment:SankeyAlignment; MaxNodes:int; MaxLinks:int }
+
+[<RequireQualifiedAccess>]
+module SankeyConfig =
+    let create bounds =
+        {Bounds=bounds;NodeWidth=24.;NodePadding=8.;Iterations=6
+         Alignment=SankeyAlignment.Justify;MaxNodes=100000;MaxLinks=1000000}
+
+type SankeyNode =
+    { Id:string; Layer:int; Bounds:Bounds; Inflow:float; Outflow:float; Value:float; Imbalance:float }
+type SankeyLink =
+    { Id:string; Source:string; Target:string; Value:float; Width:float; Start:Point; Finish:Point }
+type SankeyLayout = { Nodes:SankeyNode list; Links:SankeyLink list }
+
+[<RequireQualifiedAccess>]
+module Sankey =
+    let layoutWithCancellation (token:System.Threading.CancellationToken) (config:SankeyConfig) (graph:FlowGraph) : Result<SankeyLayout,LayoutError list> =
+        token.ThrowIfCancellationRequested()
+        let width,height=Bounds.width config.Bounds,Bounds.height config.Bounds
+        let n,m=graph.NodeIds.Length,graph.Edges.Length
+        let finiteNonnegative value=System.Double.IsFinite value && value>=0.
+        if config.MaxNodes<=0 || config.MaxLinks<=0 || config.Iterations<0 || config.Iterations>256
+           || not(finiteNonnegative config.NodeWidth && finiteNonnegative config.NodePadding) then
+            Error [InvalidObservation "Require finite nonnegative sizes, 0..256 iterations and positive budgets."]
+        elif n>config.MaxNodes || m>config.MaxLinks then Error [BudgetExceeded "Sankey graph exceeds configured budget."]
+        elif config.NodeWidth>width then Error [InvalidObservation "Node width exceeds viewport."]
+        elif n=0 then Ok {Nodes=[];Links=[]}
+        else
+            let check index=if index%64=0 then token.ThrowIfCancellationRequested()
+            let nodes=List.toArray graph.NodeIds
+            let edges=List.toArray graph.Edges
+            let index=System.Collections.Generic.Dictionary<string,int>(System.StringComparer.Ordinal)
+            for i in 0..n-1 do check i;index.Add(nodes[i],i)
+            let outgoing=Array.init n (fun _ -> ResizeArray<int>())
+            let incoming=Array.init n (fun _ -> ResizeArray<int>())
+            let sources,targets=Array.zeroCreate<int> m,Array.zeroCreate<int> m
+            let inflow,outflow=Array.zeroCreate<float> n,Array.zeroCreate<float> n
+            for e in 0..m-1 do
+                check e
+                let s,t=index[edges[e].Source],index[edges[e].Target]
+                sources[e]<-s;targets[e]<-t
+                outgoing[s].Add e;incoming[t].Add e
+                outflow[s]<-outflow[s]+edges[e].Value
+                inflow[t]<-inflow[t]+edges[e].Value
+            if Array.exists (System.Double.IsFinite >> not) inflow || Array.exists (System.Double.IsFinite >> not) outflow then
+                Error [InvalidObservation "A node flow total exceeds the finite numeric range."]
+            else
+                let remaining=incoming |> Array.map(fun links -> links.Count)
+                let depth,reverseDepth=Array.zeroCreate<int> n,Array.zeroCreate<int> n
+                let order=ResizeArray<int>(n)
+                let queue=System.Collections.Generic.Queue<int>()
+                for i in 0..n-1 do if remaining[i]=0 then queue.Enqueue i
+                while queue.Count>0 do
+                    check order.Count
+                    let i=queue.Dequeue()
+                    order.Add i
+                    for e in outgoing[i] do
+                        check e
+                        let t=targets[e]
+                        depth[t]<-max depth[t] (depth[i]+1)
+                        remaining[t]<-remaining[t]-1
+                        if remaining[t]=0 then queue.Enqueue t
+                if order.Count<>n then Error [InvalidTopology "Sankey requires an acyclic graph, including zero-valued edges."]
+                else
+                    for p in n-1 .. -1 .. 0 do
+                        check p
+                        let i=order[p]
+                        for e in outgoing[i] do
+                            check e
+                            reverseDepth[i]<-max reverseDepth[i] (reverseDepth[targets[e]]+1)
+                    let count=1+Array.max depth
+                    if config.NodeWidth*float count>width then Error [InvalidObservation "Node columns cannot fit the viewport width."]
+                    else
+                        let layer=Array.init n (fun i ->
+                            match config.Alignment with
+                            | SankeyAlignment.Left -> depth[i]
+                            | SankeyAlignment.Right -> count-1-reverseDepth[i]
+                            | SankeyAlignment.Justify -> if outgoing[i].Count=0 then count-1 else depth[i]
+                            | SankeyAlignment.Center ->
+                                if incoming[i].Count>0 then depth[i]
+                                elif outgoing[i].Count>0 then outgoing[i] |> Seq.map(fun e -> depth[targets[e]]-1) |> Seq.min
+                                else 0)
+                        let columns=Array.init count (fun _ -> ResizeArray<int>())
+                        for i in 0..n-1 do check i;columns[layer[i]].Add i
+                        let paddingFits=columns |> Array.forall(fun column ->
+                            let needed=config.NodePadding*float(max 0 (column.Count-1))
+                            needed<height || (needed=height && column |> Seq.forall(fun i -> inflow[i]=0. && outflow[i]=0.)))
+                        if not paddingFits then Error [InvalidObservation "Viewport must fit requested padding and leave height for positive flows."]
+                        else
+                            let values=Array.init n (fun i -> max inflow[i] outflow[i])
+                            let largest=Array.max values
+                            let normalized=values |> Array.map(fun value -> if largest=0. then 0. else value/largest)
+                            let mutable scale=height
+                            for column in columns do
+                                token.ThrowIfCancellationRequested()
+                                let total=column |> Seq.sumBy(fun i -> normalized[i])
+                                if total>0. then scale<-min scale ((height-config.NodePadding*float(column.Count-1))/total)
+                            if largest=0. then scale<-0.
+                            let sizes=normalized |> Array.map(fun value -> value*scale)
+                            let y=Array.zeroCreate<float> n
+                            let x i=if count=1 then 0. else (width-config.NodeWidth)*(float layer[i]/float(count-1))
+                            for column in columns do
+                                token.ThrowIfCancellationRequested()
+                                let free=max 0. (height-(column |> Seq.sumBy(fun i -> sizes[i]))-config.NodePadding*float(max 0 (column.Count-1)))
+                                let gap=free/float(column.Count+1)
+                                let mutable cursor=gap
+                                for i in column do
+                                    check i
+                                    y[i]<-cursor
+                                    cursor<-cursor+sizes[i]+config.NodePadding+gap
+                            let center i=y[i]+sizes[i]/2.
+                            let resolve (column:ResizeArray<int>) =
+                                let sorted=column |> Seq.sortWith(fun a b -> let c=compare y[a] y[b] in if c=0 then compare a b else c) |> Seq.toArray
+                                let mutable cursor=0.
+                                for i in sorted do
+                                    check i
+                                    y[i]<-max y[i] cursor
+                                    cursor<-y[i]+sizes[i]+config.NodePadding
+                                if sorted.Length>0 then
+                                    let last=sorted[sorted.Length-1]
+                                    if y[last]+sizes[last]>height then
+                                        y[last]<-height-sizes[last]
+                                        for p in sorted.Length-2 .. -1 .. 0 do
+                                            check p
+                                            let i,next=sorted[p],sorted[p+1]
+                                            y[i]<-min y[i] (y[next]-config.NodePadding-sizes[i])
+                                for i in sorted do y[i]<-max 0. (min (height-sizes[i]) y[i])
+                            let relax alpha (column:ResizeArray<int>) (links:ResizeArray<int> array) (other:int array) =
+                                for i in column do
+                                    check i
+                                    let mutable total,mean=0.,0.
+                                    for e in links[i] do
+                                        check e
+                                        let weight=if largest=0. then 0. else edges[e].Value/largest
+                                        if weight>0. then
+                                            let next=total+weight
+                                            mean<-mean+(center other[e]-mean)*(weight/next)
+                                            total<-next
+                                    if total>0. then y[i]<-max 0. (min (height-sizes[i]) (y[i]+alpha*(mean-center i)))
+                                resolve column
+                            for iteration in 0..config.Iterations-1 do
+                                token.ThrowIfCancellationRequested()
+                                let alpha=0.99**float iteration
+                                for c in count-1 .. -1 .. 0 do relax alpha columns[c] outgoing targets
+                                for c in 0..count-1 do relax alpha columns[c] incoming sources
+                            let widths=edges |> Array.map(fun edge -> if largest=0. then 0. else (edge.Value/largest)*scale)
+                            let startY,finishY=Array.zeroCreate<float> m,Array.zeroCreate<float> m
+                            let stack i (links:ResizeArray<int>) (other:int array) (output:float array) =
+                                let sorted=links |> Seq.sortWith(fun a b -> let c=compare (center other[a]) (center other[b]) in if c=0 then compare a b else c)
+                                let mutable cursor=y[i]
+                                for e in sorted do
+                                    check e
+                                    output[e]<-cursor+widths[e]/2.
+                                    cursor<-cursor+widths[e]
+                            for i in 0..n-1 do
+                                check i
+                                stack i outgoing[i] targets startY
+                                stack i incoming[i] sources finishY
+                            let left,top=Bounds.x config.Bounds,Bounds.y config.Bounds
+                            let resultNodes=
+                                [for i in 0..n-1 do
+                                    check i
+                                    yield {Id=nodes[i];Layer=layer[i];Bounds=Bounds.create (left+x i) (top+y[i]) config.NodeWidth sizes[i]
+                                           Inflow=inflow[i];Outflow=outflow[i];Value=values[i];Imbalance=outflow[i]-inflow[i]}]
+                            let resultLinks=
+                                [for e in 0..m-1 do
+                                    check e
+                                    yield {Id=edges[e].Id;Source=edges[e].Source;Target=edges[e].Target;Value=edges[e].Value;Width=widths[e]
+                                           Start=Point.create (left+x sources[e]+config.NodeWidth) (top+startY[e])
+                                           Finish=Point.create (left+x targets[e]) (top+finishY[e])}]
+                            token.ThrowIfCancellationRequested()
+                            Ok {Nodes=resultNodes;Links=resultLinks}
+    let layout config graph = layoutWithCancellation System.Threading.CancellationToken.None config graph

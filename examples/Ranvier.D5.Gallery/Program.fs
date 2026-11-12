@@ -80,7 +80,7 @@ let capture kind path =
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
         else
-            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene elif kind="tiling" then TilingGallery.scene elif kind="hierarchy-charts" then HierarchyChartsGallery.scene elif kind="planar" then PlanarGallery.scene elif kind="quadtree" then (fun () -> QuadtreeGallery.scene(Point.create 410. 265.)) elif kind="chord" then (fun () -> ChordGallery.scene 0.5) elif kind="force" then (fun () -> ForceGallery.initial() |> Force.step 200 |> ForceGallery.scene) else fun () -> Scenes.scene 0.)
+            let mounted=mount host graph (if kind="hierarchy" then HierarchyGallery.scene elif kind="tiling" then TilingGallery.scene elif kind="hierarchy-charts" then HierarchyChartsGallery.scene elif kind="planar" then PlanarGallery.scene elif kind="quadtree" then (fun () -> QuadtreeGallery.scene(Point.create 410. 265.)) elif kind="sankey" then (fun () -> SankeyGallery.scene 0.5) elif kind="chord" then (fun () -> ChordGallery.scene 0.5) elif kind="force" then (fun () -> ForceGallery.initial() |> Force.step 200 |> ForceGallery.scene) else fun () -> Scenes.scene 0.)
             {new IDisposable with member _.Dispose()=mounted.Dispose()}
     host.Cycle()
     host.Frame()
@@ -140,6 +140,16 @@ let main args =
         let owner,_,_=NetworkGallery.mount (Array.contains "--bubbles" args) window.Host window.Graph
         while window.Step() do ()
         owner.Dispose()
+    elif args.Length=2 && args[0]="--capture-sankey" then
+        capture "sankey" args[1]
+    elif Array.contains "--sankey" args then
+        use window=Window.Create("Ranvier.D5 Sankey foundations",820,590)
+        let phase=window.Graph.Run(fun () -> Api.createSignal 0.)
+        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) SankeyGallery.scene)
+        let mounted=mount window.Host window.Graph (fun () -> scene.Value)
+        let timer=Stopwatch.StartNew()
+        while window.Step() do window.Graph.Run(fun () -> phase.Value<-timer.Elapsed.TotalSeconds)
+        mounted.Dispose()
     elif args.Length=2 && args[0]="--capture-chord" then
         capture "chord" args[1]
     elif Array.contains "--chord" args then

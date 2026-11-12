@@ -83,6 +83,12 @@ let main args =
         let ribbonFlow=(Chord.layout ChordConfig.defaultValue [[1.;2.];[3.;4.]] |> Result.defaultWith(fun errors -> failwithf "%A" errors)).Flows.Head
         results.Add(measure "ribbons-10000-svg" 100. 48000000L (fun () ->
             for _ in 1..10000 do Ribbon.path (RibbonSpec.create 100. ribbonFlow) |> Path.toSvg |> ignore))
+        let flowNodes=[for i in 0..999 -> string i]
+        let flowEdges=[for e in 0..1999 -> let i=e%900 in {FlowLink.Id=string e;Source=string i;Target=string((i/100+1)*100+(i+e/900)%100);Value=float(1+e%7)}]
+        let flowGraph=FlowGraph.create flowNodes flowEdges |> Result.defaultWith(fun errors -> failwithf "%A" errors)
+        let sankeyConfig={SankeyConfig.create(Bounds.create 0. 0. 800. 500.) with NodePadding=1.}
+        results.Add(measure "sankey-1000-nodes-2000-links" 25. 8000000L (fun () ->
+            Sankey.layout sankeyConfig flowGraph |> Result.defaultWith(fun errors -> failwithf "%A" errors) |> ignore))
         let curvePoints=points |> Array.map Some |> Array.toList
         results.Add(measure "natural-10000" 100. 16000000L (fun () -> Curves.line CurveSpec.Natural curvePoints |> ignore))
         let chartData=[0..999]
