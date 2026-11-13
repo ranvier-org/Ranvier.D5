@@ -9,9 +9,11 @@ open Ranvier.D5.Dashboards.Kit
 
 type Hub = { Code:string; City:string; Region:string; Position:GeoPosition }
 type Flight = { Code:string; Route:int; From:Hub; To:Hub; Departs:float; Duration:float; Delayed:bool }
+/// <summary>Tracker state. <c>Held</c> is the time until which auto-rotation waits after a hand drag. <c>Viewport</c> is the page
+/// viewport the shell last reported, from which a drag works out the globe's radius to turn pixels into degrees.</summary>
 type State =
-    { Now:float; Lambda:float; Phi:float; TargetLambda:float; TargetPhi:float; Region:string; Auto:bool; Night:bool
-      Hover:string option; Pointer:Point option; Airborne:float list; NextSample:float; Shown:Map<string,float> }
+    { Now:float; Lambda:float; Phi:float; TargetLambda:float; TargetPhi:float; Region:string; Auto:bool; Night:bool; Held:float
+      Viewport:Viewport; Hover:string option; Pointer:Point option; Airborne:float list; NextSample:float; Shown:Map<string,float> }
 
 let private geo longitude latitude = GeoPosition.create longitude latitude |> ok
 let hubs=
@@ -27,7 +29,10 @@ let routes=
     |> List.map(fun (a,b) -> hub a,hub b) |> List.toArray
 let private regionCenters=Map.ofList ["All",(20.,25.);"Americas",(-80.,15.);"EMEA",(18.,25.);"APAC",(118.,10.)]
 let private airlines=[|"RV";"DX";"AN";"SK";"QL"|]
-let private radius,cx,cy=282.,320.,344.
+/// <summary>Seconds a hand drag holds auto-rotation before it resumes.</summary>
+let private holdSeconds=2.
+/// <summary>Latitude limit of the camera: the globe never tips further than this toward a pole.</summary>
+let private tilt=70.
 
 /// <summary>Flights whose scheduled window overlaps [start, finish]; even legs fly outbound, odd legs return.</summary>
 let flightsBetween start finish =
@@ -81,21 +86,24 @@ let circle (longitude:float) (latitude:float) (distance:float) =
 /// <summary>The sub-solar longitude sweeps the globe every two minutes; latitude follows a slow seasonal swing.</summary>
 let sun now = (180.-now*3.) % 360. - 180.,18.*sin(now/90.)
 
-let projection lambda phi =
+/// <summary>An orthographic projection of the given radius centred at (cx, cy), rotated by (lambda, phi) degrees.</summary>
+let projection radius cx cy lambda phi =
     Projection.create {ProjectionConfig.defaultValue ProjectionKind.Orthographic with
                            Scale=radius;Translate=pt cx cy;Rotation=GeoRotation.create lambda phi 0. |> ok} |> ok
 let private draw projection geometry = GeoPath.project GeoPathOptions.defaultValue projection geometry |> ok |> Path.concat
 
 let init () =
     let now=240.
-    {Now=now;Lambda=40.;Phi= -20.;TargetLambda=40.;TargetPhi= -20.;Region="All";Auto=true;Night=true;Hover=None;Pointer=None
-     Airborne=[for k in 0..59 -> float(List.length(airborne (now-60.+float k)))];NextSample=now+1.;Shown=Map.empty}
+    {Now=now;Lambda=40.;Phi= -20.;TargetLambda=40.;TargetPhi= -20.;Region="All";Auto=true;Night=true;Held=0.;Viewport={Width=1048.;Height=800.}
+     Hover=None;Pointer=None;Airborne=[for k in 0..59 -> float(List.length(airborne (now-60.+float k)))];NextSample=now+1.;Shown=Map.empty}
 
 let private ontime now (code:string) = 0.78+0.16*(0.5+0.5*fbm (stableHash code%500) (now/25.))
+/// <summary>Whether auto-rotation is on but waiting out the hold after a hand drag.</summary>
+let private held state = state.Auto && state.Now<state.Held
 
 let tick dt state =
     let now=state.Now+dt/1000.
-    let target=if state.Auto then state.TargetLambda-dt/1000.*5. else state.TargetLambda
+    let target=if state.Auto && now>=state.Held then state.TargetLambda-dt/1000.*5. else state.TargetLambda
     let sample=now>=state.NextSample
     let targets=Map.ofList ([for h in hubs -> h.Code,ontime now h.Code]@["airborne",float(List.length(airborne now))])
     {state with Now=now;TargetLambda=target;Lambda=approach dt 650. state.Lambda target;Phi=approach dt 650. state.Phi state.TargetPhi
@@ -107,28 +115,61 @@ let private focus region state =
     // Keep the rotation continuous: choose the equivalent target nearest the current angle.
     let target= -longitude
     let turns=Math.Round((state.Lambda-target)/360.)
-    {state with Region=region;TargetLambda=target+turns*360.;TargetPhi= -latitude;Auto=(region="All")}
+    {state with Region=region;TargetLambda=target+turns*360.;TargetPhi= -latitude;Auto=(region="All");Held=0.}
+
+let private summary="Twenty-two great-circle routes on an orthographic globe; planes fly scheduled legs while the day/night terminator sweeps."
+let private help="Choose a region to fly there · drag the globe to turn it · hover planes and hubs · click a hub to focus · arrows rotate · Space toggles auto-rotate · N toggles night"
+let private leftTools state =
+    [segmentedTool "region" 84. ["All","All hubs";"Americas","Americas";"EMEA","EMEA";"APAC","Asia-Pacific"] state.Region
+     buttonTool "auto" 104. "Auto-rotate" state.Auto
+     buttonTool "night" 92. "Day/night" state.Night]
+let private rightTools state =
+    let status,color,opacity=
+        if held state then "HELD",Theme.warn,1.
+        elif state.Auto then "ROTATING",Theme.good,0.35+0.65*pulse 1.4 state.Now
+        else "FIXED VIEW",Theme.muted,1.
+    [statusTool "camera" 112. status color opacity]
+let private rows=[[item 640. 420. (cell "globe" 652.); item 344. 290. (column [cell "airborne" 128.;cell "board" 300.;cell "ontime" 192.])]]
+
+/// <summary>The globe radius in a card: sized from the shorter side, with a side margin for hub codes drawn at the limb.</summary>
+let private globeRadius (r:Bounds) = max 60. (min (bw r/2.-40.) ((bh r-76.)/2.))
+
+/// <summary>Turns the globe by hand: a pixel of pointer travel is one radius-length of arc, so the surface under the pointer
+/// follows it. The camera jumps straight to the new angle (no easing lag) and auto-rotation holds for a moment.</summary>
+let private turn dx dy state =
+    let globeCard=(frame state.Viewport summary help (leftTools state) (rightTools state) rows).Cells["globe"]
+    let degrees=180./(Math.PI*globeRadius globeCard)
+    let lambda=state.Lambda+dx*degrees
+    let phi=clamp -tilt tilt (state.Phi-dy*degrees)
+    {state with Lambda=lambda;TargetLambda=lambda;Phi=phi;TargetPhi=phi;Held=state.Now+holdSeconds}
 
 let input message state =
     match message with
     | Input.Click id when id.StartsWith "region:" -> focus (id.Substring 7) state
-    | Input.Click "auto" | Input.Key " " -> {state with Auto=not state.Auto;TargetLambda=state.Lambda}
+    | Input.Click "auto" | Input.Key " " -> {state with Auto=not state.Auto;TargetLambda=state.Lambda;Held=0.}
     | Input.Click "night" | Input.Key "n" -> {state with Night=not state.Night}
+    | Input.Drag(dx,dy) -> turn dx dy state
     | Input.Key "ArrowLeft" -> {state with Auto=false;TargetLambda=state.TargetLambda+25.}
     | Input.Key "ArrowRight" -> {state with Auto=false;TargetLambda=state.TargetLambda-25.}
-    | Input.Key "ArrowUp" -> {state with TargetPhi=clamp -70. 70. (state.TargetPhi-15.)}
-    | Input.Key "ArrowDown" -> {state with TargetPhi=clamp -70. 70. (state.TargetPhi+15.)}
+    | Input.Key "ArrowUp" -> {state with TargetPhi=clamp -tilt tilt (state.TargetPhi-15.)}
+    | Input.Key "ArrowDown" -> {state with TargetPhi=clamp -tilt tilt (state.TargetPhi+15.)}
     | Input.Pick id when id.StartsWith "hub:" -> focus (hub (id.Substring 4)).Region {state with Auto=false}
     | Input.Hover id -> {state with Hover=id}
     | Input.Pointer point -> {state with Pointer=point}
+    | Input.Viewport viewport -> {state with Viewport=viewport}
     | _ -> state
 
 let private inRegion state (h:Hub) = state.Region="All" || h.Region=state.Region
 let private hoveredHub state = state.Hover |> Option.filter(fun id -> id.StartsWith "hub:") |> Option.map(fun id -> id.Substring 4)
 let private planeShape=polygon [pt 7. 0.;pt -5. -4.5;pt -2.5 0.;pt -5. 4.5]
 
-let private globe state =
-    let projection=projection state.Lambda state.Phi
+let private globe state (r:Bounds) =
+    let w,h=bw r,bh r
+    // The globe is centred between the title and the legend and sized from the shorter side; the side margin leaves room for a
+    // hub code drawn at the limb.
+    let radius=globeRadius r
+    let cx,cy=w/2.,(h+12.)/2.
+    let projection=projection radius cx cy state.Lambda state.Phi
     let project position = Projection.project projection position
     let focusHub=hoveredHub state
     let routeOpacity (a:Hub,b:Hub) =
@@ -178,19 +219,20 @@ let private globe state =
             flights |> List.tryFind(fun f -> "fl:"+f.Code=id) |> Option.bind(fun f ->
                 let progress=(state.Now-f.Departs)/f.Duration
                 Geodesic.interpolate (clamp01 progress) f.From.Position f.To.Position |> ok |> project |> Option.map(fun point ->
-                    tooltip "tip" point
+                    tooltip "tip" w h point
                         [sprintf "%s  %s → %s" f.Code f.From.Code f.To.Code
                          sprintf "%s to %s" f.From.City f.To.City
                          sprintf "%.0f%% complete · FL%.0f" (progress*100.) (Math.Round(350.*sin(Math.PI*clamp01 progress)/10.)*10.)
                          (if f.Delayed then "Departed 25 min late" else "On schedule")])) |> Option.toList
         | Some id when id.StartsWith "hub:" ->
-            let h=hub (id.Substring 4)
-            project h.Position |> Option.map(fun point ->
-                let out=flights |> List.filter(fun f -> f.From.Code=h.Code) |> List.length
-                let incoming=flights |> List.filter(fun f -> f.To.Code=h.Code) |> List.length
-                tooltip "tip" point [sprintf "%s · %s" h.Code h.City;sprintf "%d outbound, %d inbound airborne" out incoming;sprintf "On-time %s" (percent 0 (ontime state.Now h.Code));"Click to focus region"]) |> Option.toList
+            let target=hub (id.Substring 4)
+            project target.Position |> Option.map(fun point ->
+                let out=flights |> List.filter(fun f -> f.From.Code=target.Code) |> List.length
+                let incoming=flights |> List.filter(fun f -> f.To.Code=target.Code) |> List.length
+                tooltip "tip" w h point [sprintf "%s · %s" target.Code target.City;sprintf "%d outbound, %d inbound airborne" out incoming;sprintf "On-time %s" (percent 0 (ontime state.Now target.Code));"Click to focus region"]) |> Option.toList
         | _ -> []
-    card "globe" 24. 124. 640. 652. "Live network"
+    // The sea disc is a plain shape outside every data item, so a press on it starts a drag that turns the globe.
+    panel "globe" r "Live network"
         ([Leaf(dot "glow" (pt cx cy) (radius+10.) Theme.accent |> fade 0.06)
           Leaf(fill "ocean" (draw projection GeoGeometry.Sphere) (14,32,58))
           Leaf(stroke "graticule" (draw projection graticule) (40,70,105) 0.7 |> fade 0.7)
@@ -202,11 +244,36 @@ let private globe state =
                               Leaf(stroke (sprintf "r%d" index) (draw projection (GeoGeometry.LineString [a.Position;b.Position])) Theme.accent 1.1 |> fade (routeOpacity route))]
             group "hubs" hubMarks
             group "planes" planes
-            legend "legend" 18. 636. ["Hub",Theme.accent;"Airborne",Theme.text;"Delayed",Theme.warn]]
+            legend "legend" 18. (h-16.) ["Hub",Theme.accent;"Airborne",Theme.text;"Delayed",Theme.warn]]
          @ tip)
 
-let private board state =
-    let upcoming=flightsBetween state.Now (state.Now+30.) |> List.filter(fun f -> f.Departs>state.Now-1.5 && inRegion state f.From) |> List.sortBy(fun f -> f.Departs) |> List.truncate 9
+/// <summary>Headline count beside its trend: the number and its caption form a block on the left, vertically centred on the
+/// sparkline that fills the rest of the card.</summary>
+let private airborneCard state (r:Bounds) =
+    let w,h=bw r,bh r
+    let count=sprintf "%.0f" (Map.tryFind "airborne" state.Shown |> Option.defaultValue 0.)
+    let perHour=routes |> Array.mapi(fun index _ -> 3600./(7.+float((index*7)%9))) |> Array.sum
+    let caption=sprintf "%s legs scheduled per hour" (grouped perHour)
+    let captionSize=11.
+    let lines=if w>=440. then [caption] else wrap 112. captionSize caption
+    let blockW=max (textWidth 40. "000"*1.06) (lines |> List.map(textWidth captionSize) |> List.max)
+    let y0,y1=40.,h-16.
+    let blockH=29.+19.+14.*float(lines.Length-1)+3.
+    let top=y0+max 0. ((y1-y0-blockH)/2.)
+    let baseline=top+29.
+    let sparkX=16.+blockW+20.
+    panel "airborne" r "Aircraft airborne"
+        ([Leaf(label "count" 16. baseline 40. Theme.text 700 "start" count)]
+         @ (lines |> List.mapi(fun index line -> Leaf(label (sprintf "sub%d" index) 16. (baseline+19.+14.*float index) captionSize Theme.muted 400 "start" line)))
+         @ [spark "trend" state.Airborne sparkX y0 (w-16.-sparkX) (y1-y0) Theme.accent])
+
+let private board state (r:Bounds) =
+    let w,h=bw r,bh r
+    let capacity=clamp 1. 16. (floor((h-52.)/27.)) |> int
+    let upcoming=flightsBetween state.Now (state.Now+30.) |> List.filter(fun f -> f.Departs>state.Now-1.5 && inRegion state f.From) |> List.sortBy(fun f -> f.Departs) |> List.truncate capacity
+    // The status pill hugs the right edge and the countdown sits just before it; a wide board adds the city pair between.
+    let pillX=w-16.-88.
+    let etaX=pillX-44.
     let rows=
         upcoming |> List.mapi(fun index f ->
             let wait=f.Departs-state.Now
@@ -215,17 +282,22 @@ let private board state =
                 elif wait<3. then "Boarding",Theme.accent
                 elif f.Delayed then "Delayed",Theme.warn
                 else "On time",Theme.muted
+            let cities=sprintf "%s → %s" f.From.City f.To.City
             at (sprintf "row-%s-%.0f" f.Code f.Departs) 0. (44.+float index*27.)
-                [Leaf(label "code" 16. 14. 12. Theme.text 700 "start" f.Code)
-                 Leaf(label "route" 76. 14. 12. Theme.muted 400 "start" (sprintf "%s → %s" f.From.Code f.To.Code))
-                 Leaf(label "eta" 196. 14. 11. Theme.faint 400 "start" (if wait<0. then "now" else sprintf "in %.0fs" wait))
-                 Leaf(rrect "pill" 240. 1. 88. 18. 9. color |> fade (if status="Boarding" then 0.25+0.35*pulse 0.7 state.Now else 0.2))
-                 Leaf(label "status" 284. 14. 10.5 color 700 "middle" status)])
-    card "board" 680. 268. 344. 300. (sprintf "Departures · %s" (if state.Region="All" then "all hubs" else state.Region)) rows
+                ([Leaf(label "code" 16. 14. 12. Theme.text 700 "start" f.Code)
+                  Leaf(label "route" 76. 14. 12. Theme.muted 400 "start" (sprintf "%s → %s" f.From.Code f.To.Code))]
+                 @ (if 152.+textWidth 11. cities<=etaX-12. then [Leaf(label "cities" 152. 14. 11. Theme.faint 400 "start" cities)] else [])
+                 @ [Leaf(label "eta" etaX 14. 11. Theme.faint 400 "start" (if wait<0. then "now" else sprintf "in %.0fs" wait))
+                    Leaf(rrect "pill" pillX 1. 88. 18. 9. color |> fade (if status="Boarding" then 0.25+0.35*pulse 0.7 state.Now else 0.2))
+                    Leaf(label "status" (pillX+44.) 14. 10.5 color 700 "middle" status)]))
+    panel "board" r (sprintf "Departures · %s" (if state.Region="All" then "all hubs" else state.Region)) rows
 
-let private performance state =
+let private performance state (r:Bounds) =
+    let w,h=bw r,bh r
     let shown code=Map.tryFind code state.Shown |> Option.defaultValue 0.
-    let ranked=hubs |> List.filter(inRegion state) |> List.sortByDescending(fun h -> ontime state.Now h.Code) |> List.truncate 6
+    let capacity=clamp 1. 13. (floor((h-42.)/25.)) |> int
+    let ranked=hubs |> List.filter(inRegion state) |> List.sortByDescending(fun h -> ontime state.Now h.Code) |> List.truncate capacity
+    let track=w-124.
     let bars=
         ranked |> List.mapi(fun index h ->
             let value=shown h.Code
@@ -233,25 +305,14 @@ let private performance state =
             hot ("hub:"+h.Code)
                 [at "bar" 16. (44.+float index*25.)
                     [Leaf(label "code" 0. 13. 11.5 Theme.text 700 "start" h.Code)
-                     Leaf(rrect "track" 42. 3. 220. 12. 6. Theme.raised)
-                     Leaf(rrect "value" 42. 3. (220.*clamp01((value-0.6)/0.4)) 12. 6. color |> fade (emphasis (hoveredHub state) h.Code))
-                     Leaf(label "pct" 312. 13. 11. Theme.muted 600 "end" (percent 1 value))]])
-    card "ontime" 680. 584. 344. 192. "On-time departures" bars
+                     Leaf(rrect "track" 42. 3. track 12. 6. Theme.raised)
+                     Leaf(rrect "value" 42. 3. (track*clamp01((value-0.6)/0.4)) 12. 6. color |> fade (emphasis (hoveredHub state) h.Code))
+                     Leaf(label "pct" (w-32.) 13. 11. Theme.muted 600 "end" (percent 1 value))]])
+    panel "ontime" r "On-time departures" bars
 
-let view state =
-    let count=Map.tryFind "airborne" state.Shown |> Option.defaultValue 0.
-    [header "Global flight tracker" "Twenty-two great-circle routes on an orthographic globe; planes fly scheduled legs while the day/night terminator sweeps." "Choose a region to fly the camera there · hover planes and hubs · click a hub to focus · ←/→/↑/↓ rotate · Space toggles auto-rotate · N toggles night"
-     group "controls"
-        (segmented "region" 24. 84. 84. ["All","All hubs";"Americas","Americas";"EMEA","EMEA";"APAC","Asia-Pacific"] state.Region
-         @ [button "auto" 390. 84. 104. "Auto-rotate" state.Auto
-            button "night" 500. 84. 92. "Day/night" state.Night])
-     globe state
-     card "airborne" 680. 124. 344. 128. "Aircraft airborne"
-        [Leaf(label "count" 16. 76. 40. Theme.text 700 "start" (sprintf "%.0f" count))
-         Leaf(text "sub" 16. 104. 11.5 Theme.muted (sprintf "%.0f legs scheduled per hour" (routes |> Array.mapi(fun index _ -> 3600./(7.+float((index*7)%9))) |> Array.sum)))
-         spark "trend" state.Airborne 150. 40. 178. 64. Theme.accent]
-     board state
-     performance state]
+let view viewport state =
+    page viewport "Global flight tracker" summary help (leftTools state) (rightTools state) rows
+        (fun cells -> [globe state cells["globe"];airborneCard state cells["airborne"];board state cells["board"];performance state cells["ontime"]])
 
 let model = {Init=init;Tick=tick;Input=input;View=view}
 let dashboard = {Id="flights";Title="Flight tracker";Summary="Globe, routes, departures";Start=fun () -> Live.start model}

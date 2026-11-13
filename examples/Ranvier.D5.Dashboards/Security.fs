@@ -10,7 +10,8 @@ type Alert = { Id:int; At:float; Severity:string; Text:string }
 type State =
     { Now:float; Force:ForceState; Attack:float option; Blocked:bool; Labels:bool; Selected:string option
       Hover:string option; Pointer:Point option; Events:(float*float*float) list; NextSecond:float
-      Alerts:Alert list; AlertId:int; NextAlert:float; Rng:RandomState; Shown:Map<string,float> }
+      Alerts:Alert list; AlertId:int; NextAlert:float; Rng:RandomState; Shown:Map<string,float>
+      MeshX:Extent; MeshY:Extent; EventAxis:Extent }
 
 let private tiers=
     ["Internet","edge";"CDN","edge";"WAF","edge";"LB","edge";"API gateway","edge"
@@ -40,6 +41,15 @@ let private initialForce () =
                                                    ManyBody=Some(ManyBodyConfig.create -120.);Collision=Some(CollisionConfig.create 0.8)}
     Force.initialize config (Seed.create 7u) graph |> ok |> Force.step 260
 
+/// <summary>The simulation-space extent of the node positions on each axis.</summary>
+let private meshRange (force:ForceState) =
+    let nodes=(Force.snapshot force).Nodes
+    let xs,ys=nodes |> List.map(fun n -> n.Position.X),nodes |> List.map(fun n -> n.Position.Y)
+    (List.min xs,List.max xs),(List.min ys,List.max ys)
+/// <summary>Half-lives in milliseconds for the mesh fit to settle after the layout contracts, and for the events axis to relax.</summary>
+let private meshHalfLife,eventHalfLife=3000.,4000.
+let private eventPeak (events:(float*float*float) list) = events |> List.map(fun (a,b,c) -> a+b+c) |> List.fold max 1200.
+
 let private attackLevel state = match state.Attack with Some start -> clamp01((state.Now-start)/4.) | None -> 0.
 
 let private targets state =
@@ -62,9 +72,13 @@ let private raise' severity text state =
     {state with Alerts=({Id=state.AlertId+1;At=state.Now;Severity=severity;Text=text}::state.Alerts) |> List.truncate 8;AlertId=state.AlertId+1}
 
 let init () =
-    let state={Now=0.;Force=initialForce();Attack=Some -3.;Blocked=false;Labels=true;Selected=None;Hover=None;Pointer=None
-               Events=[];NextSecond=1.;Alerts=[];AlertId=0;NextAlert=1.5;Rng=RandomState.create 31337UL;Shown=Map.empty}
+    let force=initialForce()
+    let meshX,meshY=meshRange force
+    let state={Now=0.;Force=force;Attack=Some -3.;Blocked=false;Labels=true;Selected=None;Hover=None;Pointer=None
+               Events=[];NextSecond=1.;Alerts=[];AlertId=0;NextAlert=1.5;Rng=RandomState.create 31337UL;Shown=Map.empty
+               MeshX=Extent.ofRange meshX;MeshY=Extent.ofRange meshY;EventAxis=Extent.ofRange (0.,1200.)}
     let state={state with Events=[for k in 0..59 -> sample {state with Now=float(k-60)}]}
+    let state={state with EventAxis=Extent.ofRange (0.,eventPeak state.Events)}
     let state=raise' "low" "Admin session started on bastion" state |> raise' "medium" "Rate limit exceeded on search" |> raise' "critical" "Credential stuffing detected against auth"
     {state with Shown=targets state}
 
@@ -82,7 +96,10 @@ let tick dt state =
                 else routine[min (routine.Length-1) (int(pick*float routine.Length))]
             raise' severity text {state with NextAlert=now+1.2+gap;Rng=rng}
         else state
-    {state with Shown=approachMap dt 450. 0. state.Shown (targets state)}
+    let meshX,meshY=meshRange state.Force
+    {state with Shown=approachMap dt 450. 0. state.Shown (targets state)
+                MeshX=Extent.update dt meshHalfLife meshX state.MeshX;MeshY=Extent.update dt meshHalfLife meshY state.MeshY
+                EventAxis=Extent.update dt eventHalfLife (0.,eventPeak state.Events) state.EventAxis}
 
 let input message state =
     match message with
@@ -103,8 +120,19 @@ let input message state =
 let private shown key state = Map.tryFind key state.Shown |> Option.defaultValue 0.
 let private severityColor = function "critical" -> Theme.bad | "high" -> Theme.orange | "medium" -> Theme.warn | _ -> Theme.accent
 
-let private topology state =
-    let nodes=(Force.snapshot state.Force).Nodes |> List.map(fun n -> n.Id,pt (clamp 30. 610. n.Position.X) (clamp 52. 396. n.Position.Y)) |> Map.ofList
+let private topology state (r:Bounds) =
+    let w,h=bw r,bh r
+    // The mesh is fitted into the card between the title and the legend, with room for the widest label beside an edge node. The fit
+    // follows the decaying extent of the simulated positions, so the mesh stays centred without zooming on every jitter, and its
+    // aspect may stretch by at most a quarter to use a wide or tall card.
+    let left,right,top,bottom=44.,w-44.,54.,h-56.
+    let spanX,spanY=max 40. (state.MeshX.High-state.MeshX.Low),max 40. (state.MeshY.High-state.MeshY.Low)
+    let fitX,fitY=(right-left)/spanX,(bottom-top)/spanY
+    let fit=min fitX fitY
+    let sx,sy=min fitX (fit*1.25),min fitY (fit*1.25)
+    let ox=(left+right)/2.-sx*(state.MeshX.Low+state.MeshX.High)/2.
+    let oy=(top+bottom)/2.-sy*(state.MeshY.Low+state.MeshY.High)/2.
+    let nodes=(Force.snapshot state.Force).Nodes |> List.map(fun n -> n.Id,pt (ox+sx*n.Position.X) (oy+sy*n.Position.Y)) |> Map.ofList
     let focus=state.Hover |> Option.filter(fun h -> h.StartsWith "node:") |> Option.map(fun h -> h.Substring 5) |> Option.orElse state.Selected
     let neighbours=match focus with Some f -> links |> List.collect(fun (a,b) -> if a=f then [b] elif b=f then [a] else []) |> Set.ofList |> Set.add f | None -> Set.empty
     let attack=attackLevel state
@@ -150,40 +178,54 @@ let private topology state =
         | Some id when id.StartsWith "node:" ->
             let node=id.Substring 5
             let degree=links |> List.filter(fun (a,b) -> a=node || b=node) |> List.length
-            [tooltip "tip" nodes[node] [node;sprintf "Tier: %s · %d connections" (tierOf node) degree
-                                        (if node="auth" && attack>0. && not state.Blocked then "Under attack" else "Healthy");"Click to pin neighbours"]]
+            [tooltip "tip" w h nodes[node] [node;sprintf "Tier: %s · %d connection%s" (tierOf node) degree (if degree=1 then "" else "s")
+                                            (if node="auth" && attack>0. && not state.Blocked then "Under attack" else "Healthy");"Click to pin neighbours"]]
         | _ -> []
-    card "topology" 24. 124. 640. 440. "Service topology · live traffic"
-        ([group "edges" edges;group "nodes" nodeMarks;legend "legend" 18. 424. ["Edge",Theme.accent;"Service",Theme.violet;"Data",Theme.teal;"Internal",Theme.warn;"Hostile",Theme.bad]]@tip)
+    panel "topology" r "Service topology · live traffic"
+        ([group "edges" edges;group "nodes" nodeMarks;legend "legend" 18. (h-16.) ["Edge",Theme.accent;"Service",Theme.violet;"Data",Theme.teal;"Internal",Theme.warn;"Hostile",Theme.bad]]@tip)
 
-let private threat state =
+/// <summary>The first of several phrasings, longest first, that fits a width at a font size; the shortest when none does.</summary>
+let private threat state (r:Bounds) =
+    let w,h=bw r,bh r
     let level=shown "threat" state
     let status,color=if level>0.7 then "Critical",Theme.bad elif level>0.4 then "Elevated",Theme.orange elif level>0.25 then "Guarded",Theme.warn else "Low",Theme.good
-    card "threat" 680. 124. 344. 170. "Threat level"
-        [gauge "gauge" 92. 98. 58. 11. level color (percent 0 level) "risk score"
-         Leaf(label "status" 176. 80. 22. color 700 "start" status)
-         Leaf(text "detail" 176. 104. 11.5 Theme.muted (match state.Attack,state.Blocked with
-                                                          | Some _,false -> "Active credential stuffing"
-                                                          | Some _,true -> "Attack contained at WAF"
-                                                          | _ -> "No active incidents"))
-         Leaf(text "mttr" 176. 124. 11. Theme.faint (sprintf "Alerts in feed: %d" state.Alerts.Length))]
+    // The gauge sizes from the card height (and never takes more than a sixth of its width); the status text sits beside it.
+    let radius=clamp 36. 80. (min ((h-62.)/1.78) (w*0.17))
+    let cx=34.+radius
+    let cy=36.+(h-44.-(radius*1.78+18.))/2.+radius
+    let tx=cx+radius+26.
+    let room=w-tx-8.
+    let detail=
+        match state.Attack,state.Blocked with
+        | Some _,false -> ["Active credential stuffing";"Credential stuffing"]
+        | Some _,true -> ["Attack contained at WAF";"Contained at WAF"]
+        | _ -> ["No active incidents";"No incidents"]
+    panel "threat" r "Threat level"
+        [gauge "gauge" cx cy radius 11. level color (percent 0 level) "risk score"
+         Leaf(label "status" tx (cy-18.) 22. color 700 "start" status)
+         Leaf(text "detail" tx (cy+6.) 11.5 Theme.muted (fitting room 11.5 detail))
+         Leaf(text "mttr" tx (cy+26.) 11. Theme.faint (fitting room 11. [sprintf "Alerts in feed: %d" state.Alerts.Length;sprintf "%d alerts" state.Alerts.Length]))]
 
-let private feed state =
+let private feed state (r:Bounds) =
+    let w,h=bw r,bh r
+    // As many rows as the card holds, and alert text cut to the width left after the slide-in offset.
+    let capacity=max 1 (int((h-59.)/26.)+1)
+    let chars=max 8 (int((w-128.)/textWidth 10.5 "M"))
     let rows=
-        state.Alerts |> List.mapi(fun index alert ->
+        state.Alerts |> List.truncate capacity |> List.mapi(fun index alert ->
             let age=state.Now-alert.At
             let enter=outCubic(clamp01(age/0.45))
             at (sprintf "a%d" alert.Id) (16.+(1.-enter)*30.) (46.+float index*26.)
                 [Leaf(rrect "pill" 0. -12. 58. 17. 8.5 (severityColor alert.Severity) |> fade (0.22*enter))
                  Leaf(label "severity" 29. 0. 9.5 (severityColor alert.Severity) 700 "middle" (alert.Severity.ToUpperInvariant()) |> fade enter)
-                 Leaf(text "text" 66. 0. 10.5 Theme.text (if alert.Text.Length>40 then alert.Text.Substring(0,39)+"…" else alert.Text) |> fade enter)])
-    card "alerts" 680. 310. 344. 254. "Alert feed" [group "rows" (rows |> List.truncate 8)]
+                 Leaf(text "text" 66. 0. 10.5 Theme.text (if alert.Text.Length>chars then alert.Text.Substring(0,chars-1)+"…" else alert.Text) |> fade enter)])
+    panel "alerts" r "Alert feed" [group "rows" rows]
 
-let private eventBars state =
-    let x0,x1,y0,y1=56.,620.,44.,170.
+let private eventBars state (r:Bounds) =
+    let w,h=bw r,bh r
+    let x0,x1,y0,y1=56.,w-20.,44.,h-26.
     let events=state.Events
-    let maximum=events |> List.map(fun (a,b,c) -> a+b+c) |> List.fold max 1200.
-    let ys=Scale.linear (0.,maximum*1.1) (y1,y0)
+    let ys=Scale.linear (0.,state.EventAxis.High*1.1) (y1,y0)
     let slot=(x1-x0)/60.
     let shift=(state.NextSecond-state.Now)*slot
     let bars=
@@ -195,35 +237,39 @@ let private eventBars state =
             group (sprintf "s%d" i)
                 [for k,(value,color) in List.indexed segments ->
                     Leaf(rect (sprintf "k%d" k) (max x0 x) (Scale.map ys (tops[k]+value)) (slot*0.78) (Scale.map ys tops[k]-Scale.map ys (tops[k]+value)) color |> fade (opacity*0.9))])
-    card "events" 24. 580. 640. 196. "Events per second · last minute"
+    panel "events" r "Events per second · last minute"
         [yGrid "grid" ys (Scale.ticks 3 ys) x0 x1 (si 1)
          group "bars" bars
-         legend "legend" 360. 24. ["Allowed",Theme.accent;"Blocked",Theme.good;"Flagged",Theme.bad]]
+         legend "legend" (w-220.) 24. ["Allowed",Theme.accent;"Blocked",Theme.good;"Flagged",Theme.bad]]
 
-let private top state =
+let private top state (r:Bounds) =
+    let w,h=bw r,bh r
     let ranked=sources |> List.map(fun ip -> ip,shown ip state) |> List.sortByDescending snd
     let maximum=ranked |> List.map snd |> List.max
+    // Rows spread over a taller card; bars take the width between the address column and the value column.
+    let step=clamp 24. 40. ((h-52.)/6.)
+    let barX,valueX=104.,w-32.
+    let barMax=max 40. (valueX-barX-44.)
     let rows=
         ranked |> List.mapi(fun index (ip,value) ->
             let hostile=ip.StartsWith "203.0.113" && state.Attack.IsSome
-            at ("ip:"+ip) 16. (44.+float index*24.)
+            at ("ip:"+ip) 16. (44.+float index*step)
                 [Leaf(label "ip" 0. 12. 11. (if hostile then Theme.bad else Theme.text) 600 "start" ip)
-                 Leaf(rrect "bar" 104. 2. (170.*value/maximum) 12. 3. (if hostile then (if state.Blocked then Theme.good else Theme.bad) else Theme.accent) |> fade 0.85)
-                 Leaf(label "value" 312. 12. 10.5 Theme.muted 600 "end" (num 0 value))])
-    card "sources" 680. 580. 344. 196. "Top sources · req/s" rows
+                 Leaf(rrect "bar" barX 2. (barMax*value/maximum) 12. 3. (if hostile then (if state.Blocked then Theme.good else Theme.bad) else Theme.accent) |> fade 0.85)
+                 Leaf(label "value" valueX 12. 10.5 Theme.muted 600 "end" (num 0 value))])
+    panel "sources" r "Top sources · req/s" rows
 
-let view state =
-    [header "Security operations" "A force-directed service mesh with live packet flow. Launch a simulated credential-stuffing attack, watch it propagate, then block it at the WAF." "Simulate attack (A) · block at WAF (B) · re-layout (R) · labels (L) · hover nodes, click to pin neighbours, Escape clears"
-     group "controls"
-        [button "attack" 24. 84. 136. (if state.Attack.IsSome then "Stop attack" else "Simulate attack") state.Attack.IsSome
-         button "block" 166. 84. 112. (if state.Blocked then "Blocked" else "Block at WAF") state.Blocked
-         button "reheat" 284. 84. 90. "Re-layout" false
-         button "labels" 380. 84. 70. "Labels" state.Labels]
-     topology state
-     threat state
-     feed state
-     eventBars state
-     top state]
+let view viewport state =
+    page viewport "Security operations" "A force-directed service mesh with live packet flow. Launch a simulated credential-stuffing attack, watch it propagate, then block it at the WAF." "Simulate attack (A) · block at WAF (B) · re-layout (R) · labels (L) · hover nodes, click to pin neighbours, Escape clears"
+        [buttonTool "attack" 136. (if state.Attack.IsSome then "Stop attack" else "Simulate attack") state.Attack.IsSome
+         buttonTool "block" 112. (if state.Blocked then "Blocked" else "Block at WAF") state.Blocked
+         buttonTool "reheat" 90. "Re-layout" false
+         buttonTool "labels" 70. "Labels" state.Labels]
+        []
+        [[item 640. 440. (cell "topology" 440.);item 344. 290. (column [cell "threat" 170.;cell "alerts" 254.])]
+         [item 640. 440. (cell "events" 188.);item 344. 290. (cell "sources" 188.)]]
+        (fun cells -> [topology state cells["topology"];threat state cells["threat"];feed state cells["alerts"];eventBars state cells["events"];top state cells["sources"]])
+
 
 let model = {Init=init;Tick=tick;Input=input;View=view}
 let dashboard = {Id="security";Title="Security operations";Summary="Force graph, attack, alerts";Start=fun () -> Live.start model}

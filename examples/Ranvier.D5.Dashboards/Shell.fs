@@ -10,32 +10,43 @@ open Ranvier.View.Dom
 open Ranvier.View.WebCore
 open Ranvier.D5.Dashboards.Kit
 
+/// <summary>The window size the gallery opens at.</summary>
 let Width,Height=1280.,800.
-let Sidebar=232.
 
-/// <summary>Pure sidebar: brand, one navigation entry per dashboard and the keyboard hint.</summary>
-let sidebar (dashboards:Dashboard list) active (hovered:string option) =
+/// <summary>Sidebar width for a window width: a full sidebar, or a numbered rail below 1000 pixels.</summary>
+let sidebarWidth windowWidth = if windowWidth<1000. then 64. else 232.
+/// <summary>Height of one sidebar entry: 64 pixels, compressed in short windows.</summary>
+let entryHeight windowHeight = clamp 40. 64. ((windowHeight-150.)/10.)
+
+/// <summary>Pure sidebar for a window size: brand, one navigation entry per dashboard and the keyboard hint, or a numbered rail.</summary>
+let sidebar (windowWidth:float,windowHeight:float) (dashboards:Dashboard list) active (hovered:string option) =
+    let width=sidebarWidth windowWidth
+    let rail=width<100.
+    let step=entryHeight windowHeight
     let entry index (dashboard:Dashboard) =
         let selected=index=active
         let key="b:nav:"+dashboard.Id
         let over=hovered=Some key
-        at key 12. (100.+float index*64.)
-            [Leaf(rrect "bg" 0. 0. (Sidebar-24.) 56. 8. (if selected then Theme.raised elif over then (23,33,54) else Theme.panel)
-                  |> Mark.withStroke (paint (if selected then Theme.edge else Theme.panel)) 1.)
-             Leaf(rrect "marker" 0. 13. 3. 30. 1.5 (if selected then Theme.accent else Theme.panel))
-             Leaf(label "index" 22. 34. 12. (if selected then Theme.accent else Theme.faint) 700 "middle" (string((index+1)%10)))
-             Leaf(label "name" 40. 25. 13.5 (if selected || over then Theme.text else (190,200,216)) 600 "start" dashboard.Title)
-             Leaf(text "summary" 40. 43. 10.5 Theme.faint dashboard.Summary)]
+        let h=step-8.
+        at key (if rail then 8. else 12.) (100.+float index*step)
+            ([Leaf(rrect "bg" 0. 0. (width-(if rail then 16. else 24.)) h 8. (if selected then Theme.raised elif over then (23,33,54) else Theme.panel)
+                   |> Mark.withStroke (paint (if selected then Theme.edge else Theme.panel)) 1.)
+              Leaf(rrect "marker" 0. (h/2.-15.) 3. 30. 1.5 (if selected then Theme.accent else Theme.panel))
+              Leaf(label "index" (if rail then (width-16.)/2. else 22.) (h/2.+6.) (if rail then 14. else 12.) (if selected then Theme.accent else Theme.faint) 700 "middle" (string((index+1)%10)))]
+             @ (if rail then [] else
+                 [Leaf(label "name" 40. (if h>=50. then 25. else h/2.+5.) 13.5 (if selected || over then Theme.text else (190,200,216)) 600 "start" dashboard.Title)]
+                 @ (if h>=50. then [Leaf(text "summary" 40. 43. 10.5 Theme.faint dashboard.Summary)] else [])))
     group "sidebar"
-        ([Leaf(rect "bg" 0. 0. Sidebar Height Theme.panel)
-          Leaf(rect "edge" (Sidebar-1.) 0. 1. Height Theme.edge)
-          Leaf(rrect "logo" 20. 22. 26. 26. 6. Theme.accent)
-          Leaf(label "logo-mark" 33. 40. 14. Theme.background 800 "middle" "D5")
-          Leaf(label "brand" 56. 34. 16. Theme.text 800 "start" "Ranvier.D5")
-          Leaf(text "tagline" 56. 50. 11. Theme.muted "Live dashboards")
-          Leaf(label "section" 20. 86. 10. Theme.faint 700 "start" "GALLERY")]
+        ([Leaf(rect "bg" 0. 0. width windowHeight Theme.panel)
+          Leaf(rect "edge" (width-1.) 0. 1. windowHeight Theme.edge)
+          Leaf(rrect "logo" (if rail then 19. else 20.) 22. 26. 26. 6. Theme.accent)
+          Leaf(label "logo-mark" (if rail then 32. else 33.) 40. 14. Theme.background 800 "middle" "D5")]
+         @ (if rail then [] else
+             [Leaf(label "brand" 56. 34. 16. Theme.text 800 "start" "Ranvier.D5")
+              Leaf(text "tagline" 56. 50. 11. Theme.muted "Live dashboards")
+              Leaf(label "section" 20. 86. 10. Theme.faint 700 "start" "GALLERY")])
          @ List.mapi entry dashboards
-         @ [Leaf(text "keys" 20. 782. 10.5 Theme.faint "PgUp / PgDn or 1–0 to switch")])
+         @ (if rail || windowHeight<100.+10.*step+30. then [] else [Leaf(text "keys" 20. (windowHeight-18.) 10.5 Theme.faint "PgUp / PgDn or 1–0 to switch")]))
 
 /// <summary>Outlines the background of the hovered control so every button shows native hover feedback.</summary>
 let rec highlight (hovered:string option) nodes =
@@ -48,13 +59,54 @@ let rec highlight (hovered:string option) nodes =
             | Group(spec,children) -> Group(spec,highlight hovered children)
             | node -> node)
 
-/// <summary>The whole window scene for an active dashboard and its current content nodes.</summary>
-let scene (dashboards:Dashboard list) active hovered (content:SceneNode list) =
+/// <summary>One rectangular clip definition for every distinct <c>clip-WxH</c> key used in the nodes.</summary>
+let clips (nodes:SceneNode list) =
+    let rec keys nodes =
+        nodes |> List.collect(function
+            | Group(spec,children) -> (match spec.Clip with Some key when key.StartsWith "clip-" -> [key] | _ -> [])@keys children
+            | Leaf _ -> [])
+    keys nodes |> List.distinct |> List.map(fun key ->
+        let size=key.Substring(5).Split 'x'
+        RectClip(key,box 0. 0. (float size[0]) (float size[1])))
+
+/// <summary>Largest scroll offset for a page in a window.</summary>
+let maxScroll (windowHeight:float) (page:Page) = max 0. (page.Height-windowHeight)
+
+/// <summary>The window's top-level nodes for a window size, the active dashboard, its laid-out page and the page's scroll offset.</summary>
+let nodes (windowWidth:float,windowHeight:float) (dashboards:Dashboard list) active hovered (page:Page) scroll =
     let dashboard=List.item active dashboards
-    Scene.compose {Width=Width;Height=Height} ("Ranvier.D5 dashboards: "+dashboard.Title) []
-        [Leaf(rect "page" 0. 0. Width Height Theme.background)
-         sidebar dashboards active hovered
-         at ("content:"+dashboard.Id) Sidebar 0. (highlight hovered content)]
+    let side=sidebarWidth windowWidth
+    let content=at ("content:"+dashboard.Id) side (-scroll) (highlight hovered page.Nodes)
+    let limit=maxScroll windowHeight page
+    let scrollbar=
+        if limit<=0. then [] else
+        let thumb=max 40. (windowHeight*windowHeight/page.Height)
+        [Leaf(rrect "scrollbar" (windowWidth-7.) (4.+(windowHeight-8.-thumb)*scroll/limit) 4. thumb 2. Theme.edge)]
+    [Leaf(rect "page" 0. 0. windowWidth windowHeight Theme.background)
+     content
+     sidebar (windowWidth,windowHeight) dashboards active hovered]
+    @ scrollbar
+
+/// <summary>Composes window nodes into a scene with the clip definitions they use.</summary>
+let compose (windowWidth:float,windowHeight:float) (dashboard:Dashboard) (nodes:SceneNode list) =
+    Scene.compose {Width=windowWidth;Height=windowHeight} ("Ranvier.D5 dashboards: "+dashboard.Title) (clips nodes) nodes
+
+/// <summary>The whole window scene, without transitions.</summary>
+let scene window (dashboards:Dashboard list) active hovered page scroll =
+    compose window (List.item active dashboards) (nodes window dashboards active hovered page scroll)
+
+/// <summary>An application-surface preflight in the spirit of Tailwind's base layer: nothing but a writable field is selectable or
+/// shows a text cursor, text never
+/// takes the pointer (so a label over a chart or a button hits whatever is underneath), controls (<c>b:</c>) and data items
+/// (<c>h:</c>) show a pointer cursor, and overlays (<c>x:</c>) let the pointer through.</summary>
+let private stylesheet =
+    String.concat ""
+        ["*{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;cursor:default}"
+         "input,textarea,[contenteditable]{user-select:text;-webkit-user-select:text;cursor:text}"
+         "svg{outline:none}"
+         "text{pointer-events:none}"
+         "[data-d5-group^='b:'],[data-d5-group^='b:'] *,[data-d5-group^='h:'],[data-d5-group^='h:'] *{cursor:pointer}"
+         "[data-d5-group^='x:']{pointer-events:none}"]
 
 /// <summary>A mounted gallery: its owner, navigation, the frame step, input entry points and readers used by native checks.</summary>
 type App =
@@ -67,9 +119,21 @@ type App =
       Send:Input -> unit
       Current:unit -> Live
       Hovered:unit -> string option
-      Control:unit -> string option }
+      Control:unit -> string option
+      /// <summary>The window size the shell is laid out for.</summary>
+      Window:unit -> float*float
+      /// <summary>The content viewport the active dashboard is laid out in.</summary>
+      Content:unit -> Viewport
+      Scroll:unit -> float
+      /// <summary>True while a press that started on empty space is being dragged.</summary>
+      Dragging:unit -> bool
+      /// <summary>Ends a drag; the window loop calls it when the native mouse button is no longer held.</summary>
+      Release:unit -> unit
+      /// <summary>The active dashboard's page at the current size.</summary>
+      Page:unit -> Page }
 
-/// <summary>Mounts the gallery into the host. Each dashboard keeps its own immutable <c>Live</c> in a signal; only the active one advances.</summary>
+/// <summary>Mounts the gallery into the host. Each dashboard keeps its own immutable <c>Live</c> in a signal; only the active one
+/// advances. The layout follows the host viewport, the page scrolls with the wheel, and a press on empty space drags.</summary>
 let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
     graph.Run(fun () -> Api.createRoot(fun owner ->
         let count=List.length dashboards
@@ -77,6 +141,15 @@ let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
         let lives=dashboards |> List.map(fun dashboard -> Api.createSignal(dashboard.Start())) |> List.toArray
         let control=Api.createSignal None
         let item=Api.createSignal None
+        let window=Api.createSignal (Width,Height)
+        let scroll=Api.createSignal 0.
+        // The viewport each dashboard was last told about; the active one hears of every change before its next frame.
+        let told:Viewport option array=Array.create count None
+        let content()=let w,h=window.Value in ({Width=w-sidebarWidth w;Height=h}:Viewport)
+        let page()=lives[active.Value].Value.View(content())
+        let scrollTo value =
+            let next=clamp 0. (maxScroll (snd window.Value) (page())) value
+            if next<>scroll.Value then scroll.Value<-next
         let send input =
             let index=active.Value
             lives[index].Value<-lives[index].Value.Send input
@@ -88,6 +161,7 @@ let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
                 item.Value<-None
                 control.Value<-None
                 active.Value<-index
+                scroll.Value<-0.
         let key (name:string) =
             match name with
             | "PageDown" | "]" -> select(active.Value+1)
@@ -95,34 +169,66 @@ let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
             | digit when digit.Length=1 && Char.IsDigit digit[0] -> select((int digit[0]-int '0'+9)%10)
             | other -> send(Input.Key other)
         let svg:Ranvier.Dom.SVGGraphicsElement option ref=ref None
+        let dragging:Point option ref=ref None
+        let plot (event:Ranvier.Dom.Event) =
+            match event,svg.Value with
+            | (:? Ranvier.Dom.PointerEvent as pointer),Some element -> InputAdapter.clientToPlot element (Point.create pointer.clientX pointer.clientY)
+            | _ -> None
+        let trace=not(String.IsNullOrEmpty(Environment.GetEnvironmentVariable "RANVIER_DASHBOARDS_TRACE"))
         let dispatch (path:string list) (name:string) (event:Ranvier.Dom.Event) =
+            if trace && name<>"wheel" then
+                let buttons=match event with :? Ranvier.Dom.PointerEvent as p -> int p.buttons | _ -> -1
+                eprintfn "event %-12s buttons=%d dragging=%b path=%s" name buttons dragging.Value.IsSome (String.concat "/" path)
             graph.Run(fun () -> Api.untrack(fun () ->
                 let button=path |> List.tryFindBack(fun key -> key.StartsWith "b:")
                 let picked=path |> List.tryFindBack(fun key -> key.StartsWith "h:") |> Option.map(fun key -> key.Substring 2)
+                let side=sidebarWidth (fst window.Value)
                 match name with
                 | "click" ->
                     match button with
                     | Some key when key.StartsWith "b:nav:" -> dashboards |> List.tryFindIndex(fun dashboard -> "b:nav:"+dashboard.Id=key) |> Option.iter select
                     | Some key -> send(Input.Click(key.Substring 2))
                     | None -> picked |> Option.iter(fun id -> send(Input.Pick id))
+                | "pointerdown" ->
+                    // A press on empty content (no control, no data item) starts a drag.
+                    dragging.Value<-plot event |> Option.filter(fun point -> button.IsNone && picked.IsNone && point.X>=side)
+                | "pointerup" | "pointercancel" -> dragging.Value<-None
                 | "pointermove" ->
                     if control.Value<>button then control.Value<-button
                     if item.Value<>picked then
                         item.Value<-picked
                         send(Input.Hover picked)
-                    match event,svg.Value with
-                    | (:? Ranvier.Dom.PointerEvent as pointer),Some element ->
-                        InputAdapter.clientToPlot element (Point.create pointer.clientX pointer.clientY) |> Option.iter(fun point ->
-                            send(Input.Pointer(if point.X>=Sidebar then Some(Point.create (point.X-Sidebar) point.Y) else None)))
+                    plot event |> Option.iter(fun point ->
+                        match event,dragging.Value with
+                        | (:? Ranvier.Dom.PointerEvent as pointer),Some start when pointer.buttons<>0us ->
+                            send(Input.Drag(point.X-start.X,point.Y-start.Y))
+                            dragging.Value<-Some point
+                        | _ -> dragging.Value<-None
+                        send(Input.Pointer(if point.X>=side then Some(Point.create (point.X-side) (point.Y+scroll.Value)) else None)))
+                | "wheel" ->
+                    match event with
+                    | :? Ranvier.Dom.WheelEvent as wheel -> scrollTo(scroll.Value+wheel.deltaY)
                     | _ -> ()
                 | _ -> ()))
+        let style=host.Document.createElement "style"
+        style.textContent<-stylesheet
+        host.Document.head.appendChild style |> ignore
         let container=host.Document.createElement "div"
+        container.setAttribute("style","width:100vw;height:100vh;overflow:hidden")
         host.Document.body.setAttribute("style","margin:0;overflow:hidden;background:#0a0f1c")
         host.Document.body.appendChild container |> ignore
-        let view()=scene dashboards active.Value control.Value (lives[active.Value].Value.View())
+        // Each frame eases every mark's style toward the view (Kit.Transitions); the eased scene is what the window shows.
+        let memory=Transitions.Memory()
+        let raw()=nodes window.Value dashboards active.Value control.Value (page()) scroll.Value
+        let shown=Api.createSignal(compose window.Value dashboards.Head (raw()))
+        let easing=String.IsNullOrEmpty(Environment.GetEnvironmentVariable "RANVIER_DASHBOARDS_NO_TRANSITIONS")
+        let present dt =
+            let eased=if easing then Transitions.ease dt memory (raw()) else raw()
+            shown.Value<-compose window.Value (List.item active.Value dashboards) eased
+        let view()=shown.Value
         let mounted=Mounting.mount graph None (fun errors -> raise(AggregateException errors)) container None
                         (fun context -> Program.run (Component.render (Renderer.createScoped dispatch) view) context.Backend)
-        Api.onCleanup(fun () -> mounted.Dispose();container.remove())
+        Api.onCleanup(fun () -> mounted.Dispose();container.remove();style.remove())
         host.Cycle()
         let element=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
         svg.Value<-Some element
@@ -135,14 +241,40 @@ let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
             | _ -> ()
         host.Document.addEventListener("keydown",onKey)
         Api.onCleanup(fun () -> host.Document.removeEventListener("keydown",onKey))
+        // A release anywhere ends a drag, whichever element (or none of the marks) receives it.
+        let onRelease (_:Ranvier.Dom.Event) = dragging.Value<-None
+        let releases=["pointerup";"pointercancel";"mouseup";"lostpointercapture"]
+        for name in releases do host.Document.addEventListener(name,onRelease)
+        Api.onCleanup(fun () -> for name in releases do host.Document.removeEventListener(name,onRelease))
         let run f=graph.Run(fun () -> Api.untrack f)
+        // The layout follows the container, which fills the host viewport.
+        let measure()=
+            let size=float container.clientWidth,float container.clientHeight
+            if fst size>=320. && snd size>=240. && size<>window.Value then
+                window.Value<-size
+                scrollTo scroll.Value
         {Owner=owner :> IDisposable
          Active=(fun () -> run(fun () -> active.Value))
          Select=(fun index -> run(fun () -> select index))
          Reset=(fun () -> run(fun () -> let index=active.Value in lives[index].Value<-(List.item index dashboards).Start()))
-         Advance=(fun dt -> run(fun () -> let index=active.Value in lives[index].Value<-lives[index].Value.Tick dt))
+         Advance=(fun dt -> run(fun () ->
+            measure()
+            let index=active.Value
+            let viewport=content()
+            if told[index]<>Some viewport then
+                told[index]<-Some viewport
+                send(Input.Viewport viewport)
+            lives[index].Value<-lives[index].Value.Tick dt
+            scrollTo scroll.Value
+            present dt))
          Key=(fun name -> run(fun () -> key name))
          Send=(fun input -> run(fun () -> send input))
          Current=(fun () -> run(fun () -> lives[active.Value].Value))
          Hovered=(fun () -> run(fun () -> item.Value))
-         Control=(fun () -> run(fun () -> control.Value))}))
+         Control=(fun () -> run(fun () -> control.Value))
+         Window=(fun () -> run(fun () -> window.Value))
+         Content=(fun () -> run content)
+         Scroll=(fun () -> run(fun () -> scroll.Value))
+         Dragging=(fun () -> dragging.Value.IsSome)
+         Release=(fun () -> dragging.Value<-None)
+         Page=(fun () -> run page)}))

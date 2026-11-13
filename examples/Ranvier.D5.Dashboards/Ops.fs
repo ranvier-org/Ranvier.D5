@@ -88,8 +88,10 @@ let windowed start (samples:Sample list) =
 let private hostColor index = Theme.series[index%Theme.series.Length]
 let private shown key state = Map.tryFind key state.Shown |> Option.defaultValue 0.
 
-let private cpuCard state rows start =
-    let x0,x1,y0,y1=48.,620.,48.,272.
+let private cpuCard state rows start (r:Bounds) =
+    let w,h=bw r,bh r
+    // The right margin holds the host labels at the line ends, so they stay inside the card.
+    let x0,x1,y0,y1=48.,w-72.,48.,h-28.
     let xs=Scale.linear (start,state.Now) (x0,x1)
     let ys=Scale.linear (0.,100.) (y1,y0)
     let px (s:Sample)=Scale.map xs s.T
@@ -111,42 +113,43 @@ let private cpuCard state rows start =
     let threshold=Scale.map ys 85.
     let crosshair=
         match state.Pointer with
-        | Some p when p.X-24.>=x0 && p.X-24.<=x1 && p.Y-244.>=y0 && p.Y-244.<=y1 && not rows.IsEmpty ->
-            let local=pt (p.X-24.) (p.Y-244.)
+        | Some p when p.X-bx r>=x0 && p.X-bx r<=x1 && p.Y-by r>=y0 && p.Y-by r<=y1 && not rows.IsEmpty ->
+            let local=pt (p.X-bx r) (p.Y-by r)
             let time=Scale.invert xs local.X
             let nearest=rows |> List.minBy(fun s -> abs(s.T-time))
             let x=px nearest
             let ranked=hosts |> Array.mapi(fun index host -> host,nearest.Cpu[index]) |> Array.sortByDescending snd |> Array.toList
-            [Leaf(stroke "cursor" (segment (pt x y0) (pt x y1)) Theme.muted 1. |> fade 0.6)
-             group "cursor-dots" [for index in 0..hosts.Length-1 -> Leaf(ring (sprintf "d%d" index) (pt x (Scale.map ys nearest.Cpu[index])) 4. (hostColor index) 2.)]
-             tooltip "tip" (pt x local.Y) ((sprintf "%.1fs ago" (state.Now-nearest.T))::(ranked |> List.map(fun (host,cpu) -> sprintf "%-9s %5.1f%%" host cpu)))]
+            [overlay "crosshair"
+                [Leaf(stroke "cursor" (segment (pt x y0) (pt x y1)) Theme.muted 1. |> fade 0.6)
+                 group "cursor-dots" [for index in 0..hosts.Length-1 -> Leaf(ring (sprintf "d%d" index) (pt x (Scale.map ys nearest.Cpu[index])) 4. (hostColor index) 2.)]]
+             tooltip "tip" w h (pt x local.Y) ((sprintf "%.1fs ago" (state.Now-nearest.T))::(ranked |> List.map(fun (host,cpu) -> sprintf "%-9s %5.1f%%" host cpu)))]
         | _ -> []
-    card "cpu" 24. 244. 640. 300. "CPU utilisation by host"
+    panel "cpu" r "CPU utilisation by host"
         ([yGrid "grid" ys [0.;25.;50.;75.;100.] x0 x1 (fun v -> num 0 v+"%")
           Leaf(stroke "threshold" (segment (pt x0 threshold) (pt x1 threshold)) Theme.bad 1. |> fade 0.55)
           Leaf(label "threshold-label" (x1-4.) (threshold-5.) 10. Theme.bad 600 "end" "alert 85%")
-          xLabels "time" 290. [for k in 0..4 -> x0+(x1-x0)*float k/4.,(if k=4 then "now" else sprintf "-%.0fs" (state.Window*(1.-float k/4.)))]
+          xLabels "time" (h-10.) [for k in 0..4 -> x0+(x1-x0)*float k/4.,(if k=4 then "now" else sprintf "-%.0fs" (state.Window*(1.-float k/4.)))]
           group "breaches" breaches
           group "lines" lines]@crosshair)
 
-let private latencyCard state rows =
-    let x0,x1,y0,y1=44.,326.,48.,272.
+let private latencyCard state rows (r:Bounds) =
+    let x0,x1,y0,y1=44.,bw r-18.,48.,bh r-28.
     let start=state.Now-state.Window
     let xs=Scale.linear (start,state.Now) (x0,x1)
     let ys=Scale.linear (0.,max 100. (shown "latencyMax" state)) (y1,y0)
     let at value (s:Sample)=pt (Scale.map xs s.T) (Scale.map ys value)
     let band=rows |> List.map(fun s -> at s.P90 s,at s.P99 s)
     let ticks=Scale.ticks 4 ys
-    card "latency" 680. 244. 344. 300. "Latency percentiles (ms)"
+    panel "latency" r "Latency percentiles (ms)"
         [yGrid "grid" ys ticks x0 x1 (num 0)
          Leaf(fill "p90-p99" (smoothArea band) Theme.violet |> fade 0.28)
          Leaf(stroke "p99" (smooth (rows |> List.map(fun s -> at s.P99 s))) Theme.violet 1.4)
          Leaf(stroke "p90" (smooth (rows |> List.map(fun s -> at s.P90 s))) Theme.violet 1. |> fade 0.7)
          Leaf(stroke "p50" (smooth (rows |> List.map(fun s -> at s.P50 s))) Theme.teal 2.)
-         legend "legend" 44. 292. ["p50",Theme.teal;"p90–p99 band",Theme.violet]]
+         legend "legend" 44. (bh r-8.) ["p50",Theme.teal;"p90–p99 band",Theme.violet]]
 
-let private throughputCard state rows =
-    let x0,x1,y0,y1=56.,620.,44.,186.
+let private throughputCard state rows (r:Bounds) =
+    let x0,x1,y0,y1=56.,bw r-20.,44.,bh r-30.
     let start=state.Now-state.Window
     let xs=Scale.linear (start,state.Now) (x0,x1)
     let ys=Scale.linear (0.,max 1000. (shown "throughputMax" state)) (y1,y0)
@@ -157,31 +160,34 @@ let private throughputCard state rows =
         layers |> List.mapi(fun index layer ->
             let pairs=List.zip rows layer.Values |> List.map(fun (s,(low,high)) -> pt (Scale.map xs s.T) (Scale.map ys low),pt (Scale.map xs s.T) (Scale.map ys high))
             hot layer.Key [Leaf(fill "area" (smoothArea pairs) Theme.series[(index+2)%Theme.series.Length] |> fade (0.82*emphasis state.Hover layer.Key))])
-    card "throughput" 24. 560. 640. 216. "Throughput by service (req/s)"
+    panel "throughput" r "Throughput by service (req/s)"
         [yGrid "grid" ys (Scale.ticks 3 ys) x0 x1 (si 0)
          group "areas" areas
-         legend "legend" 56. 206. [for index,name in Array.indexed services -> name,Theme.series[(index+2)%Theme.series.Length]]]
+         legend "legend" 56. (bh r-10.) [for index,name in Array.indexed services -> name,Theme.series[(index+2)%Theme.series.Length]]]
 
-let private healthCard state =
+let private healthCard state (r:Bounds) =
     let last=List.last state.Samples
+    // Two columns of tiles that widen with the card; rows share the height below the title.
+    let tw=(bw r-42.)/2.
+    let step=(bh r-48.)/3.
     let tiles=
         hosts |> Array.toList |> List.mapi(fun index host ->
             let cpu=last.Cpu[index]
             let hotHost=cpu>85.
             let color=if hotHost then Theme.bad elif cpu>70. then Theme.warn else Theme.good
-            let x,y=16.+float(index%2)*160.,40.+float(index/2)*56.
+            let x,y=16.+float(index%2)*(tw+10.),40.+float(index/2)*step
             hot host
                 [at "tile" x y
-                    [Leaf(rrect "bg" 0. 0. 150. 48. 6. Theme.raised
+                    [Leaf(rrect "bg" 0. 0. tw (step-8.) 6. Theme.raised
                           |> Mark.withStroke (paint (if hotHost then Theme.bad elif state.Hover=Some host then Theme.accent else Theme.edge)) (if hotHost then 1.+2.*pulse 0.8 state.Now else 1.))
                      Leaf(dot "status" (pt 12. 16.) 4. color |> fade (if hotHost then 0.4+0.6*pulse 0.8 state.Now else 1.))
                      Leaf(label "name" 22. 20. 11.5 Theme.text 600 "start" host)
-                     Leaf(label "cpu" 140. 20. 11.5 color 700 "end" (num 0 cpu+"%"))
-                     Leaf(rrect "track" 10. 32. 130. 6. 3. Theme.edge)
-                     Leaf(rrect "level" 10. 32. (130.*cpu/100.) 6. 3. color)]])
-    card "health" 680. 560. 344. 216. "Host health" tiles
+                     Leaf(label "cpu" (tw-10.) 20. 11.5 color 700 "end" (num 0 cpu+"%"))
+                     Leaf(rrect "track" 10. (step-24.) (tw-20.) 6. 3. Theme.edge)
+                     Leaf(rrect "level" 10. (step-24.) ((tw-20.)*cpu/100.) 6. 3. color)]])
+    panel "health" r "Host health" tiles
 
-let view state =
+let view viewport state =
     let start=state.Now-state.Window
     let rows=windowed start state.Samples
     let last=List.last state.Samples
@@ -189,30 +195,31 @@ let view state =
     let rpsChange=(Array.sum last.Traffic-Array.sum earlier.Traffic)/Array.sum earlier.Traffic
     let recent=state.Samples |> List.skip (max 0 (state.Samples.Length-60))
     let errors=shown "errors" state
-    let tileWidth=(1000.-48.)/4.
     let live=not state.Paused
-    [header "Cluster operations" "Six hosts and five services sampled twice a second. The window scrolls continuously and axes rescale as load changes." "Hover a host or a service to isolate it · move over the CPU chart for a crosshair · Space pauses · S injects a spike · ←/→ change the window"
-     group "controls"
-        (segmented "window" 24. 84. 54. ["30","30 s";"60","60 s";"120","120 s"] (string(int state.Window))
-         @ [button "pause" 210. 84. 86. (if state.Paused then "Resume" else "Pause") state.Paused
-            button "spike" 304. 84. 110. (if state.Spike>0. then "Spiking…" else "Inject spike") (state.Spike>0.)
-            at "status" 920. 84.
-                [Leaf(rrect "bg" 0. 0. 104. 26. 13. Theme.raised |> Mark.withStroke (paint Theme.edge) 1.)
-                 Leaf(dot "dot" (pt 16. 13.) 4.5 (if live then Theme.good else Theme.warn) |> fade (if live then 0.35+0.65*pulse 1.4 state.Now else 1.))
-                 Leaf(label "text" 30. 17.5 11.5 Theme.text 700 "start" (if live then "LIVE" else "PAUSED"))]])
-     kpi "rps" 24. 124. tileWidth 104. "Requests / s" (grouped (shown "rps" state)) (sprintf "%s vs 30 s ago" (percent 1 rpsChange)) (if rpsChange>=0. then Theme.good else Theme.bad)
-         (recent |> List.map(fun s -> Array.sum s.Traffic)) Theme.accent
-     kpi "errors" (24.+tileWidth+16.) 124. tileWidth 104. "Error rate" (num 2 errors+"%") (if errors>1. then "above 1% budget" else "within budget") (if errors>1. then Theme.bad else Theme.good)
-         (recent |> List.map(fun s -> s.Errors)) Theme.bad
-     kpi "p99" (24.+2.*(tileWidth+16.)) 124. tileWidth 104. "p99 latency" (num 0 (shown "p99" state)+" ms") (sprintf "p50 %s ms" (num 0 last.P50)) Theme.muted
-         (recent |> List.map(fun s -> s.P99)) Theme.violet
-     kpi "healthy" (24.+3.*(tileWidth+16.)) 124. tileWidth 104. "Healthy hosts" (sprintf "%.0f / %d" (Math.Round(shown "healthy" state)) hosts.Length)
-         (if last.Cpu |> Array.exists(fun c -> c>85.) then "CPU alert active" else "all hosts nominal") (if last.Cpu |> Array.exists(fun c -> c>85.) then Theme.bad else Theme.good)
-         (recent |> List.map(fun s -> s.Cpu |> Array.average)) Theme.good
-     cpuCard state rows start
-     latencyCard state rows
-     throughputCard state rows
-     healthCard state]
+    let kpis=["rps";"errors";"p99";"healthy"] |> List.map(fun key -> item 238. 180. (cell key 104.))
+    page viewport "Cluster operations" "Six hosts and five services sampled twice a second. The window scrolls continuously and axes rescale as load changes." "Hover a host or a service to isolate it · move over the CPU chart for a crosshair · Space pauses · S injects a spike · ←/→ change the window"
+        [segmentedTool "window" 54. ["30","30 s";"60","60 s";"120","120 s"] (string(int state.Window))
+         buttonTool "pause" 86. (if state.Paused then "Resume" else "Pause") state.Paused
+         buttonTool "spike" 110. (if state.Spike>0. then "Spiking…" else "Inject spike") (state.Spike>0.)]
+        [statusTool "status" 104. (if live then "LIVE" else "PAUSED") (if live then Theme.good else Theme.warn) (if live then 0.35+0.65*pulse 1.4 state.Now else 1.)]
+        [kpis
+         [item 640. 400. (cell "cpu" 300.);item 344. 300. (cell "latency" 300.)]
+         [item 640. 400. (cell "throughput" 216.);item 344. 320. (cell "health" 216.)]]
+        (fun cells ->
+            let tile key = let r=cells[key] in bx r,by r,bw r,bh r
+            [(let x,y,w,h=tile "rps" in kpi "rps" x y w h "Requests / s" (grouped (shown "rps" state)) (sprintf "%s vs 30 s ago" (percent 1 rpsChange)) (if rpsChange>=0. then Theme.good else Theme.bad)
+                                          (recent |> List.map(fun s -> Array.sum s.Traffic)) Theme.accent)
+             (let x,y,w,h=tile "errors" in kpi "errors" x y w h "Error rate" (num 2 errors+"%") (if errors>1. then "above 1% budget" else "within budget") (if errors>1. then Theme.bad else Theme.good)
+                                             (recent |> List.map(fun s -> s.Errors)) Theme.bad)
+             (let x,y,w,h=tile "p99" in kpi "p99" x y w h "p99 latency" (num 0 (shown "p99" state)+" ms") (sprintf "p50 %s ms" (num 0 last.P50)) Theme.muted
+                                          (recent |> List.map(fun s -> s.P99)) Theme.violet)
+             (let x,y,w,h=tile "healthy" in kpi "healthy" x y w h "Healthy hosts" (sprintf "%.0f / %d" (Math.Round(shown "healthy" state)) hosts.Length)
+                                              (if last.Cpu |> Array.exists(fun c -> c>85.) then "CPU alert active" else "all hosts nominal") (if last.Cpu |> Array.exists(fun c -> c>85.) then Theme.bad else Theme.good)
+                                              (recent |> List.map(fun s -> s.Cpu |> Array.average)) Theme.good)
+             cpuCard state rows start cells["cpu"]
+             latencyCard state rows cells["latency"]
+             throughputCard state rows cells["throughput"]
+             healthCard state cells["health"]])
 
 let model = {Init=init;Tick=tick;Input=input;View=view}
 let dashboard = {Id="ops";Title="Cluster operations";Summary="Streaming CPU, latency, traffic";Start=fun () -> Live.start model}
