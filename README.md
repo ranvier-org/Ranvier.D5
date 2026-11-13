@@ -52,6 +52,8 @@ It renders a signal-driven line, donut, treemap and bars using the same scene pr
 
 ![Working native linked charts](https://raw.githubusercontent.com/ranvier-org/Ranvier.D5/main/docs/images/linked.png)
 
+The [live dashboards app](examples/Ranvier.D5.Dashboards/README.md) is a native gallery of ten animated, input-reactive dashboards: operations, trading, a flight-tracking globe, revenue, a power grid, security operations, climate, product analytics, a bar-chart race and an emergency-department simulation. It uses only Ranvier libraries; run it with `dotnet run --project examples/Ranvier.D5.Dashboards -c Release`.
+
 See the [native example gallery](examples/Ranvier.D5.Gallery/README.md) for rendered snapshots and reproduction commands, including [hierarchy layouts](docs/hierarchy.md), [tiling and packing](docs/tiling.md), and the [reactive hierarchy explorer](docs/hierarchy-charts.md).
 
 ## Expansion packages and examples

@@ -10,3 +10,9 @@ for name in ["gallery","linked","hierarchy","tiling","hierarchy-charts","hierarc
         with Image.open(source) as native:
             native.convert("RGB").save(out/(name+".png"),optimize=True)
             print(f"{name}: {native.width}x{native.height}, native capture -> PNG")
+dashboards=out/"dashboards"
+dashboards.mkdir(parents=True,exist_ok=True)
+for source in sorted((root/"artifacts"/"dashboards").glob("*.bmp")):
+    with Image.open(source) as native:
+        native.convert("RGB").save(dashboards/(source.stem+".png"),optimize=True)
+        print(f"dashboards/{source.stem}: {native.width}x{native.height}, native capture -> PNG")

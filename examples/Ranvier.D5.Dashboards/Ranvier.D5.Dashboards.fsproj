@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><IsPackable>false</IsPackable><GenerateDocumentationFile>false</GenerateDocumentationFile></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Kit.fs" />
+    <Compile Include="Ops.fs" />
+    <Compile Include="Markets.fs" />
+    <Compile Include="Flights.fs" />
+    <Compile Include="Sales.fs" />
+    <Compile Include="Energy.fs" />
+    <Compile Include="Security.fs" />
+    <Compile Include="Weather.fs" />
+    <Compile Include="Product.fs" />
+    <Compile Include="Race.fs" />
+    <Compile Include="Hospital.fs" />
+    <Compile Include="Gallery.fs" />
+    <Compile Include="Shell.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Ranvier.D5.Geo/Ranvier.D5.Geo.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.View/Ranvier.D5.View.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj" />
+    <PackageReference Include="Ranvier.View.WebCore.Sdl$(RanvierPackageSuffix)" Version="[0.1.0-rc.12]" />
+  </ItemGroup>
+</Project>
