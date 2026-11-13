@@ -432,55 +432,70 @@ module Extent =
         let span=max 1e-9 (extent.High-extent.Low)
         extent.Low-span*fraction,extent.High+span*fraction
 
-/// <summary>Scene-wide style transitions: every mark's opacity, fill, stroke and stroke width ease toward the values its view asks for,
-/// so hover emphasis, highlights and colour changes animate without any dashboard code. Marks are matched by their key path; a new
-/// mark fades in. Geometry and transforms are untouched, so streaming data never lags.</summary>
+/// <summary>Scene-wide style transitions. Every mark's opacity eases toward what its view asks for, so hover emphasis and fades
+/// animate without any dashboard code. Fill, stroke and stroke width ease only inside controls and hover items (<c>b:</c> and
+/// <c>h:</c> groups), where colour changes come from interaction; elsewhere colours are data and change at once, and a
+/// <c>steady</c> group opts hover items whose colours are live data out as well. Marks are matched by their key path; a new mark
+/// fades in. Geometry and transforms are never eased, so streaming data does not lag.</summary>
 [<RequireQualifiedAccess>]
 module Transitions =
     /// <summary>The time constant in milliseconds: a change is about 95% complete after 200 ms.</summary>
     let tau=67.
-    /// <summary>What each mark showed last frame, by key path.</summary>
-    type Memory = Map<string,struct(float*Rgb option*Rgb option*float)>
-    let empty:Memory=Map.empty
+    [<Struct>]
+    type internal Shown = { Opacity:float; Fill:Rgb voption; Stroke:Rgb voption; Width:float; Frame:int }
+    /// <summary>What each mark showed last frame, by key path; owned by one window and updated in place every frame.</summary>
+    type Memory() =
+        member val internal Shown=Collections.Generic.Dictionary<string,Shown>() with get
+        member val internal Frame=0 with get,set
     let private rgbOf (paint:Paint) =
         let css=Paint.toCss paint
         if css.Length=7 && css[0]='#' then
             let channel i=Convert.ToInt32(css.Substring(i,2),16)
-            Some(channel 1,channel 3,channel 5)
-        else None
+            ValueSome(channel 1,channel 3,channel 5)
+        else ValueNone
     let private towards dt (current:Rgb) (target:Rgb) =
         let (r1,g1,b1),(r2,g2,b2)=current,target
         let channel a b=int(Math.Round(approach dt tau (float a) (float b)))
         channel r1 r2,channel g1 g2,channel b1 b2
     let private close (a:float) b=abs(a-b)<0.002
-    /// <summary>Eases one frame of nodes from the memory over <c>dt</c> milliseconds; returns the shown nodes and the next memory.</summary>
+    /// <summary>Eases one frame of nodes from the memory over <c>dt</c> milliseconds and records what is shown.</summary>
     let ease dt (memory:Memory) (nodes:SceneNode list) =
-        let next=Collections.Generic.Dictionary<string,struct(float*Rgb option*Rgb option*float)>()
-        let rec walk prefix nodes =
+        memory.Frame<-memory.Frame+1
+        let frame=memory.Frame
+        let shown=memory.Shown
+        let rec walk (prefix:string) colours nodes =
             nodes |> List.map(function
-                | Group(spec,children) -> Group(spec,walk (prefix+spec.Key+"/") children)
+                | Group(spec,children) ->
+                    let key=spec.Key
+                    let colours=if key.StartsWith "s:" then false elif key.StartsWith "b:" || key.StartsWith "h:" then true else colours
+                    Group(spec,walk (prefix+key+"/") colours children)
                 | Leaf mark ->
                     let key=prefix+Mark.key mark
                     let style=Mark.style mark
-                    let fill=if (Mark.fillDefinition mark).IsSome then None else rgbOf style.Fill
-                    let stroke=rgbOf style.Stroke
-                    let struct(opacity0,fill0,stroke0,width0)=
-                        match memory.TryFind key with
-                        | Some previous -> previous
-                        | None -> struct(0.,fill,stroke,style.StrokeWidth)
-                    let opacity=approach dt tau opacity0 style.Opacity
-                    let fill'=match fill0,fill with Some a,Some b -> Some(towards dt a b) | _ -> fill
-                    let stroke'=match stroke0,stroke with Some a,Some b -> Some(towards dt a b) | _ -> stroke
-                    let width=approach dt tau width0 style.StrokeWidth
-                    next[key]<-struct(opacity,fill',stroke',width)
-                    let mutable shown=mark
-                    if not(close opacity style.Opacity) then shown<-Mark.withOpacity (clamp01 opacity) shown
-                    if fill'<>fill then shown<-Mark.withFill (paint fill'.Value) shown
+                    let fill=if not colours || (Mark.fillDefinition mark).IsSome then ValueNone else rgbOf style.Fill
+                    let stroke=if colours then rgbOf style.Stroke else ValueNone
+                    let found,previous=shown.TryGetValue key
+                    let opacity=approach dt tau (if found then previous.Opacity else 0.) style.Opacity
+                    let fill'=match (if found then previous.Fill else fill),fill with ValueSome a,ValueSome b when a<>b -> ValueSome(towards dt a b) | _ -> fill
+                    let stroke'=match (if found then previous.Stroke else stroke),stroke with ValueSome a,ValueSome b when a<>b -> ValueSome(towards dt a b) | _ -> stroke
+                    let width=if colours && found then approach dt tau previous.Width style.StrokeWidth else style.StrokeWidth
+                    shown[key]<-{Opacity=opacity;Fill=fill';Stroke=stroke';Width=width;Frame=frame}
+                    let mutable result=mark
+                    if not(close opacity style.Opacity) then result<-Mark.withOpacity (clamp01 opacity) result
+                    if fill'<>fill then result<-Mark.withFill (paint fill'.Value) result
                     if stroke'<>stroke || not(close width style.StrokeWidth) then
-                        shown<-Mark.withStroke (match stroke' with Some c -> paint c | None -> style.Stroke) (max 0. width) shown
-                    Leaf shown)
-        let shown=walk "" nodes
-        shown,(next |> Seq.map(fun pair -> pair.Key,pair.Value) |> Map.ofSeq : Memory)
+                        result<-Mark.withStroke (match stroke' with ValueSome c -> paint c | ValueNone -> style.Stroke) (max 0. width) result
+                    Leaf result)
+        let result=walk "" false nodes
+        // Forget marks that left the scene, so a returning mark fades in again.
+        if shown.Count>0 then
+            let stale=shown |> Seq.choose(fun pair -> if pair.Value.Frame<>frame then Some pair.Key else None) |> Seq.toArray
+            for key in stale do shown.Remove key |> ignore
+        result
+
+/// <summary>Keeps the colours of the children out of the scene-wide transitions, for hover items whose colour is live data (a
+/// forming candle, a treemap tile coloured by its move): they change at once, while opacity still eases.</summary>
+let steady key children = Group(GroupSpec.create ("s:"+key),children)
 
 /// <summary>Eased hover levels per item, for geometric hover effects (lifting a slice, growing a bar) that the scene-wide style
 /// transitions cannot provide. Keep the map in dashboard state and tick it every frame.</summary>

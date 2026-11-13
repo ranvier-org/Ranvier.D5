@@ -226,7 +226,7 @@ let private priceCard state (r:Bounds) =
     panel "price" r (sprintf "%s · 2 s candles" ticker.Name)
         (dimmed (reveal state)
             ([yGrid "grid" ys (Scale.ticks 5 ys) x0 x1 (num 1)
-              group "candles" candles]
+              steady "candles" candles]
              // Bands, averages and the last-price line sit above the candles but let the pointer through to them.
              @ (if state.Bands then [overlay "bands" bands] else [])
              @ (if state.Sma then [overlay "averages" [average 9 Theme.warn;average 21 Theme.accent]] else [])
@@ -333,7 +333,7 @@ let private sessionCard state (r:Bounds) =
         ([yGrid "grid" ys [-extreme;0.;extreme] x0 x1 (fun v -> signed 1 (v*100.)+"%")
           Leaf(stroke "zero" (segment (pt x0 zero) (pt x1 zero)) Theme.muted 1. |> fade 0.5)
           group "lines" lines
-          at "map" mapX mapY heat]
+          at "map" mapX mapY [steady "tiles" heat]]
          @ tip)
 
 let view (viewport:Viewport) state =
@@ -358,7 +358,7 @@ let view (viewport:Viewport) state =
         [quote]
         ([[for name in names -> item 240. 150. (cell ("tile:"+name) 58.)]]@book@[[item 1000. 520. (cell "session" 162.)]])
         (fun cells ->
-            [group "tickers" (tickerTiles state cells)
+            [steady "tickers" (tickerTiles state cells)
              priceCard state cells["price"]
              depthCard state cells["depth"]
              tapeCard state cells["tape"]

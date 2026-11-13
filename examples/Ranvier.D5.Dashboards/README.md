@@ -30,7 +30,8 @@ Native events reach the model like this:
 Two more inputs support the responsive layout:
 
 - **Drag:** a press that starts on empty space and moves arrives as `Input.Drag`, which the flight tracker uses to turn
-  the globe.
+  the globe. A release anywhere on the page ends the drag. The window loop also ends it whenever SDL reports the left
+  button up.
 - **Viewport:** when the content size changes, the model receives `Input.Viewport`. Input handling can then call
   `Kit.frame`, the layout that `Kit.page` draws from, to find a card's bounds. The flight tracker does this to turn drag
   pixels into degrees of rotation.
@@ -57,9 +58,11 @@ The shell adapts to the window around the pages:
 
 These behaviours live once in the shell or the Kit and apply to every dashboard:
 
-- **Style transitions:** `Kit.Transitions` eases every mark's opacity, fill, stroke and stroke width toward what the view
-  asks for, settling within about 200 ms. Hover emphasis and highlights therefore animate with no dashboard code.
-  Geometry is never eased, so streaming data does not lag.
+- **Style transitions:** `Kit.Transitions` eases every mark's opacity toward what the view asks for, settling within
+  about 200 ms, so hover emphasis animates with no dashboard code. Fill, stroke and stroke width ease only inside controls
+  and hover items, where colour changes come from interaction. Elsewhere colours are data and change at once. A `steady`
+  group opts hover items with live-data colours, such as candles and market-map tiles, out of colour easing. Geometry is
+  never eased, so streaming data does not lag.
 - **Geometric hover:** `Kit.Focus` keeps eased hover levels per item for effects such as lifting a donut slice.
 - **Axis extents:** `Kit.Extent` widens an axis at once to take in new values and relaxes it slowly, so the axis remembers
   recent extremes.

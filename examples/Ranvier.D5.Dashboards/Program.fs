@@ -77,7 +77,7 @@ let soak () =
             let viewport=contentOf window
             live<-live.Send(Input.Viewport viewport)
             let page=live.View viewport
-            let scene=try (let eased,_=Transitions.ease 16.7 Transitions.empty (Shell.nodes window Gallery.all index None page 0.) in Shell.compose window dashboard eased) with error -> failwithf "%s: scene failed to compose at %.0fx%.0f: %s" dashboard.Id viewport.Width viewport.Height error.Message
+            let scene=try (let eased=Transitions.ease 16.7 (Transitions.Memory()) (Shell.nodes window Gallery.all index None page 0.) in Shell.compose window dashboard eased) with error -> failwithf "%s: scene failed to compose at %.0fx%.0f: %s" dashboard.Id viewport.Width viewport.Height error.Message
             if check then
                 for problem in overflow viewport page do failures.Add(sprintf "%s at %.0fx%.0f: %s" dashboard.Id viewport.Width viewport.Height problem)
             // Serialise every mark as the renderer does, so non-finite geometry fails here with its path.
@@ -230,6 +230,26 @@ let capture directory (only:Set<string>) =
         let final=snapshot host
         writeBitmap (Path.Combine(directory,dashboard.Id+".bmp")) final
         printfn "capture %-10s moved=%d painted=%.0f%% colours=%d hover=%A controls: %s" dashboard.Id moved (coverage*100.) colours (app.Hovered()) controlPoint
+    // Dragging: a press on empty globe space turns the flight tracker's globe, and releasing the button ends the drag.
+    match Gallery.all |> List.tryFindIndex(fun d -> d.Id="flights") with
+    | Some index when only.IsEmpty || only.Contains "flights" ->
+        app.Select index
+        run 0.5
+        let x,y=
+            seq { for y in 300..10..600 do
+                    for x in 450..10..700 -> x,y }
+            |> Seq.find(fun (x,y) -> host.Mouse(0,x,y,0,0,0) |> ignore; (app.Hovered()).IsNone && (app.Control()).IsNone)
+        let before=app.Page()
+        host.Mouse(1,x,y,0,1,0) |> ignore
+        if not(app.Dragging()) then failwith "flights: a press on empty globe space did not start a drag."
+        for k in 1..6 do
+            host.Mouse(0,x+k*12,y+k*6,0,0,0) |> ignore
+            run 0.05
+        host.Mouse(2,x+72,y+36,0,1,0) |> ignore
+        if app.Dragging() then failwith "flights: releasing the button did not end the drag."
+        if app.Page()=before then failwith "flights: dragging did not turn the globe."
+        printfn "drag    flights released after turning the globe"
+    | _ -> ()
     // Cursor: controls show a pointer and empty page space the default arrow, so controls read as buttons rather than text.
     app.Select 0
     run 0.5
@@ -263,12 +283,84 @@ let capture directory (only:Set<string>) =
     if app.Active()<>1 then failwith "Digit key did not select the second dashboard."
     app.Owner.Dispose()
 
+#nowarn "9"
+/// <summary>Whether the left mouse button is held, from SDL's global mouse state.</summary>
+let private leftButtonHeld () =
+    let flags=SDL.SDL3.SDL_GetGlobalMouseState(NativeInterop.NativePtr.nullPtr,NativeInterop.NativePtr.nullPtr)
+    flags.HasFlag SDL.SDL_MouseButtonFlags.SDL_BUTTON_LMASK
+
 [<EntryPoint>]
 let main args =
     match args with
     | [|"--soak"|] -> soak()
+    | [|"--frame-cost"|] ->
+        // Frame cost per dashboard: model tick, view, transitions and scene composition, without native rendering.
+        for index,dashboard in List.indexed Gallery.all do
+            let mutable live=dashboard.Start()
+            let memory=Transitions.Memory()
+            let window=Shell.Width,Shell.Height
+            let viewport:Viewport={Width=Shell.Width-Shell.sidebarWidth Shell.Width;Height=Shell.Height}
+            let clock=Stopwatch()
+            let mutable view,ease,compose=0.,0.,0.
+            let mutable marks=0
+            for frame in 0..299 do
+                live<-live.Tick 16.7
+                if frame=150 then (view<-0.;ease<-0.;compose<-0.)
+                clock.Restart()
+                let nodes=Shell.nodes window Gallery.all index None (live.View viewport) 0.
+                view<-view+clock.Elapsed.TotalMilliseconds
+                clock.Restart()
+                let eased=Transitions.ease 16.7 memory nodes
+                ease<-ease+clock.Elapsed.TotalMilliseconds
+                clock.Restart()
+                let scene=Shell.compose window dashboard eased
+                compose<-compose+clock.Elapsed.TotalMilliseconds
+                marks<-List.length (Scene.marks scene)
+            printfn "%-10s marks=%5d view=%6.2f ms ease=%6.2f ms compose=%6.2f ms per frame" dashboard.Id marks (view/150.) (ease/150.) (compose/150.)
+    | [|"--native-probe"|] ->
+        use host=WebCoreHost.Create(1280,800)
+        use graph=new Graph()
+        let app=Shell.mount host graph Gallery.all
+        let clock=Stopwatch()
+        for index,dashboard in List.indexed Gallery.all do
+            app.Select index
+            let struct(w,h)=host.PaintSize
+            let pixels=Array.zeroCreate<byte>(w*h*4)
+            let frame()=app.Advance 16.7;host.Cycle();host.Frame();host.Paint pixels
+            for _ in 1..60 do frame()
+            clock.Restart()
+            for _ in 1..120 do frame()
+            let idle=clock.Elapsed.TotalMilliseconds/120.
+            // Sweep the pointer across the content so hover emphasis changes many times.
+            clock.Restart()
+            for k in 0..119 do
+                host.Mouse(0,300+(k*7)%900,200+(k*13)%500,0,0,0) |> ignore
+                frame()
+            printfn "%-10s idle %.2f ms  hovering %.2f ms per painted frame" dashboard.Id idle (clock.Elapsed.TotalMilliseconds/120.)
+        app.Owner.Dispose()
     | [|"--capture";directory|] -> soak();capture directory Set.empty
     | [|"--capture";directory;ids|] -> capture directory (Set.ofArray(ids.Split ','))
+    | [|"--bench";id|] ->
+        // Real window: three seconds idle, then three seconds with a synthetic pointer sweeping the content; reports frame times.
+        use window=Window.Create("Ranvier.D5 live dashboards (bench)",int Shell.Width,int Shell.Height)
+        let app=Shell.mount window.Host window.Graph Gallery.all
+        Gallery.all |> List.tryFindIndex(fun d -> d.Id=id) |> Option.iter app.Select
+        let clock=Stopwatch.StartNew()
+        let mutable last=0.
+        let idle,hover=ResizeArray(),ResizeArray()
+        let mutable k=0
+        while window.Step() && clock.Elapsed.TotalSeconds<7. do
+            let now=clock.Elapsed.TotalMilliseconds
+            app.Advance(min 100. (now-last))
+            if now>4000. then
+                k<-k+1
+                window.Host.Mouse(0,300+(k*7)%900,200+(k*13)%500,0,0,0) |> ignore
+            if now>1000. && now<=4000. then idle.Add(now-last) elif now>4000. then hover.Add(now-last)
+            last<-now
+        let report (xs:ResizeArray<float>) = if xs.Count=0 then "n/a" else sprintf "%.1f ms avg, %.1f ms p95 over %d frames" (Seq.average xs) (Seq.sort xs |> Seq.item (xs.Count*95/100)) xs.Count
+        printfn "bench %s idle: %s" id (report idle)
+        printfn "bench %s hover: %s" id (report hover)
+        app.Owner.Dispose()
     | _ ->
         use window=Window.Create("Ranvier.D5 live dashboards",int Shell.Width,int Shell.Height)
         let app=Shell.mount window.Host window.Graph Gallery.all
@@ -279,6 +371,9 @@ let main args =
         let clock=Stopwatch.StartNew()
         let mutable last=0.
         while window.Step() do
+            // The native button state is the source of truth for a drag: if the left button is up, the drag is over, even when
+            // no release event reached the page.
+            if app.Dragging() && not(leftButtonHeld()) then app.Release()
             let now=clock.Elapsed.TotalMilliseconds
             app.Advance(min 100. (now-last))
             last<-now

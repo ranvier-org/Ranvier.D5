@@ -125,6 +125,10 @@ type App =
       /// <summary>The content viewport the active dashboard is laid out in.</summary>
       Content:unit -> Viewport
       Scroll:unit -> float
+      /// <summary>True while a press that started on empty space is being dragged.</summary>
+      Dragging:unit -> bool
+      /// <summary>Ends a drag; the window loop calls it when the native mouse button is no longer held.</summary>
+      Release:unit -> unit
       /// <summary>The active dashboard's page at the current size.</summary>
       Page:unit -> Page }
 
@@ -170,7 +174,11 @@ let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
             match event,svg.Value with
             | (:? Ranvier.Dom.PointerEvent as pointer),Some element -> InputAdapter.clientToPlot element (Point.create pointer.clientX pointer.clientY)
             | _ -> None
+        let trace=not(String.IsNullOrEmpty(Environment.GetEnvironmentVariable "RANVIER_DASHBOARDS_TRACE"))
         let dispatch (path:string list) (name:string) (event:Ranvier.Dom.Event) =
+            if trace && name<>"wheel" then
+                let buttons=match event with :? Ranvier.Dom.PointerEvent as p -> int p.buttons | _ -> -1
+                eprintfn "event %-12s buttons=%d dragging=%b path=%s" name buttons dragging.Value.IsSome (String.concat "/" path)
             graph.Run(fun () -> Api.untrack(fun () ->
                 let button=path |> List.tryFindBack(fun key -> key.StartsWith "b:")
                 let picked=path |> List.tryFindBack(fun key -> key.StartsWith "h:") |> Option.map(fun key -> key.Substring 2)
@@ -210,12 +218,12 @@ let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
         host.Document.body.setAttribute("style","margin:0;overflow:hidden;background:#0a0f1c")
         host.Document.body.appendChild container |> ignore
         // Each frame eases every mark's style toward the view (Kit.Transitions); the eased scene is what the window shows.
-        let memory=ref Transitions.empty
+        let memory=Transitions.Memory()
         let raw()=nodes window.Value dashboards active.Value control.Value (page()) scroll.Value
         let shown=Api.createSignal(compose window.Value dashboards.Head (raw()))
+        let easing=String.IsNullOrEmpty(Environment.GetEnvironmentVariable "RANVIER_DASHBOARDS_NO_TRANSITIONS")
         let present dt =
-            let eased,next=Transitions.ease dt memory.Value (raw())
-            memory.Value<-next
+            let eased=if easing then Transitions.ease dt memory (raw()) else raw()
             shown.Value<-compose window.Value (List.item active.Value dashboards) eased
         let view()=shown.Value
         let mounted=Mounting.mount graph None (fun errors -> raise(AggregateException errors)) container None
@@ -233,6 +241,11 @@ let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
             | _ -> ()
         host.Document.addEventListener("keydown",onKey)
         Api.onCleanup(fun () -> host.Document.removeEventListener("keydown",onKey))
+        // A release anywhere ends a drag, whichever element (or none of the marks) receives it.
+        let onRelease (_:Ranvier.Dom.Event) = dragging.Value<-None
+        let releases=["pointerup";"pointercancel";"mouseup";"lostpointercapture"]
+        for name in releases do host.Document.addEventListener(name,onRelease)
+        Api.onCleanup(fun () -> for name in releases do host.Document.removeEventListener(name,onRelease))
         let run f=graph.Run(fun () -> Api.untrack f)
         // The layout follows the container, which fills the host viewport.
         let measure()=
@@ -262,4 +275,6 @@ let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
          Window=(fun () -> run(fun () -> window.Value))
          Content=(fun () -> run content)
          Scroll=(fun () -> run(fun () -> scroll.Value))
+         Dragging=(fun () -> dragging.Value.IsSome)
+         Release=(fun () -> dragging.Value<-None)
          Page=(fun () -> run page)}))
