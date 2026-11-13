@@ -103,7 +103,7 @@ let private profile state =
             let mix=generation state.Scenario state.Day hour
             let px=Scale.map xs hour
             [Leaf(stroke "inspect" (segment (pt px y0) (pt px y1)) Theme.text 1. |> fade 0.5)
-             tooltip "tip" (pt px (p.Y-124.))
+             legacyT "tip" (pt px (p.Y-124.))
                 ((sprintf "%s · demand %.1f GW" (clock hour) (demand state.Scenario state.Day hour))::
                  (sources |> List.rev |> List.map(fun s -> sprintf "%-8s %5.1f GW" s mix[s])))]
         | _ -> []
@@ -201,5 +201,5 @@ let view state =
      flows state
      status state]
 
-let model = {Init=init;Tick=tick;Input=input;View=view}
+let model = {Init=init;Tick=tick;Input=input;View=legacy view}
 let dashboard = {Id="energy";Title="Power grid";Summary="Generation mix, live Sankey";Start=fun () -> Live.start model}

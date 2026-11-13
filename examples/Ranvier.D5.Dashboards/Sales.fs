@@ -145,7 +145,7 @@ let private bars state =
         match hovered,state.Pointer with
         | Some region,Some p ->
             let parts=categories |> List.map(fun c -> c,measure state.Metric state.Quarter region c) |> List.sortByDescending snd
-            [tooltip "tip" (pt (p.X-24.) (p.Y-244.)) ((region+" · "+state.Quarter)::(parts |> List.truncate 3 |> List.map(fun (c,v) -> sprintf "%s %s" c (format state.Metric v))))]
+            [legacyT "tip" (pt (p.X-24.) (p.Y-244.)) ((region+" · "+state.Quarter)::(parts |> List.truncate 3 |> List.map(fun (c,v) -> sprintf "%s %s" c (format state.Metric v))))]
         | _ -> []
     card "regions" 24. 244. 500. 300. (sprintf "%s by region · %s" state.Metric state.Quarter)
         ([group "bars" nodes
@@ -215,5 +215,5 @@ let view state =
      monthly state
      feed state]
 
-let model = {Init=init;Tick=tick;Input=input;View=view}
+let model = {Init=init;Tick=tick;Input=input;View=legacy view}
 let dashboard = {Id="sales";Title="Revenue overview";Summary="Keyed re-ranking, donut, orders";Start=fun () -> Live.start model}

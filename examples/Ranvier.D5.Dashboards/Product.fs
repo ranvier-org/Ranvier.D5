@@ -115,7 +115,7 @@ let private funnelCard state =
         match focus,state.Pointer with
         | Some stage,Some p ->
             let i=List.findIndex ((=) stage) stages
-            [tooltip "tip" (pt (p.X-24.) (p.Y-244.)) [stage;sprintf "%s users" (grouped counts[i]);(if i=0 then "Top of funnel" else sprintf "%s from %s" (percent 1 (counts[i]/counts[i-1])) stages[i-1]);sprintf "%s of visits" (percent 1 (counts[i]/top))]]
+            [legacyT "tip" (pt (p.X-24.) (p.Y-244.)) [stage;sprintf "%s users" (grouped counts[i]);(if i=0 then "Top of funnel" else sprintf "%s from %s" (percent 1 (counts[i]/counts[i-1])) stages[i-1]);sprintf "%s of visits" (percent 1 (counts[i]/top))]]
         | _ -> []
     card "funnel" 24. 244. 500. 330. (sprintf "Conversion funnel · %s · %s" state.Segment state.Range)
         ([group "bands" bands;group "particles" particles]@tip)
@@ -141,7 +141,7 @@ let private cohorts state =
         | Some id,Some p ->
             let parts=id.Split ':'
             let c,w=int parts[1],int parts[2]
-            [tooltip "tip" (pt (p.X-540.) (p.Y-244.)) [sprintf "Cohort week %d" (c+1);sprintf "Week %d retention" w;percent 1 (retention state.Segment c w)]]
+            [legacyT "tip" (pt (p.X-540.) (p.Y-244.)) [sprintf "Cohort week %d" (c+1);sprintf "Week %d retention" w;percent 1 (retention state.Segment c w)]]
         | _ -> []
     card "cohorts" 540. 244. 484. 330. (sprintf "Weekly retention · %s" state.Segment)
         ([group "cells" cells;group "rows" rows;group "columns" columns]@tip)
@@ -190,5 +190,5 @@ let view state =
      activeCard state
      sourcesCard state]
 
-let model = {Init=init;Tick=tick;Input=input;View=view}
+let model = {Init=init;Tick=tick;Input=input;View=legacy view}
 let dashboard = {Id="product";Title="Product analytics";Summary="Funnel flow, cohorts, live users";Start=fun () -> Live.start model}

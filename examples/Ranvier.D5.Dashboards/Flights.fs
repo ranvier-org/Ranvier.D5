@@ -178,7 +178,7 @@ let private globe state =
             flights |> List.tryFind(fun f -> "fl:"+f.Code=id) |> Option.bind(fun f ->
                 let progress=(state.Now-f.Departs)/f.Duration
                 Geodesic.interpolate (clamp01 progress) f.From.Position f.To.Position |> ok |> project |> Option.map(fun point ->
-                    tooltip "tip" point
+                    legacyT "tip" point
                         [sprintf "%s  %s → %s" f.Code f.From.Code f.To.Code
                          sprintf "%s to %s" f.From.City f.To.City
                          sprintf "%.0f%% complete · FL%.0f" (progress*100.) (Math.Round(350.*sin(Math.PI*clamp01 progress)/10.)*10.)
@@ -188,7 +188,7 @@ let private globe state =
             project h.Position |> Option.map(fun point ->
                 let out=flights |> List.filter(fun f -> f.From.Code=h.Code) |> List.length
                 let incoming=flights |> List.filter(fun f -> f.To.Code=h.Code) |> List.length
-                tooltip "tip" point [sprintf "%s · %s" h.Code h.City;sprintf "%d outbound, %d inbound airborne" out incoming;sprintf "On-time %s" (percent 0 (ontime state.Now h.Code));"Click to focus region"]) |> Option.toList
+                legacyT "tip" point [sprintf "%s · %s" h.Code h.City;sprintf "%d outbound, %d inbound airborne" out incoming;sprintf "On-time %s" (percent 0 (ontime state.Now h.Code));"Click to focus region"]) |> Option.toList
         | _ -> []
     card "globe" 24. 124. 640. 652. "Live network"
         ([Leaf(dot "glow" (pt cx cy) (radius+10.) Theme.accent |> fade 0.06)
@@ -253,5 +253,5 @@ let view state =
      board state
      performance state]
 
-let model = {Init=init;Tick=tick;Input=input;View=view}
+let model = {Init=init;Tick=tick;Input=input;View=legacy view}
 let dashboard = {Id="flights";Title="Flight tracker";Summary="Globe, routes, departures";Start=fun () -> Live.start model}

@@ -150,7 +150,7 @@ let private topology state =
         | Some id when id.StartsWith "node:" ->
             let node=id.Substring 5
             let degree=links |> List.filter(fun (a,b) -> a=node || b=node) |> List.length
-            [tooltip "tip" nodes[node] [node;sprintf "Tier: %s · %d connections" (tierOf node) degree
+            [legacyT "tip" nodes[node] [node;sprintf "Tier: %s · %d connections" (tierOf node) degree
                                         (if node="auth" && attack>0. && not state.Blocked then "Under attack" else "Healthy");"Click to pin neighbours"]]
         | _ -> []
     card "topology" 24. 124. 640. 440. "Service topology · live traffic"
@@ -225,5 +225,5 @@ let view state =
      eventBars state
      top state]
 
-let model = {Init=init;Tick=tick;Input=input;View=view}
+let model = {Init=init;Tick=tick;Input=input;View=legacy view}
 let dashboard = {Id="security";Title="Security operations";Summary="Force graph, attack, alerts";Start=fun () -> Live.start model}

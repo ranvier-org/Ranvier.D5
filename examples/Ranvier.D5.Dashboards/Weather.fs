@@ -112,7 +112,7 @@ let private radial state =
         match hoverDay,state.Pointer with
         | Some d,Some p ->
             let lo,hi=temperature c d
-            [tooltip "tip" (pt (p.X-24.) (p.Y-124.)) [dateOf d;sprintf "High %s" (degrees state hi);sprintf "Low %s" (degrees state lo);(if d<=today then "Observed" else "Last year")]]
+            [legacyT "tip" (pt (p.X-24.) (p.Y-124.)) [dateOf d;sprintf "High %s" (degrees state hi);sprintf "Low %s" (degrees state lo);(if d<=today then "Observed" else "Last year")]]
         | _ -> []
     card "year" 24. 124. 520. 652. (sprintf "%s · daily temperature range" c.Name)
         ([at "chart" cx cy
@@ -149,7 +149,7 @@ let private windRose state =
         | Some name ->
             let share=[0..3] |> List.sumBy(fun b -> Map.tryFind (sprintf "%s|%d" name b) state.Rose |> Option.defaultValue 0.)
             let strong=Map.tryFind (sprintf "%s|3" name) state.Rose |> Option.defaultValue 0.
-            [tooltip "tip" (match state.Pointer with Some p -> pt (p.X-560.) (p.Y-124.) | None -> pt cx 40.) [sprintf "From %s" name;sprintf "%s of hours" (percent 1 share);sprintf "%s above 9 m/s" (percent 1 strong)]]
+            [legacyT "tip" (match state.Pointer with Some p -> pt (p.X-560.) (p.Y-124.) | None -> pt cx 40.) [sprintf "From %s" name;sprintf "%s of hours" (percent 1 share);sprintf "%s above 9 m/s" (percent 1 strong)]]
         | None -> []
     card "rose" 560. 124. 464. 336. (sprintf "Wind rose · %s" months[monthOf state.Day])
         ([Leaf(stroke "r1" (circlePath 50.) Theme.grid 1. |> Mark.withTransform (Transform.translate cx cy))
@@ -217,5 +217,5 @@ let view state =
      precipitation state
      conditions state]
 
-let model = {Init=init;Tick=tick;Input=input;View=view}
+let model = {Init=init;Tick=tick;Input=input;View=legacy view}
 let dashboard = {Id="weather";Title="Climate station";Summary="Radial year, wind rose";Start=fun () -> Live.start model}

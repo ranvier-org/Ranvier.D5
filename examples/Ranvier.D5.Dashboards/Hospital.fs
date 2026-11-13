@@ -176,7 +176,7 @@ let private floorCard state =
         | Some id when id.StartsWith "pt:" ->
             state.Patients |> List.tryFind(fun p -> sprintf "pt:%d" p.Id=id) |> Option.map(fun p ->
                 let stage=match p.Stage with Arriving -> "Awaiting triage" | Triage _ -> "In triage" | Waiting -> "Waiting for a bay" | Treating(_,b) -> sprintf "Bay %d" (b+1) | Leaving(_,a) -> (if a then "Admitted" else "Discharged")
-                tooltip "tip" p.Position [sprintf "Patient %d · ESI %d" p.Id p.Acuity;acuityName p.Acuity;stage;sprintf "In department %.0f min" (state.Clock-p.Arrived)]) |> Option.toList
+                legacyT "tip" p.Position [sprintf "Patient %d · ESI %d" p.Id p.Acuity;acuityName p.Acuity;stage;sprintf "In department %.0f min" (state.Clock-p.Arrived)]) |> Option.toList
         | _ -> []
     card "floor" 24. 124. 640. 400. (sprintf "Department floor · %s" (clock state.Clock))
         ([zone "z-arrive" 40. 50. "In"
@@ -275,5 +275,5 @@ let view state =
      waits state
      wardsCard state]
 
-let model = {Init=init;Tick=tick;Input=input;View=view}
+let model = {Init=init;Tick=tick;Input=input;View=legacy view}
 let dashboard = {Id="hospital";Title="Emergency department";Summary="Patient flow simulation";Start=fun () -> Live.start model}

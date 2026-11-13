@@ -158,7 +158,7 @@ let private priceCard state =
         match state.Hover with
         | Some id when id.StartsWith "c" ->
             shown |> List.tryFind(fun c -> sprintf "c%.0f" (c.Start*10.)=id) |> Option.map(fun c ->
-                tooltip "tip" (pt (center c) (Scale.map ys c.High))
+                legacyT "tip" (pt (center c) (Scale.map ys c.High))
                     [sprintf "%s · %.0fs ago" ticker.Name (state.Now-c.Start)
                      sprintf "O %s  H %s" (num 2 c.Open) (num 2 c.High)
                      sprintf "L %s  C %s" (num 2 c.Low) (num 2 c.Close)
@@ -283,9 +283,9 @@ let view state =
     @ (match state.Hover with
        | Some id when id.StartsWith "map:" ->
            match state.Pointer with
-           | Some p -> [tooltip "map-tip" p [id.Substring 4;"Live market-cap weight";"Colour: session move"]]
+           | Some p -> [legacyT "map-tip" p [id.Substring 4;"Live market-cap weight";"Colour: session move"]]
            | None -> []
        | _ -> [])
 
-let model = {Init=init;Tick=tick;Input=input;View=view}
+let model = {Init=init;Tick=tick;Input=input;View=legacy view}
 let dashboard = {Id="markets";Title="Trading desk";Summary="Candles, depth book, market map";Start=fun () -> Live.start model}
