@@ -5,27 +5,9 @@ open System.Diagnostics
 open System.IO
 open System.Text.Json
 open Ranvier.D5.Geo
-
-type Measurement = { Name:string; MedianMs:float; P95Ms:float; MedianBytes:int64; LimitMs:float; LimitBytes:int64 }
+open Ranvier.D5.BenchmarkHarness
 
 let private ok = function Ok value -> value | Error errors -> failwithf "%A" errors
-let private measure name limit bytes action =
-    for _ in 1..3 do action()
-    let samples=Array.init 60 (fun _ ->
-        // Collect outside the timed region so one sample's garbage is not charged to the next.
-        GC.Collect()
-        GC.WaitForPendingFinalizers()
-        GC.Collect()
-        let before=GC.GetAllocatedBytesForCurrentThread()
-        let watch=Stopwatch.StartNew()
-        action()
-        watch.Stop()
-        watch.Elapsed.TotalMilliseconds,GC.GetAllocatedBytesForCurrentThread()-before)
-    let times=samples |> Array.map fst |> Array.sort
-    let allocated=samples |> Array.map snd |> Array.sort
-    let result={Name=name;MedianMs=(times[29]+times[30])/2.;P95Ms=times[56];MedianBytes=allocated[30];LimitMs=limit;LimitBytes=bytes}
-    printfn "%s: median %.3f ms, p95 %.3f ms, %d bytes" name result.MedianMs result.P95Ms result.MedianBytes
-    result
 
 [<EntryPoint>]
 let main args =
@@ -207,7 +189,6 @@ let main args =
     let directory=Path.GetDirectoryName(Path.GetFullPath output)
     Directory.CreateDirectory directory |> ignore
     File.WriteAllText(output,JsonSerializer.Serialize(results,JsonSerializerOptions(WriteIndented=true)))
-    let failures=results |> Array.filter(fun value -> value.P95Ms>value.LimitMs || value.MedianBytes>value.LimitBytes)
-    for value in failures do
-        printfn "FAIL %s: p95 %.3f ms (limit %.3f); allocation %d bytes (limit %d)" value.Name value.P95Ms value.LimitMs value.MedianBytes value.LimitBytes
+    let failures=failures results
+    for value in failures do printfn "%s" (describe value)
     if failures.Length>0 then 1 else 0
