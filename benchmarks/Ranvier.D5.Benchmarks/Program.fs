@@ -11,27 +11,7 @@ open Ranvier.D5.Charts
 open Ranvier.View
 open Ranvier.View.Dom
 open Ranvier.View.WebCore
-
-type Measurement = { Name: string; MedianMs: float; P95Ms: float; MedianBytes: int64; LimitMs: float; LimitBytes: int64 }
-
-let measure name limit bytes action =
-    for _ in 1..3 do action()
-    let samples =
-        Array.init 60 (fun _ ->
-            // Collect outside the timed region so one sample's garbage is not charged to the next.
-            GC.Collect()
-            GC.WaitForPendingFinalizers()
-            GC.Collect()
-            let allocated = GC.GetAllocatedBytesForCurrentThread()
-            let watch = Stopwatch.StartNew()
-            action()
-            watch.Stop()
-            watch.Elapsed.TotalMilliseconds, GC.GetAllocatedBytesForCurrentThread() - allocated)
-    let times = samples |> Array.map fst |> Array.sort
-    let allocations = samples |> Array.map snd |> Array.sort
-    let result = { Name=name; MedianMs=(times[29]+times[30])/2.; P95Ms=times[56]; MedianBytes=allocations[30]; LimitMs=limit; LimitBytes=bytes }
-    printfn "%s: median %.3f ms, p95 %.3f ms, %d bytes" name result.MedianMs result.P95Ms result.MedianBytes
-    result
+open Ranvier.D5.BenchmarkHarness
 
 [<EntryPoint>]
 let main args =
@@ -334,7 +314,6 @@ let main args =
     File.WriteAllText(output, JsonSerializer.Serialize(results, JsonSerializerOptions(WriteIndented=true)))
     let stages={| WarmupSamples=3; Columns=[|"BuildMs";"SignalUpdateMs";"HostCycleMs";"PaintMs";"Gen0";"Gen1";"Gen2"|]; Samples=retainedStages.ToArray(); NetworkSamples=networkStages.ToArray(); RuntimeColumns=[|"GCPauseMs";"JitMs";"CurrentThreadJitMs";"ManagedHeapBytes";"TraceEvents"|]; RuntimeSamples=retainedRuntime.ToArray(); NetworkRuntimeSamples=networkRuntime.ToArray() |}
     File.WriteAllText(Path.ChangeExtension(output,"stages.json"),JsonSerializer.Serialize(stages,JsonSerializerOptions(WriteIndented=true)))
-    let failures=results |> Seq.filter(fun r -> r.P95Ms > r.LimitMs || r.MedianBytes > r.LimitBytes) |> Seq.toArray
-    for result in failures do
-        eprintfn "FAIL %s: p95 %.3f ms (limit %.3f); allocation %d bytes (limit %d)" result.Name result.P95Ms result.LimitMs result.MedianBytes result.LimitBytes
+    let failures=failures results
+    for result in failures do eprintfn "%s" (describe result)
     if failures.Length>0 then 1 else 0

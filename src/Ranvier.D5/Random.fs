@@ -141,10 +141,12 @@ module Distribution =
                     if log u<0.5*x*x+d-d*v+d*log v then result<-d*v
             struct(result,current)
 
-    // Lanczos approximation (g = 7, n = 9) of log Gamma for the Poisson acceptance test.
-    let private logGamma (x:float) =
-        let coefficients=[|0.99999999999980993;676.5203681218851;-1259.1392167224028;771.32342877765313;-176.61502916214059;
+    // Lanczos approximation (g = 7, n = 9) of log Gamma for the Poisson acceptance test. The table is shared: built per
+    // call, it is a heap allocation on every rejection step until the optimising JIT stack-allocates it.
+    let private lanczos=[|0.99999999999980993;676.5203681218851;-1259.1392167224028;771.32342877765313;-176.61502916214059;
                           12.507343278686905;-0.13857109526572012;9.9843695780195716e-6;1.5056327351493116e-7|]
+    let private logGamma (x:float) =
+        let coefficients=lanczos
         let x=x-1.
         let mutable sum=coefficients[0]
         for index=1 to 8 do sum<-sum+coefficients[index]/(x+float index)
