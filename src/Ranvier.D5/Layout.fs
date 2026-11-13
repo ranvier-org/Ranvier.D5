@@ -75,7 +75,12 @@ module Hierarchy =
         let errors=ResizeArray<LayoutError>()
         for i in 0..ids.Length-1 do
             if String.IsNullOrEmpty ids[i] then errors.Add(InvalidObservation "Hierarchy IDs must be nonempty.")
+#if FABLE_COMPILER
+            elif lookup.ContainsKey ids[i] then errors.Add(DuplicateId ids[i])
+            else lookup.Add(ids[i],i)
+#else
             elif not(lookup.TryAdd(ids[i],i)) then errors.Add(DuplicateId ids[i])
+#endif
         virtualRoot |> Option.iter(fun key ->
             if String.IsNullOrEmpty key then errors.Add(InvalidObservation "Virtual root ID must be nonempty.")
             elif lookup.ContainsKey key then errors.Add(DuplicateId key))

@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>Hexagonal binning settings: bounds that must contain every point, the hexagon circumradius in layout units, and point and bin
 /// budgets.</summary>
 type HexbinConfig = { Bounds:Bounds; Radius:float; MaxPoints:int; MaxBins:int }
@@ -33,13 +35,13 @@ module Hexbin =
     /// OperationCanceledException.</summary>
     let aggregateWithCancellation (token:System.Threading.CancellationToken) (config:HexbinConfig) (points:WeightedPoint list) : Result<HexBin list,LayoutError list> =
         token.ThrowIfCancellationRequested()
-        if not(System.Double.IsFinite config.Radius) || config.Radius<=0. || Bounds.width config.Bounds<=0. || Bounds.height config.Bounds<=0.
+        if not(Double.IsFinite config.Radius) || config.Radius<=0. || Bounds.width config.Bounds<=0. || Bounds.height config.Bounds<=0.
            || config.MaxPoints<=0 || config.MaxBins<=0 then
             Error [InvalidObservation "Hexbin requires positive finite radius, bounds and budgets."]
         elif points.Length>config.MaxPoints then Error [BudgetExceeded "Hexbin input exceeds its point budget."]
         else
           try
-            let seen=System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+            let seen=System.Collections.Generic.HashSet<string>(StringComparer.Ordinal)
             let groups=System.Collections.Generic.Dictionary<struct(int64*int64),ResizeArray<WeightedPoint>>()
             let mutable index=0
             for point in points do
@@ -47,13 +49,13 @@ module Hexbin =
                 index<-index+1
                 if System.String.IsNullOrWhiteSpace point.Id then raise(HexbinAbort(InvalidObservation "Point IDs must not be empty."))
                 if not(seen.Add point.Id) then raise(HexbinAbort(DuplicateId point.Id))
-                if not(System.Double.IsFinite point.Weight) || point.Weight<0. then raise(HexbinAbort(InvalidObservation "Hexbin weights must be finite and nonnegative."))
+                if not(Double.IsFinite point.Weight) || point.Weight<0. then raise(HexbinAbort(InvalidObservation "Hexbin weights must be finite and nonnegative."))
                 if not(Bounds.contains point.Position config.Bounds) then raise(HexbinAbort(InvalidObservation("Point lies outside hexbin bounds: "+point.Id)))
                 let x=(point.Position.X-Bounds.x config.Bounds)/config.Radius
                 let y=(point.Position.Y-Bounds.y config.Bounds)/config.Radius
                 let q,r=x/sqrt 3.-y/3.,y*(2./3.)
                 let third= -q-r
-                if not(System.Double.IsFinite q && System.Double.IsFinite r && System.Double.IsFinite third)
+                if not(Double.IsFinite q && Double.IsFinite r && Double.IsFinite third)
                    || max (abs q) (max (abs r) (abs third))>1125899906842624. then
                     raise(HexbinAbort(BudgetExceeded "Hexbin lattice coordinates exceed the exact rounding range."))
                 let mutable rq,rr=System.Math.Round q,System.Math.Round r
@@ -77,12 +79,12 @@ module Hexbin =
                                         (Bounds.y config.Bounds+(1.5*float r)*config.Radius)
                 vertices center config.Radius |> ignore
                 let members=groups[key].ToArray()
-                Array.sortInPlaceWith(fun (a:WeightedPoint) b -> System.StringComparer.Ordinal.Compare(a.Id,b.Id)) members
+                Array.sortInPlaceWith(fun (a:WeightedPoint) b -> StringComparer.Ordinal.Compare(a.Id,b.Id)) members
                 let mutable weight=0.
                 for i in 0..members.Length-1 do
                     if i%64=0 then token.ThrowIfCancellationRequested()
                     weight<-weight+members[i].Weight
-                if not(System.Double.IsFinite weight) then raise(HexbinAbort(InvalidObservation "Hexbin weight exceeds the finite numeric range."))
+                if not(Double.IsFinite weight) then raise(HexbinAbort(InvalidObservation "Hexbin weight exceeds the finite numeric range."))
                 output.Add {Key=key;Center=center;Radius=config.Radius;Weight=weight;Members=members |> Array.map(fun p -> p.Id) |> Array.toList}
             Ok(List.ofSeq output)
           with

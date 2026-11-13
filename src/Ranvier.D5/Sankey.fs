@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>A directed link between two node IDs; Value must be finite and nonnegative.</summary>
 type FlowLink = { Id:string; Source:string; Target:string; Value:float }
 /// <summary>A validated flow graph with unique node and link IDs, created by FlowGraph.create.</summary>
@@ -12,8 +14,8 @@ module FlowGraph =
     /// Cycles are not checked here.</summary>
     let create (nodes:string list) (links:FlowLink list) : Result<FlowGraph,LayoutError list> =
         let errors=ResizeArray<LayoutError>()
-        let nodeIds=System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
-        let edgeIds=System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+        let nodeIds=System.Collections.Generic.HashSet<string>(StringComparer.Ordinal)
+        let edgeIds=System.Collections.Generic.HashSet<string>(StringComparer.Ordinal)
         let identity (seen:System.Collections.Generic.HashSet<string>) id =
             if System.String.IsNullOrWhiteSpace id then errors.Add(InvalidObservation "Flow ID must not be empty.")
             elif not(seen.Add id) then errors.Add(DuplicateId id)
@@ -22,10 +24,10 @@ module FlowGraph =
             identity edgeIds edge.Id
             if not(nodeIds.Contains edge.Source) then errors.Add(MissingEndpoint edge.Source)
             if not(nodeIds.Contains edge.Target) then errors.Add(MissingEndpoint edge.Target)
-            if not(System.Double.IsFinite edge.Value) || edge.Value<0. then errors.Add(InvalidObservation "Flow values must be finite and nonnegative.")
+            if not(Double.IsFinite edge.Value) || edge.Value<0. then errors.Add(InvalidObservation "Flow values must be finite and nonnegative.")
         if errors.Count>0 then Error(List.ofSeq errors) else
-        Ok {NodeIds=nodes |> List.sortWith(fun a b -> System.StringComparer.Ordinal.Compare(a,b))
-            Edges=links |> List.sortWith(fun a b -> System.StringComparer.Ordinal.Compare(a.Id,b.Id))}
+        Ok {NodeIds=nodes |> List.sortWith(fun a b -> StringComparer.Ordinal.Compare(a,b))
+            Edges=links |> List.sortWith(fun a b -> StringComparer.Ordinal.Compare(a.Id,b.Id))}
     /// <summary>Returns node IDs in ordinal order.</summary>
     let nodes graph = graph.NodeIds
     /// <summary>Returns links in ordinal ID order.</summary>
@@ -69,7 +71,7 @@ module Sankey =
         token.ThrowIfCancellationRequested()
         let width,height=Bounds.width config.Bounds,Bounds.height config.Bounds
         let n,m=graph.NodeIds.Length,graph.Edges.Length
-        let finiteNonnegative value=System.Double.IsFinite value && value>=0.
+        let finiteNonnegative value=Double.IsFinite value && value>=0.
         if config.MaxNodes<=0 || config.MaxLinks<=0 || config.Iterations<0 || config.Iterations>256
            || not(finiteNonnegative config.NodeWidth && finiteNonnegative config.NodePadding) then
             Error [InvalidObservation "Require finite nonnegative sizes, 0..256 iterations and positive budgets."]
@@ -87,7 +89,7 @@ module Sankey =
             let check index=if index%64=0 then token.ThrowIfCancellationRequested()
             let nodes=List.toArray graph.NodeIds
             let edges=List.toArray graph.Edges
-            let index=System.Collections.Generic.Dictionary<string,int>(System.StringComparer.Ordinal)
+            let index=System.Collections.Generic.Dictionary<string,int>(StringComparer.Ordinal)
             for i in 0..n-1 do check i;index.Add(nodes[i],i)
             let outgoing=Array.init n (fun _ -> ResizeArray<int>())
             let incoming=Array.init n (fun _ -> ResizeArray<int>())
@@ -100,7 +102,7 @@ module Sankey =
                 outgoing[s].Add e;incoming[t].Add e
                 outflow[s]<-outflow[s]+edges[e].Value
                 inflow[t]<-inflow[t]+edges[e].Value
-            if Array.exists (System.Double.IsFinite >> not) inflow || Array.exists (System.Double.IsFinite >> not) outflow then
+            if Array.exists (Double.IsFinite >> not) inflow || Array.exists (Double.IsFinite >> not) outflow then
                 Error [InvalidObservation "A node flow total exceeds the finite numeric range."]
             else
                 let remaining=incoming |> Array.map(fun links -> links.Count)
@@ -247,7 +249,7 @@ module Sankey =
     /// <summary>Moves a node's top edge toward <c>top</c>, clamped between its column neighbours plus padding and the bounds, and shifts its link
     /// endpoints. Returns MissingEndpoint for an unknown ID and InvalidObservation for non-finite input or no feasible slot.</summary>
     let moveNode (config:SankeyConfig) (id:string) (top:float) (layout:SankeyLayout) : Result<SankeyLayout,LayoutError list> =
-        if not(System.Double.IsFinite top && System.Double.IsFinite config.NodePadding) || config.NodePadding<0. then
+        if not(Double.IsFinite top && Double.IsFinite config.NodePadding) || config.NodePadding<0. then
             Error [InvalidObservation "Node position and padding must be finite; padding must be nonnegative."]
         else
             match layout.Nodes |> List.tryFind(fun node -> node.Id=id) with
@@ -256,7 +258,7 @@ module Sankey =
                 let column=layout.Nodes |> List.filter(fun other -> other.Layer=node.Layer)
                            |> List.sortWith(fun a b ->
                                let c=compare (Bounds.y a.Bounds) (Bounds.y b.Bounds)
-                               if c=0 then System.StringComparer.Ordinal.Compare(a.Id,b.Id) else c)
+                               if c=0 then StringComparer.Ordinal.Compare(a.Id,b.Id) else c)
                            |> List.toArray
                 let index=column |> Array.findIndex(fun other -> other.Id=id)
                 let size=Bounds.height node.Bounds

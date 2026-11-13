@@ -56,7 +56,13 @@ module DsvRow =
     /// <summary>A whole number within the 32-bit range, in the given culture.</summary>
     let integer (culture:CultureInfo) name row =
         text name row |> Result.bind(fun value ->
+#if FABLE_COMPILER
+            // Fable parses invariant integers and has no NumberStyles; AllowLeadingSign rejects surrounding whitespace.
+            ignore culture
+            match (if isNull value || value.Trim()<>value then false,0 else Int32.TryParse value) with
+#else
             match Int32.TryParse(value,NumberStyles.AllowLeadingSign,culture) with
+#endif
             | true,number -> Ok number
             | _ -> fail row name (sprintf "'%s' is not an integer." value))
     /// <summary>true or false, case-insensitively.</summary>
@@ -70,7 +76,7 @@ module DsvRow =
         text name row |> Result.bind(fun value ->
             match Parse.time culture zone pattern policy value with
             | Ok time -> Ok time
-            | Error _ -> fail row name (sprintf "'%s' is not a valid %s time in %s." value pattern (zone:TimeZoneInfo).Id))
+            | Error _ -> fail row name (sprintf "'%s' is not a valid %s time in %s." value pattern (Zone.id zone)))
 
 /// <summary>Strict RFC 4180 parsing and formatting for comma, tab and other single-character delimiters.</summary>
 /// <remarks>Quotes are recognised only at the start of a field and escape themselves by doubling. Fields may contain delimiters and line breaks inside quotes. CRLF, LF and CR end records; a leading byte-order mark and one trailing line break are ignored. Errors name the line and column and never return a partial table.</remarks>
@@ -205,7 +211,11 @@ module Dsv =
         if not(validConfig config) then invalidArg "config" "DSV delimiter cannot be a quote or line break."
         let builder=StringBuilder()
         for row in rows do
+#if FABLE_COMPILER
+            builder.Append(String.Join(string config.Delimiter,row |> List.map(quoteIfNeeded config.Delimiter))).Append('\n') |> ignore
+#else
             builder.AppendJoin(config.Delimiter,row |> List.map(quoteIfNeeded config.Delimiter)).Append('\n') |> ignore
+#endif
         builder.ToString()
 
     /// <summary>Formats the header and rows; parsing the result returns an equal table.</summary>
@@ -213,6 +223,11 @@ module Dsv =
 
     /// <summary>Reads text asynchronously within the character budget, then parses it with cancellation.</summary>
     let readAsync (config:DsvConfig) (reader:TextReader) (token:CancellationToken) =
+#if FABLE_COMPILER
+        // Fable implements no TextReader reads; JavaScript callers read the text themselves and call parse.
+        ignore (config,reader,token)
+        task { return Error [InvalidObservation "Dsv.readAsync is not available under Fable: TextReader cannot be read."] }
+#else
         task {
             let buffer=Array.zeroCreate<char> 65536
             let builder=StringBuilder()
@@ -227,3 +242,4 @@ module Dsv =
                 if exceeded then Error [BudgetExceeded "DSV input exceeds its character budget."]
                 else parseWithCancellation config token (builder.ToString())
         }
+#endif

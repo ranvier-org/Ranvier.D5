@@ -1,5 +1,7 @@
 namespace Ranvier.D5.Charts
 
+open System
+
 open Ranvier.D5
 
 /// <summary>Space in screen pixels reserved on each side between the viewport edge and the plot area.</summary>
@@ -33,7 +35,7 @@ module ChartFrame =
 /// <summary>Pure point picking against chart hit targets in screen pixels.</summary>
 [<RequireQualifiedAccess>]
 module HitTest =
-    let private containsPolygon point (polygon:HitPolygon) =
+    let private containsPolygon (point:Point) (polygon:HitPolygon) =
         let mutable left,right,top,bottom=infinity,-infinity,infinity,-infinity
         for vertex in polygon.Outer do
             left<-min left vertex.X;right<-max right vertex.X
@@ -41,20 +43,20 @@ module HitTest =
         point.X>=left && point.X<=right && point.Y>=top && point.Y<=bottom &&
         Polygon.contains point polygon.Outer &&
         not (polygon.Holes |> List.exists (Polygon.contains point))
-    let rec private containsAny point polygons =
+    let rec private containsAny (point:Point) polygons =
         match polygons with
         | [] -> false
         | polygon::rest -> containsPolygon point polygon || containsAny point rest
     /// <summary>True when the target has no clip or its clip bounds contain the point.</summary>
-    let visibleAt point target = target.Clip |> Option.forall (Bounds.contains point)
+    let visibleAt (point:Point) target = target.Clip |> Option.forall (Bounds.contains point)
     /// <summary>True when the point lies inside the geometry; disc and sector boundaries are inclusive and an empty sector sweep never hits.</summary>
-    let contains point geometry =
+    let contains (point:Point) geometry =
             match geometry with
             | HitRegion(included,excluded,_) -> containsAny point included && not (containsAny point excluded)
             | HitBounds bounds -> Bounds.contains point bounds
-            | HitPoint(center,radius) -> System.Double.Hypot(point.X-center.X,point.Y-center.Y)<=radius
+            | HitPoint(center,radius) -> Double.Hypot(point.X-center.X,point.Y-center.Y)<=radius
             | HitSector(center,inner,outer,start,finish) ->
-                let radius=System.Double.Hypot(point.X-center.X,point.Y-center.Y)
+                let radius=Double.Hypot(point.X-center.X,point.Y-center.Y)
                 let tau=2.*System.Math.PI
                 let normalize x=(x%tau+tau)%tau
                 let angle=normalize(atan2 (point.X-center.X) (center.Y-point.Y))
@@ -62,5 +64,5 @@ module HitTest =
                 let position=if finish>=start then normalize(angle-start) else normalize(start-angle)
                 sweep>0. && outer>inner && radius>=inner && radius<=outer && (sweep>=tau || position<=sweep)
     /// <summary>Returns every hit target of the output that is visible at and contains the point, in output order.</summary>
-    let at point output =
+    let at (point:Point) output =
         output.HitTargets |> List.filter (fun target -> visibleAt point target && contains point target.Geometry)

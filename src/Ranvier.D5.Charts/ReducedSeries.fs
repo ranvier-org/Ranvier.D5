@@ -1,5 +1,7 @@
 namespace Ranvier.D5.Charts
 
+open System
+
 open Ranvier.D5
 
 /// <summary>Downsampling algorithm for reduced series: MinMax keeps bucket extremes, Lttb uses largest-triangle-three-buckets.</summary>
@@ -32,7 +34,7 @@ module ReducedSeriesChart =
             Recipe.run spec.Frame id [] (fun bounds ->
                 if System.String.IsNullOrWhiteSpace spec.Key then invalidArg "Key" "Series key must be nonblank."
                 let pointArea=System.Math.PI*spec.PointRadius*spec.PointRadius
-                if not(System.Double.IsFinite spec.PointRadius && System.Double.IsFinite pointArea) || spec.PointRadius<=0. || pointArea<=0. then
+                if not(Double.IsFinite spec.PointRadius && Double.IsFinite pointArea) || spec.PointRadius<=0. || pointArea<=0. then
                     invalidArg "PointRadius" "Point radius must have a finite positive representable area."
                 let values=source |> List.choose(fun sample -> sample.Y)
                 let summary=DistributionSummary.ofValues values

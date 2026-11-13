@@ -40,7 +40,7 @@ module internal GeoRectangle =
                 if insideA then b<-intersection else a<-intersection
             edge<-edge+1
         if visible then
-            let clamp point={X=Math.Clamp(point.X,Bounds.x clip,Bounds.x clip+Bounds.width clip);Y=Math.Clamp(point.Y,Bounds.y clip,Bounds.y clip+Bounds.height clip)}
+            let clamp (point:Point)={X=Math.Clamp(point.X,Bounds.x clip,Bounds.x clip+Bounds.width clip);Y=Math.Clamp(point.Y,Bounds.y clip,Bounds.y clip+Bounds.height clip)}
             a<-clamp a
             b<-clamp b
         if visible && a<>b then ValueSome(struct(a,b)) else ValueNone
@@ -61,12 +61,12 @@ module internal GeoRectangle =
                     elif t<=2. then {X=left+width*(t-1.);Y=top}
                     elif t<=3. then {X=right;Y=top+height*(t-2.)}
                     else {X=right-width*(t-3.);Y=bottom}
-                let parameter point =
+                let parameter (point:Point) =
                     if point.X=left then Math.Clamp((bottom-point.Y)/height,0.,1.)
                     elif point.Y=top then 1.+Math.Clamp((point.X-left)/width,0.,1.)
                     elif point.X=right then 2.+Math.Clamp((point.Y-top)/height,0.,1.)
                     else normalize(3.+Math.Clamp((right-point.X)/width,0.,1.))
-                let contains point =
+                let contains (point:Point) =
                     let mutable winding=0
                     for ring in rings do
                         for index=0 to ring.Length-1 do

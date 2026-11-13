@@ -1,5 +1,7 @@
 namespace Ranvier.D5.Geo
 
+open System
+
 open Ranvier.D5
 
 /// <summary>Already planar geometry with straight edges and unrestricted finite Point coordinates.</summary>
@@ -41,9 +43,9 @@ type IdentityProjection = private {Forward:Transform;Backward:Transform option}
 module IdentityProjection =
     /// <summary>Validates a finite planar projection configuration.</summary>
     let create (config:IdentityProjectionConfig) : Result<IdentityProjection,LayoutError list> =
-        if not(System.Double.IsFinite config.Scale) || config.Scale<=0. ||
-           not(System.Double.IsFinite config.AngleDegrees) ||
-           not(System.Double.IsFinite config.Translate.X && System.Double.IsFinite config.Translate.Y) then
+        if not(Double.IsFinite config.Scale) || config.Scale<=0. ||
+           not(Double.IsFinite config.AngleDegrees) ||
+           not(Double.IsFinite config.Translate.X && Double.IsFinite config.Translate.Y) then
             Error [InvalidObservation "Planar identity requires positive finite scale, finite angle and translation."]
         else
             let struct(sine,cosine)=GeoMath.sinCosDegrees(-config.AngleDegrees)
@@ -52,16 +54,16 @@ module IdentityProjection =
             let matrix=Transform.create (x*cosine) (x*sine) (-y*sine) (y*cosine) config.Translate.X config.Translate.Y
             Ok {Forward=matrix;Backward=Transform.tryInverse matrix}
 
-    let internal projectValue projection point =
-        if not(System.Double.IsFinite point.X && System.Double.IsFinite point.Y) then ValueNone
+    let internal projectValue projection (point:Point) =
+        if not(Double.IsFinite point.X && Double.IsFinite point.Y) then ValueNone
         else
             try ValueSome(Transform.apply projection.Forward point)
             with :? System.ArgumentException -> ValueNone
     /// <summary>Returns a transformed point, or None when its input or result is nonfinite.</summary>
     let project projection point = projectValue projection point |> ValueOption.toOption
     /// <summary>Returns an inverse point, or None when the inverse or result is not representable.</summary>
-    let invert projection point =
-        if not(System.Double.IsFinite point.X && System.Double.IsFinite point.Y) then None
+    let invert projection (point:Point) =
+        if not(Double.IsFinite point.X && Double.IsFinite point.Y) then None
         else
             projection.Backward |> Option.bind(fun matrix ->
                 try Some(Transform.apply matrix point)

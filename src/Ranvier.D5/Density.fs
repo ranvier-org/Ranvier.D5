@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>An identified point with a weight, used as density and hexbin input; IDs must be non-empty and unique, and weights finite and
 /// nonnegative.</summary>
 type WeightedPoint = { Id:string; Position:Point; Weight:float }
@@ -41,7 +43,7 @@ module DensityGrid =
         elif count>int64 maxCells then Error [BudgetExceeded "Grid exceeds the cell budget."]
         elif Bounds.width bounds<=0. || Bounds.height bounds<=0. then Error [InvalidObservation "Grid bounds must have positive dimensions."]
         elif int64 values.Length<>count then Error [InvalidObservation "Grid values must match the dimensions."]
-        elif values |> List.exists(Option.exists(System.Double.IsFinite >> not)) then Error [InvalidObservation "Measured cells must be finite; use None for missing cells."]
+        elif values |> List.exists(Option.exists(Double.IsFinite >> not)) then Error [InvalidObservation "Measured cells must be finite; use None for missing cells."]
         else
             Ok {Extent=bounds;ColumnCount=columns;RowCount=rows
                 Data=values |> List.map(Option.defaultValue 0.) |> List.toArray
@@ -76,14 +78,14 @@ module Density =
     /// non-finite results.</summary>
     let blurWithCancellation (token:System.Threading.CancellationToken) (bandwidth:float) (boundary:DensityBoundary) (maxRadius:int) (grid:DensityGrid) : Result<DensityGrid,LayoutError list> =
         token.ThrowIfCancellationRequested()
-        if not(System.Double.IsFinite bandwidth) || bandwidth<0. || maxRadius<0 then
+        if not(Double.IsFinite bandwidth) || bandwidth<0. || maxRadius<0 then
             Error [InvalidObservation "Bandwidth must be finite and nonnegative; kernel radius budget must be nonnegative."]
         elif bandwidth=0. then Ok grid
         else
             let sigmaX=bandwidth/(Bounds.width grid.Extent/float grid.ColumnCount)
             let sigmaY=bandwidth/(Bounds.height grid.Extent/float grid.RowCount)
             let radius sigma=ceil(3.*sigma)
-            if not(System.Double.IsFinite sigmaX && System.Double.IsFinite sigmaY)
+            if not(Double.IsFinite sigmaX && Double.IsFinite sigmaY)
                || radius sigmaX>float(min maxRadius ((System.Int32.MaxValue-1)/2)) || radius sigmaY>float(min maxRadius ((System.Int32.MaxValue-1)/2)) then
                 Error [BudgetExceeded "Gaussian radius exceeds the configured kernel budget."]
             elif 4.*float grid.Data.Length*(radius sigmaX+radius sigmaY+1.)>256000000.
@@ -125,7 +127,7 @@ module Density =
                     target
                 let data=pass true sigmaX grid.Data |> pass false sigmaY
                 token.ThrowIfCancellationRequested()
-                if data |> Array.exists(System.Double.IsFinite >> not) then Error [InvalidObservation "Blur exceeds the finite numeric range."]
+                if data |> Array.exists(Double.IsFinite >> not) then Error [InvalidObservation "Blur exceeds the finite numeric range."]
                 else Ok {grid with Data=data}
     /// <summary>Runs <c>blurWithCancellation</c> without cancellation.</summary>
     let blur bandwidth boundary maxRadius grid = blurWithCancellation System.Threading.CancellationToken.None bandwidth boundary maxRadius grid
@@ -136,19 +138,19 @@ module Density =
         let count=int64 config.Columns*int64 config.Rows
         let width,height=Bounds.width config.Bounds,Bounds.height config.Bounds
         if config.Columns<=0 || config.Rows<=0 || config.MaxCells<=0 || config.MaxPoints<=0 || width<=0. || height<=0.
-           || not(System.Double.IsFinite config.Bandwidth) || config.Bandwidth<0. || config.MaxKernelRadius<0 then
+           || not(Double.IsFinite config.Bandwidth) || config.Bandwidth<0. || config.MaxKernelRadius<0 then
             Error [InvalidObservation "Require positive grid dimensions, bounds and budgets, and a finite nonnegative bandwidth."]
         elif count>int64 config.MaxCells || points.Length>config.MaxPoints then Error [BudgetExceeded "Density input or grid exceeds its budget."]
         else
             let errors=ResizeArray<LayoutError>()
-            let seen=System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+            let seen=System.Collections.Generic.HashSet<string>(StringComparer.Ordinal)
             let mutable item=0
             for point in points do
                 if item%64=0 then token.ThrowIfCancellationRequested()
                 item<-item+1
                 if System.String.IsNullOrWhiteSpace point.Id then errors.Add(InvalidObservation "Point ID must not be empty.")
                 elif not(seen.Add point.Id) then errors.Add(DuplicateId point.Id)
-                if not(System.Double.IsFinite point.Weight) || point.Weight<0. then errors.Add(InvalidObservation "Point weights must be finite and nonnegative.")
+                if not(Double.IsFinite point.Weight) || point.Weight<0. then errors.Add(InvalidObservation "Point weights must be finite and nonnegative.")
                 if not(Bounds.contains point.Position config.Bounds) then errors.Add(InvalidObservation("Point lies outside density bounds: "+point.Id))
             if errors.Count>0 then Error(List.ofSeq errors)
             else
@@ -163,7 +165,7 @@ module Density =
                     let index=row*config.Columns+column
                     data[index]<-data[index]+point.Weight
                     members[index]<-point.Id::members[index]
-                if data |> Array.exists(System.Double.IsFinite >> not) then Error [InvalidObservation "Cell weight exceeds the finite numeric range."]
+                if data |> Array.exists(Double.IsFinite >> not) then Error [InvalidObservation "Cell weight exceeds the finite numeric range."]
                 else
                     let initial={Extent=config.Bounds;ColumnCount=config.Columns;RowCount=config.Rows;Data=data
                                  Observed=Array.create (int count) true;Membership=members |> Array.map List.rev}
@@ -172,12 +174,12 @@ module Density =
                     | Ok grid when config.Normalization=DensityNormalization.Mass -> Ok grid
                     | Ok grid ->
                         let area=(width/float config.Columns)*(height/float config.Rows)
-                        if not(System.Double.IsFinite area) || area<=0. then Error [InvalidObservation "Cell area is outside the finite positive numeric range."]
+                        if not(Double.IsFinite area) || area<=0. then Error [InvalidObservation "Cell area is outside the finite positive numeric range."]
                         else
                             let normalized=grid.Data |> Array.mapi(fun i value ->
                                 if i%4096=0 then token.ThrowIfCancellationRequested()
                                 value/area)
-                            if normalized |> Array.exists(System.Double.IsFinite >> not) then Error [InvalidObservation "Density exceeds the finite numeric range."]
+                            if normalized |> Array.exists(Double.IsFinite >> not) then Error [InvalidObservation "Density exceeds the finite numeric range."]
                             else Ok {grid with Data=normalized}
     /// <summary>Runs <c>gridWithCancellation</c> without cancellation.</summary>
     let grid config points = gridWithCancellation System.Threading.CancellationToken.None config points
@@ -186,11 +188,11 @@ module Density =
     /// pairs.</summary>
     let kde1dWithCancellation (token:System.Threading.CancellationToken) (bandwidth:float) (samples:(float*float) list) (positions:float list) : Result<float list,LayoutError list> =
         token.ThrowIfCancellationRequested()
-        if not(System.Double.IsFinite bandwidth) || bandwidth<=0. then Error [InvalidObservation "KDE bandwidth must be finite and positive."]
+        if not(Double.IsFinite bandwidth) || bandwidth<=0. then Error [InvalidObservation "KDE bandwidth must be finite and positive."]
         elif samples.Length>1000000 || positions.Length>1000000 || int64 samples.Length*int64 positions.Length>100000000L then
             Error [BudgetExceeded "KDE exceeds the sample/query work budget."]
-        elif samples |> List.exists(fun (position,weight) -> not(System.Double.IsFinite position && System.Double.IsFinite weight) || weight<0.)
-             || positions |> List.exists(System.Double.IsFinite >> not) then
+        elif samples |> List.exists(fun (position,weight) -> not(Double.IsFinite position && Double.IsFinite weight) || weight<0.)
+             || positions |> List.exists(Double.IsFinite >> not) then
             Error [InvalidObservation "KDE samples and query positions must be finite; weights must be nonnegative."]
         else
             let largest=samples |> List.fold(fun largest (_,weight) -> max largest weight) 0.
@@ -210,15 +212,15 @@ module Density =
                         if index%64=0 then token.ThrowIfCancellationRequested()
                         index<-index+1
                         let delta=query-position
-                        let z=if System.Double.IsFinite delta then delta/bandwidth else query/bandwidth-position/bandwidth
+                        let z=if Double.IsFinite delta then delta/bandwidth else query/bandwidth-position/bandwidth
                         let term=logWeight-0.5*z*z
-                        if System.Double.IsFinite term then
+                        if Double.IsFinite term then
                             if term>largestTerm then
                                 sum<-sum*exp(largestTerm-term)+1.
                                 largestTerm<-term
                             else sum<-sum+exp(term-largestTerm)
                     if sum=0. then 0. else exp(largestTerm+log sum))
-                if values |> List.exists(System.Double.IsFinite >> not) then Error [InvalidObservation "KDE density exceeds the finite numeric range."]
+                if values |> List.exists(Double.IsFinite >> not) then Error [InvalidObservation "KDE density exceeds the finite numeric range."]
                 else Ok values
     /// <summary>Runs <c>kde1dWithCancellation</c> without cancellation.</summary>
     let kde1d bandwidth samples positions = kde1dWithCancellation System.Threading.CancellationToken.None bandwidth samples positions

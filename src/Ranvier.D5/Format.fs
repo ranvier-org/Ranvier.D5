@@ -17,7 +17,13 @@ module Format =
         value.ToString(digits precision,culture)
     /// <summary>Formats the value multiplied by 100 as <c>number</c> does, followed by the culture's percent symbol; fails as <c>number</c>
     /// does.</summary>
-    let percent culture precision value = number culture precision (value*100.)+culture.NumberFormat.PercentSymbol
+    let percent (culture:CultureInfo) precision value =
+#if FABLE_COMPILER
+        // Fable has no culture data: every culture formats as invariant, whose percent symbol is "%".
+        number culture precision (value*100.)+"%"
+#else
+        number culture precision (value*100.)+culture.NumberFormat.PercentSymbol
+#endif
     /// <summary>Formats a finite value scaled by the largest SI prefix from y (10^-24) to Y (10^24) not exceeding its magnitude, as <c>number</c>
     /// does; zero has no prefix.</summary>
     let si culture precision value =
@@ -61,7 +67,12 @@ module Parse =
     /// <summary>Parses a finite number with an optional sign, decimal point and exponent; whitespace, group separators and non-finite words are rejected.</summary>
     let number (culture:CultureInfo) (text:string) : Result<float,LayoutError list> =
         if isNull culture then nullArg "culture"
+#if FABLE_COMPILER
+        // Fable parses invariant text only and has no NumberStyles; reject the surrounding whitespace those styles reject.
+        match (if isNull text || text.Trim()<>text then false,0. else Double.TryParse text) with
+#else
         match Double.TryParse(text,styles,culture) with
+#endif
         | true,value when Double.IsFinite value -> Ok value
         | _ -> Error [InvalidObservation(sprintf "'%s' is not a finite number." text)]
 
@@ -70,6 +81,11 @@ module Parse =
         if isNull culture then nullArg "culture"
         if isNull zone then nullArg "zone"
         let fail message=Error [InvalidObservation(sprintf "'%s' %s" text message)]
+#if FABLE_COMPILER
+        // Fable implements neither DateTime.TryParseExact nor DateTimeOffset.TryParseExact.
+        ignore policy
+        fail ("cannot be parsed with an exact pattern under Fable ("+pattern+").")
+#else
         if pattern.Contains 'K' || pattern.Contains 'z' then
             // AssumeUniversal keeps a quoted literal such as 'Z' from falling back to the machine offset.
             match DateTimeOffset.TryParseExact(text,pattern,culture,DateTimeStyles.AssumeUniversal) with
@@ -80,18 +96,19 @@ module Parse =
             | false,_ -> fail ("does not match the pattern "+pattern+".")
             | true,parsed ->
                 let local=DateTime.SpecifyKind(parsed,DateTimeKind.Unspecified)
-                if zone.IsInvalidTime local then
+                if Zone.isInvalidTime zone local then
                     match policy.Invalid with
-                    | InvalidTime.Reject -> fail ("does not exist in "+zone.Id+".")
+                    | InvalidTime.Reject -> fail ("does not exist in "+Zone.id zone+".")
                     | InvalidTime.ShiftForward ->
                         // Read the instant with the offset in force before the gap, then show it in the zone.
-                        let before=zone.GetUtcOffset(local.AddHours -6.)
+                        let before=Zone.utcOffset zone (local.AddHours -6.)
                         let instant=DateTimeOffset(local.Ticks-before.Ticks,TimeSpan.Zero)
                         Ok(TimeZoneInfo.ConvertTime(instant,zone))
-                elif zone.IsAmbiguousTime local then
-                    let offsets=zone.GetAmbiguousTimeOffsets local
+                elif Zone.isAmbiguousTime zone local then
+                    let offsets=Zone.ambiguousOffsets zone local
                     match policy.Ambiguous with
-                    | AmbiguousTime.Reject -> fail ("is ambiguous in "+zone.Id+".")
+                    | AmbiguousTime.Reject -> fail ("is ambiguous in "+Zone.id zone+".")
                     | AmbiguousTime.Earlier -> Ok(DateTimeOffset(local,Array.max offsets))
                     | AmbiguousTime.Later -> Ok(DateTimeOffset(local,Array.min offsets))
-                else Ok(DateTimeOffset(local,zone.GetUtcOffset local))
+                else Ok(DateTimeOffset(local,Zone.utcOffset zone local))
+#endif

@@ -90,7 +90,7 @@ module HierarchyChart =
             let layoutBounds=if radial then Bounds.create 0. 0. (2.*Math.PI) radius else Bounds.create (Bounds.x bounds+min 5. (Bounds.width bounds/2.)) (Bounds.y bounds+min 5. (Bounds.height bounds/2.)) (max 0. (Bounds.width bounds-10.)) (max 0. (Bounds.height bounds-10.))
             let positions=(if radial then Tree.layout else Cluster.layout) (TreeConfig.create layoutBounds) visible |> unwrap
             let lookup=positions |> Seq.map(fun item -> item.Id,item.Point) |> dict
-            let position point=if radial then let p=Curves.radialPoint point.X point.Y in Point.create (cx+p.X) (cy+p.Y) else point
+            let position (point:Point)=if radial then let p=Curves.radialPoint point.X point.Y in Point.create (cx+p.X) (cy+p.Y) else point
             let entries=positions |> List.map(fun item ->
                 let p=position item.Point
                 entry spec item.Id (HitPoint(p,5.)) (fun key -> Shape.symbol Symbol.Circle (Math.PI*16.) |> Mark.path key |> Mark.withTransform(Transform.translate p.X p.Y)))

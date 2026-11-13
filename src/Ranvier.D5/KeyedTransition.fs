@@ -68,7 +68,7 @@ module KeyedTransition =
             let children=state.Segments[key] |> List.choose(fun segment ->
                 sampleSegment now segment |> Option.map(fun mark ->
                     Mark.reframe (string segment.Layer) (Mark.geometry mark) (Mark.style mark) (Mark.transform mark) mark |> Leaf))
-            if children.IsEmpty then None else Some(Group(GroupSpec.create key,children)))
+            if children.IsEmpty then None else Some(SceneNode.Group(GroupSpec.create key,children)))
     /// <summary>Retargets from current samples. At most eight crossfade layers per key survive repeated topology changes; the faintest old layers are discarded first.</summary>
     let retarget now duration ease reduced marks state =
         validate now marks

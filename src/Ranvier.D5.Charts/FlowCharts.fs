@@ -1,5 +1,7 @@
 namespace Ranvier.D5.Charts
 
+open System
+
 open Ranvier.D5
 
 /// <summary>Chord diagram specification: layout options, labels and colors by domain ID, selected group IDs to outline, and whether to draw group labels.</summary>
@@ -42,7 +44,7 @@ module FlowChart =
                     let flows=layout.Flows |> List.map(fun flow ->
                         let a,b=domains[flow.Source.Index],domains[flow.Target.Index]
                         let domainPair=
-                            if spec.Layout.Mode=ChordMode.Directed || System.StringComparer.Ordinal.Compare(a,b)<=0 then [a;b] else [b;a]
+                            if spec.Layout.Mode=ChordMode.Directed || StringComparer.Ordinal.Compare(a,b)<=0 then [a;b] else [b;a]
                         let key=Recipe.key ("flow"::domainPair)
                         let label=spec.Label a+" → "+spec.Label b
                         let ribbon={RibbonSpec.create (max 0. (inner-3.)) flow with
@@ -77,10 +79,10 @@ module FlowChart =
         | Error errors -> Error errors
         | Ok _ ->
             Recipe.run spec.Frame (fun (node:SankeyNode) -> node.Id) layout.Nodes (fun bounds ->
-                let finiteNonnegative value=System.Double.IsFinite value && value>=0.
+                let finiteNonnegative value=Double.IsFinite value && value>=0.
                 if not(finiteNonnegative spec.LinkOpacity) || spec.LinkOpacity>1. then invalidArg "spec" "Link opacity must be in [0,1]."
                 for node in layout.Nodes do
-                    if not(finiteNonnegative node.Value && finiteNonnegative node.Inflow && finiteNonnegative node.Outflow && System.Double.IsFinite node.Imbalance) then
+                    if not(finiteNonnegative node.Value && finiteNonnegative node.Inflow && finiteNonnegative node.Outflow && Double.IsFinite node.Imbalance) then
                         invalidArg "layout" "Node flow values must be finite and nonnegative."
                 let links=layout.Links |> List.map(fun edge ->
                     if not(finiteNonnegative edge.Width) then invalidArg "layout" "Link width must be finite and nonnegative."

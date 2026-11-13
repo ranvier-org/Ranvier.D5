@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><PackageId>Ranvier.D5.Geo$(RanvierPackageSuffix)</PackageId><Description>Functional geographic geometry and map projections for Ranvier.D5.</Description><IsAotCompatible>true</IsAotCompatible></PropertyGroup>
+  <!-- Fable has no System.Text.Json; FableJson.fs supplies the part GeoJson uses (FABLE_COMPILER is passed as a property by Fable). -->
+  <ItemGroup Condition="'$(FABLE_COMPILER)' == 'True'"><Compile Include="FableJson.fs" /></ItemGroup>
   <ItemGroup><Compile Include="Coordinates.fs" /><Compile Include="GeoTypes.fs" /><Compile Include="GeoJson.fs" /><Compile Include="Graticule.fs" /><Compile Include="GeoStream.fs" /><Compile Include="GeoMeasure.fs" /><Compile Include="Projection.fs" /><Compile Include="GeoPreclip.fs" /><Compile Include="GeoRejoin.fs" /><Compile Include="GeoPolygon.fs" /><Compile Include="GeoRectangle.fs" /><Compile Include="ProjectedPath.fs" /><Compile Include="GeoPath.fs" /><Compile Include="ProjectionFit.fs" /><Compile Include="CompositeProjection.fs" /><Compile Include="IdentityProjection.fs" /><Compile Include="PlanarPath.fs" /><Compile Include="MapCharts.fs" /></ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj" />

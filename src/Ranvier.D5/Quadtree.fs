@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>Finite endpoint bounds; their span need not fit in a double.</summary>
 type QuadExtent = { Min:Point; Max:Point }
 
@@ -116,20 +118,20 @@ module Quadtree =
             overlaps) tree
         results |> Seq.sortBy(fun item -> item.Index) |> Seq.map(fun item -> item.Value) |> Seq.toList
 
-    let private distance (q:Point) (p:Point) = System.Double.Hypot(q.X-p.X,q.Y-p.Y)
+    let private distance (q:Point) (p:Point) = Double.Hypot(q.X-p.X,q.Y-p.Y)
     let private exactDistances (q:Point) (a:Point) (b:Point) =
         let v,_=ExactDyadic.integers [|q.X;q.Y;a.X;a.Y;b.X;b.Y|]
         let ax,ay,bx,by=v[2]-v[0],v[3]-v[1],v[4]-v[0],v[5]-v[1]
         compare (ax*ax+ay*ay) (bx*bx+by*by)
     let private compareDistance q a b =
         let da,db=distance q a,distance q b
-        if System.Double.IsFinite da && System.Double.IsFinite db && abs(da-db)>max da db*1e-14 then compare da db
+        if Double.IsFinite da && Double.IsFinite db && abs(da-db)>max da db*1e-14 then compare da db
         elif a=b then 0
         else exactDistances q a b
     let private insideRadius q p radius =
         if System.Double.IsPositiveInfinity radius then true else
         let d=distance q p
-        if System.Double.IsFinite d && abs(d-radius)>max d radius*1e-14 then d<radius else
+        if Double.IsFinite d && abs(d-radius)>max d radius*1e-14 then d<radius else
         let v,_=ExactDyadic.integers [|q.X;q.Y;p.X;p.Y;radius|]
         let dx,dy=v[2]-v[0],v[3]-v[1]
         dx*dx+dy*dy<=v[4]*v[4]
@@ -139,7 +141,11 @@ module Quadtree =
         Point.create query.X query.Y |> ignore
         if System.Double.IsNaN radius || radius<0. then invalidArg "radius" "Radius must be nonnegative."
         let closest e=Point.create (max e.Min.X (min e.Max.X query.X)) (max e.Min.Y (min e.Max.Y query.Y))
+#if FABLE_COMPILER
+        let pending=PriorityQueue<QuadNode<'T>,float>()
+#else
         let pending=System.Collections.Generic.PriorityQueue<QuadNode<'T>,float>()
+#endif
         root |> Option.iter(fun (QuadNode(cell,_) as node) -> pending.Enqueue(node,distance query (closest cell.Extent)))
         let mutable best:QuadItem<'T> option=None
         while pending.Count>0 do

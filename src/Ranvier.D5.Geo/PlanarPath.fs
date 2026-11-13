@@ -1,5 +1,7 @@
 namespace Ranvier.D5.Geo
 
+open System
+
 open System.Threading
 open Ranvier.D5
 
@@ -66,7 +68,7 @@ module PlanarPath =
                     visit()
                     if inputCount>=limits.MaxPoints then reject(BudgetExceeded "Planar input exceeds its point budget.")
                     inputCount<-inputCount+1
-                    if not(System.Double.IsFinite point.X && System.Double.IsFinite point.Y) then
+                    if not(Double.IsFinite point.X && Double.IsFinite point.Y) then
                         reject(InvalidObservation "Planar input coordinates must be finite.")
                 let project point =
                     spend 1L

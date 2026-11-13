@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>Scene viewport dimensions in scene units; <c>Scene.compose</c> requires both to be finite and positive.</summary>
 type Viewport = { Width:float; Height:float }
 /// <summary>A gradient color stop; offset and opacity must lie in [0,1], and offsets must be nondecreasing within a gradient.</summary>
@@ -33,8 +35,8 @@ module SceneDefinition =
                 stops
         let mutable previous = -1.
         for stop in stops do
-            if not(System.Double.IsFinite stop.Offset) || stop.Offset<previous || stop.Offset>1. || stop.Offset<0. then
+            if not(Double.IsFinite stop.Offset) || stop.Offset<previous || stop.Offset>1. || stop.Offset<0. then
                 invalidArg "stops" "Offsets must be ordered in [0,1]."
-            if not(System.Double.IsFinite stop.Opacity) || stop.Opacity<0. || stop.Opacity>1. then
+            if not(Double.IsFinite stop.Opacity) || stop.Opacity<0. || stop.Opacity>1. then
                 invalidArg "stops" "Opacity must be in [0,1]."
             previous <- stop.Offset

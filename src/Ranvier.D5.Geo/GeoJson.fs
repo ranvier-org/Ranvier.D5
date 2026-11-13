@@ -75,7 +75,12 @@ module GeoJson =
         | _ -> reject "GeoJSON type must be a string."
     let private coordinateNumber = function
         | GeoValue.Number value ->
+#if FABLE_COMPILER
+            // The value is already a JSON number lexeme, and Fable parses invariantly without NumberStyles.
+            match Double.TryParse value with
+#else
             match Double.TryParse(value,NumberStyles.Float,CultureInfo.InvariantCulture) with
+#endif
             | true,number when Double.IsFinite number -> number
             | _ -> reject "Coordinates require finite representable numbers."
         | _ -> reject "Coordinates require JSON numbers."
@@ -283,11 +288,18 @@ module GeoJson =
     let serializeWithCancellation config cancellation document =
         protect config cancellation (fun context ->
             let value=writeDocument context document
+#if FABLE_COMPILER
+            // Fable has no MemoryStream; the Fable Utf8JsonWriter (FableJson.fs) writes into a string.
+            use writer=new Utf8JsonWriter(JsonWriterOptions(MaxDepth=config.MaxDepth))
+            emitValue context config 1 writer value
+            writer.ToString())
+#else
             use output=new MemoryStream()
             use writer=new Utf8JsonWriter(output,JsonWriterOptions(MaxDepth=config.MaxDepth))
             emitValue context config 1 writer value
             writer.Flush()
             Encoding.UTF8.GetString(output.GetBuffer(),0,int output.Length))
+#endif
 
     /// <summary>Serializes RFC 7946 using the default budgets.</summary>
     let serialize document = serializeWithCancellation GeoJsonConfig.defaultValue CancellationToken.None document

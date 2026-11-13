@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>How matrix cells become chord arcs. Undirected sizes each group by its row sum; Directed adds incoming flow so each flow appears at both
 /// ends; Transposed is Undirected over the transposed matrix.</summary>
 [<RequireQualifiedAccess>]
@@ -37,7 +39,7 @@ module Chord =
         let tau=2.*System.Math.PI
         if config.MaxCells<=0 then Error [InvalidObservation "MaxCells must be positive."]
         elif int64 n*int64 n>int64 config.MaxCells then Error [BudgetExceeded "Chord matrix exceeds MaxCells."]
-        elif not(System.Double.IsFinite config.PadAngle) || config.PadAngle<0. || (n>0 && config.PadAngle>tau/float n) then
+        elif not(Double.IsFinite config.PadAngle) || config.PadAngle<0. || (n>0 && config.PadAngle>tau/float n) then
             Error [InvalidObservation "Chord padding must be finite, nonnegative and fit the circle."]
         elif matrix |> List.exists(fun row -> token.ThrowIfCancellationRequested();row.Length<>n) then Error [InvalidTopology "Chord matrix must be square."]
         elif matrix |> List.exists(fun row ->
@@ -45,7 +47,7 @@ module Chord =
             row |> List.exists(fun value ->
                 if index%64=0 then token.ThrowIfCancellationRequested()
                 index<-index+1
-                not(System.Double.IsFinite value) || value<0.)) then
+                not(Double.IsFinite value) || value<0.)) then
             Error [InvalidObservation "Chord values must be finite and nonnegative."]
         elif n=0 then Ok {Groups=[];Flows=[]}
         else
@@ -69,7 +71,7 @@ module Chord =
                     let incoming=if directed then value j i else 0.
                     sums[i]<-sums[i]+outgoing+incoming
                     if largest>0. then scaledTotal<-scaledTotal+outgoing/largest+incoming/largest
-            if sums |> Array.exists(fun sum -> not(System.Double.IsFinite sum)) then
+            if sums |> Array.exists(fun sum -> not(Double.IsFinite sum)) then
                 Error [InvalidObservation "A group flow total exceeds the finite numeric range."]
             else
                 let sort order weight items =

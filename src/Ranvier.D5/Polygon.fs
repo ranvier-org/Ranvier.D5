@@ -1,4 +1,6 @@
 namespace Ranvier.D5
+
+open System
 open System.Numerics
 
 /// <summary>Area, centroid, containment and convex hull of polygons given as vertex lists, using exact arithmetic.</summary>
@@ -24,7 +26,7 @@ module Polygon =
         let mutable largest=0.
         for point in points do
             let x,y=point.X*2.,point.Y*2.
-            if not(System.Double.IsFinite x && System.Double.IsFinite y) || floor x<>x || floor y<>y then eligible<-false
+            if not(Double.IsFinite x && Double.IsFinite y) || floor x<>x || floor y<>y then eligible<-false
             largest<-max largest (max (abs x) (abs y))
         if eligible && 2.*float(List.length points)*largest*largest<=4503599627370496. then
             match points with

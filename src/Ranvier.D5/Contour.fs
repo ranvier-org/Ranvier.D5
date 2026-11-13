@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>A region where values are at or above Threshold, in grid-bounds coordinates. Rings are closed by repeating the first point; Outer has
 /// positive signed area and each hole negative.</summary>
 type ContourPolygon = { Threshold:float; Outer:Point list; Holes:Point list list }
@@ -27,14 +29,14 @@ module Contour =
         let left,right=aa*cc,bb*dd
         let determinant=left-right
         let bound=(abs left+abs right)*1e-14+16.*System.Double.Epsilon
-        if System.Double.IsFinite determinant && System.Double.IsFinite bound && abs determinant>bound then sign determinant
+        if Double.IsFinite determinant && Double.IsFinite bound && abs determinant>bound then sign determinant
         else
             let values,_=ExactDyadic.integers [|a;b;c;d;threshold|]
             ((values[0]-values[4])*(values[2]-values[4])-(values[1]-values[4])*(values[3]-values[4])).Sign
 
     let private fraction a b threshold =
         let numerator,denominator=threshold-a,b-a
-        if System.Double.IsFinite numerator && System.Double.IsFinite denominator then numerator/denominator
+        if Double.IsFinite numerator && Double.IsFinite denominator then numerator/denominator
         else
             let values,_=ExactDyadic.integers [|a;b;threshold|]
             ExactDyadic.ratio (values[2]-values[0]) (values[1]-values[0]) 0
@@ -60,7 +62,7 @@ module Contour =
         let cellWork=(int64 columns+1L)*(int64 rows+1L)
         if config.MaxCells<=0 || config.MaxVertices<=0 || config.MaxPolygons<=0 || config.MaxWork<=0L then
             Error [InvalidObservation "Contour budgets must be positive."]
-        elif config.Thresholds |> List.exists(System.Double.IsFinite >> not) then
+        elif config.Thresholds |> List.exists(Double.IsFinite >> not) then
             Error [InvalidObservation "Contour thresholds must be finite."]
         elif Set.count(Set.ofList config.Thresholds)<>config.Thresholds.Length then
             Error [InvalidObservation "Contour thresholds must be unique."]
@@ -99,7 +101,12 @@ module Contour =
                     if links.Count>=config.MaxVertices-vertices then raise(ContourAbort(BudgetExceeded "Contour vertices exceed the output budget."))
                     crossing first |> ignore
                     crossing last |> ignore
+#if FABLE_COMPILER
+                    if links.ContainsKey first then raise(ContourAbort(InvalidTopology "A contour edge has multiple outgoing segments."))
+                    links.Add(first,last)
+#else
                     if not(links.TryAdd(first,last)) then raise(ContourAbort(InvalidTopology "A contour edge has multiple outgoing segments."))
+#endif
                 for y in -1..rows-1 do
                     token.ThrowIfCancellationRequested()
                     for x in -1..columns-1 do

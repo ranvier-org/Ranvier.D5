@@ -9,8 +9,14 @@ type Paint = private Paint of string
 [<RequireQualifiedAccess>]
 module Paint =
     /// <summary>Uses a typed Ranvier.Css value as SVG paint. The caller chooses a color-compatible CSS value.</summary>
+#if FABLE_COMPILER
+    // Under Fable the Css union cases named Value (internal on .NET) capture Ranvier.Css.Value; Generated holds the same functions.
+    let ofCss value = Paint (Ranvier.Css.Generated.text value)
+    let private tokens text = (Ranvier.Css.Generated.unsafeTokens text : Ranvier.Css.Value<unit>) |> ofCss
+#else
     let ofCss value = Paint (Ranvier.Css.Value.render value)
     let private tokens text = Ranvier.Css.Value.unsafeFromTokens<unit> text |> ofCss
+#endif
     /// <summary>The CSS <c>none</c> paint, which draws nothing.</summary>
     let none = tokens "none"
     /// <summary>The CSS <c>currentColor</c> paint, which inherits the rendering context's text color.</summary>

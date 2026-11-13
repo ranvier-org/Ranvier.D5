@@ -55,4 +55,8 @@ module Chromatic =
         let color=ColorSpace.applyGamut gamut color
         let number (value:float)=value.ToString("R",CultureInfo.InvariantCulture)
         let css="rgba("+number(color.Red*255.)+","+number(color.Green*255.)+","+number(color.Blue*255.)+","+number color.Alpha+")"
+#if FABLE_COMPILER
+        (Ranvier.Css.Generated.unsafeTokens css : Ranvier.Css.Value<unit>) |> Paint.ofCss
+#else
         Ranvier.Css.Value.unsafeFromTokens<unit> css |> Paint.ofCss
+#endif

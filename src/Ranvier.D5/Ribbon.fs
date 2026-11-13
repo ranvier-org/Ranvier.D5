@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>One chord ribbon: source and target arcs and radii, PadAngle in radians trimmed from each arc, and an optional ArrowHead radial length
 /// that replaces the target arc with an arrow tip.</summary>
 type RibbonSpec =
@@ -32,7 +34,7 @@ module Ribbon =
             Check.finite "StartAngle" arc.StartAngle
             Check.finite "EndAngle" arc.EndAngle
             let span=arc.EndAngle-arc.StartAngle
-            if not(System.Double.IsFinite span) || span<0. || span>tau+1e-12 then invalidArg "arc" "Require an ascending arc of at most one turn."
+            if not(Double.IsFinite span) || span<0. || span>tau+1e-12 then invalidArg "arc" "Require an ascending arc of at most one turn."
             if span<=spec.PadAngle then
                 let middle=arc.StartAngle+span/2.
                 middle,middle
