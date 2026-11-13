@@ -1,6 +1,6 @@
 # Native examples
 
-Every image below comes from a working native WebCore view.
+Every image below comes from a working native WebCore view. For complete animated dashboards built from these pieces, see the [live dashboards app](../Ranvier.D5.Dashboards/README.md).
 
 ## Bounded geographic projections
 

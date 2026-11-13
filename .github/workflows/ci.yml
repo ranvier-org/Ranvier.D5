@@ -88,6 +88,12 @@ jobs:
           for recipe in violin minmax lttb; do
             "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-distribution "$recipe" "artifacts/$recipe-distribution.bmp"
           done
+      - name: Native dashboards
+        shell: bash
+        run: |
+          prefix=()
+          if [[ "$RUNNER_OS" == Linux ]]; then prefix=(xvfb-run -a); fi
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Dashboards -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture artifacts/dashboards
       - name: Paired performance regression gate
         shell: bash
         run: |
@@ -195,6 +201,7 @@ jobs:
           path: |
             artifacts/*.json
             artifacts/*.bmp
+            artifacts/dashboards/*.bmp
             artifacts/packages/
             artifacts/comparison-*/*.json
             artifacts/comparison-*/*.log
