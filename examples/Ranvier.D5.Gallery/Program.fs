@@ -297,9 +297,14 @@ let capture kind path =
             verify "rotated" |> ignore
             owner :> IDisposable
         elif kind="advanced" then
-            let phase=graph.Run(fun () -> Api.createSignal 0.)
-            let scene=graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) AdvancedRecipesGallery.scene)
-            let mounted=mount host graph (fun () -> scene.Value)
+            let owner,phase,input,current,status=AdvancedRecipesGallery.mount host graph
+            let center (hit:Ranvier.D5.Charts.HitTarget) =
+                match hit.Geometry with
+                | Ranvier.D5.Charts.HitPoint(point,_) | Ranvier.D5.Charts.HitRegion(_,_,point) -> Some point
+                | Ranvier.D5.Charts.HitBounds bounds -> Some(Point.create (Bounds.x bounds+Bounds.width bounds/2.) (Bounds.y bounds+Bounds.height bounds/2.))
+                | _ -> None
+            let clean (output:Ranvier.D5.Charts.ChartOutput) (hit:Ranvier.D5.Charts.HitTarget) point =
+                Ranvier.D5.Charts.HitTest.at point output |> List.map(fun target -> target.DataIds) = [hit.DataIds]
             // Every dot and matrix cell that picks only itself must paint over the white page.
             let verify value =
                 host.Cycle()
@@ -307,24 +312,66 @@ let capture kind path =
                 let struct(w,h)=host.PaintSize
                 let pixels=Array.zeroCreate<byte>(w*h*4)
                 host.Paint pixels
-                let output=AdvancedRecipesGallery.chart value
+                let output=graph.Run current
+                if output<>AdvancedRecipesGallery.chart value then failwithf "Advanced gallery did not follow the phase signal to %.2f." value
                 let candidates=output.HitTargets |> List.choose(fun hit ->
                     match hit.Geometry with
                     | Ranvier.D5.Charts.HitPoint(point,radius) when radius>=3. -> Some(hit,point)
                     | Ranvier.D5.Charts.HitBounds bounds when hit.MarkPath |> List.exists(fun part -> part.Contains "cell") ->
                         Some(hit,Point.create (Bounds.x bounds+Bounds.width bounds/2.) (Bounds.y bounds+Bounds.height bounds/2.))
                     | _ -> None)
-                let targets=candidates |> List.filter(fun (hit,point) -> Ranvier.D5.Charts.HitTest.at point output |> List.map(fun target -> target.DataIds) = [hit.DataIds])
+                let targets=candidates |> List.filter(fun (hit,point) -> clean output hit point)
                 if targets.Length<100 then failwithf "Advanced gallery exposed only %d cleanly pickable marks." targets.Length
                 for hit,point in targets do
                     let x,y=int(Math.Round point.X)+8,int(Math.Round point.Y)+8
                     let i=(y*w+x)*4
                     if int pixels[i]>235 && int pixels[i+1]>235 && int pixels[i+2]>235 then
                         failwithf "Advanced gallery mark %A did not paint at (%d,%d) for phase %.2f." hit.DataIds x y value
+            let marked (output:Ranvier.D5.Charts.ChartOutput) id =
+                let paths=AdvancedRecipesGallery.highlightedPaths output (Set.singleton id)
+                let scenePaths=SceneNode.paths [] (Scene.nodes output.Scene) |> List.map fst |> Set.ofList
+                if paths.IsEmpty || not(Set.isSubset paths scenePaths) then failwithf "Advanced item %s has no highlightable scene mark." id
             verify 0.
+            // Native hover must pick one item in each of the six panels and describe it.
+            let output=graph.Run current
+            let panels=
+                output.HitTargets |> List.groupBy(fun hit -> List.head hit.MarkPath)
+                |> List.choose(fun (_,hits) -> hits |> List.tryPick(fun hit -> center hit |> Option.filter(clean output hit) |> Option.map(fun point -> hit,point)))
+            if panels.Length<>6 then failwithf "Advanced gallery hover reached %d of 6 panels." panels.Length
+            for hit,point in panels do
+                host.Mouse(0,int(Math.Round point.X)+8,int(Math.Round point.Y)+8,0,0,0) |> ignore
+                let id=List.head hit.DataIds
+                if graph.Run(fun () -> input.Selection.Hovered)<>Some id then failwithf "Advanced hover did not pick %s in %s." id (List.head hit.MarkPath)
+                let expected=output.Semantics |> List.find(fun item -> List.contains id item.DataIds) |> fun item -> item.Description
+                if graph.Run status<>expected then failwithf "Advanced status did not describe hovered %s." id
+                marked output id
+            host.Mouse(0,2,2,0,0,0) |> ignore
+            if graph.Run(fun () -> input.Selection.Hovered).IsSome then failwith "Advanced hover did not clear outside the marks."
+            // Keyboard focus and selection, kept across a data change.
+            input.Send(InputEvent.Key "ArrowRight")
+            input.Send(InputEvent.Key "Enter")
+            let selection=graph.Run(fun () -> input.Selection)
+            match selection.Focused with
+            | Some id when selection.Selected=Set.singleton id -> marked output id
+            | _ -> failwithf "Advanced keyboard selection failed: %A." selection
+            let id=selection.Focused.Value
             graph.Run(fun () -> phase.Value<-0.6)
             verify 0.6
-            {new IDisposable with member _.Dispose()=mounted.Dispose()}
+            if not(graph.Run(fun () -> input.Selection.Selected.Contains id)) then failwithf "Advanced selection of %s did not survive the phase change." id
+            input.Send(InputEvent.Key "ArrowRight")
+            if graph.Run(fun () -> input.Selection.Focused)=Some id then failwith "Advanced keyboard focus did not move."
+            input.Send(InputEvent.Key "Escape")
+            if not(graph.Run(fun () -> input.Selection.Selected.IsEmpty)) then failwith "Advanced Escape did not clear the selection."
+            // Leave a keyboard selection and a hovered beeswarm dot for the snapshot.
+            input.Send(InputEvent.Key "ArrowRight")
+            input.Send(InputEvent.Key "Enter")
+            let output=graph.Run current
+            panels |> List.tryFind(fun (hit,_) -> (List.head hit.MarkPath).Contains "Beeswarm") |> Option.iter(fun (hit,_) ->
+                let point=center hit |> Option.get
+                host.Mouse(0,int(Math.Round point.X)+8,int(Math.Round point.Y)+8,0,0,0) |> ignore)
+            if graph.Run(fun () -> input.Selection.Selected.IsEmpty || input.Selection.Hovered.IsNone) then failwith "Advanced snapshot state is missing a selection or hover."
+            ignore output
+            owner :> IDisposable
         elif kind="linked" then
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
@@ -395,12 +442,10 @@ let main args =
         capture "advanced" args[1]
     elif Array.contains "--advanced" args then
         use window=Window.Create("Ranvier.D5 advanced recipes",820,590)
-        let phase=window.Graph.Run(fun () -> Api.createSignal 0.)
-        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) AdvancedRecipesGallery.scene)
-        let mounted=mount window.Host window.Graph (fun () -> scene.Value)
+        let owner,phase,_,_,_=AdvancedRecipesGallery.mount window.Host window.Graph
         let timer=Stopwatch.StartNew()
         while window.Step() do window.Graph.Run(fun () -> phase.Value<-timer.Elapsed.TotalSeconds*0.2)
-        mounted.Dispose()
+        owner.Dispose()
     elif args.Length=2 && args[0]="--capture-linked" then
         capture "linked" args[1]
     elif args.Length=2 && args[0]="--capture-hierarchy" then
