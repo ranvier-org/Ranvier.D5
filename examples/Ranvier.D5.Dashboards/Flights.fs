@@ -9,11 +9,11 @@ open Ranvier.D5.Dashboards.Kit
 
 type Hub = { Code:string; City:string; Region:string; Position:GeoPosition }
 type Flight = { Code:string; Route:int; From:Hub; To:Hub; Departs:float; Duration:float; Delayed:bool }
-/// <summary>Tracker state. <c>Held</c> is the time until which auto-rotation waits after a hand drag. <c>Radius</c> is the globe
-/// radius the last view laid out: input carries no viewport, so a drag reads it to turn pixels into degrees.</summary>
+/// <summary>Tracker state. <c>Held</c> is the time until which auto-rotation waits after a hand drag. <c>Viewport</c> is the page
+/// viewport the shell last reported, from which a drag works out the globe's radius to turn pixels into degrees.</summary>
 type State =
     { Now:float; Lambda:float; Phi:float; TargetLambda:float; TargetPhi:float; Region:string; Auto:bool; Night:bool; Held:float
-      Radius:float ref; Hover:string option; Pointer:Point option; Airborne:float list; NextSample:float; Shown:Map<string,float> }
+      Viewport:Viewport; Hover:string option; Pointer:Point option; Airborne:float list; NextSample:float; Shown:Map<string,float> }
 
 let private geo longitude latitude = GeoPosition.create longitude latitude |> ok
 let hubs=
@@ -94,7 +94,7 @@ let private draw projection geometry = GeoPath.project GeoPathOptions.defaultVal
 
 let init () =
     let now=240.
-    {Now=now;Lambda=40.;Phi= -20.;TargetLambda=40.;TargetPhi= -20.;Region="All";Auto=true;Night=true;Held=0.;Radius=ref 280.
+    {Now=now;Lambda=40.;Phi= -20.;TargetLambda=40.;TargetPhi= -20.;Region="All";Auto=true;Night=true;Held=0.;Viewport={Width=1048.;Height=800.}
      Hover=None;Pointer=None;Airborne=[for k in 0..59 -> float(List.length(airborne (now-60.+float k)))];NextSample=now+1.;Shown=Map.empty}
 
 let private ontime now (code:string) = 0.78+0.16*(0.5+0.5*fbm (stableHash code%500) (now/25.))
@@ -117,10 +117,28 @@ let private focus region state =
     let turns=Math.Round((state.Lambda-target)/360.)
     {state with Region=region;TargetLambda=target+turns*360.;TargetPhi= -latitude;Auto=(region="All");Held=0.}
 
+let private summary="Twenty-two great-circle routes on an orthographic globe; planes fly scheduled legs while the day/night terminator sweeps."
+let private help="Choose a region to fly there · drag the globe to turn it · hover planes and hubs · click a hub to focus · arrows rotate · Space toggles auto-rotate · N toggles night"
+let private leftTools state =
+    [segmentedTool "region" 84. ["All","All hubs";"Americas","Americas";"EMEA","EMEA";"APAC","Asia-Pacific"] state.Region
+     buttonTool "auto" 104. "Auto-rotate" state.Auto
+     buttonTool "night" 92. "Day/night" state.Night]
+let private rightTools state =
+    let status,color,opacity=
+        if held state then "HELD",Theme.warn,1.
+        elif state.Auto then "ROTATING",Theme.good,0.35+0.65*pulse 1.4 state.Now
+        else "FIXED VIEW",Theme.muted,1.
+    [statusTool "camera" 112. status color opacity]
+let private rows=[[item 640. 420. (cell "globe" 652.); item 344. 290. (column [cell "airborne" 128.;cell "board" 300.;cell "ontime" 192.])]]
+
+/// <summary>The globe radius in a card: sized from the shorter side, with a side margin for hub codes drawn at the limb.</summary>
+let private globeRadius (r:Bounds) = max 60. (min (bw r/2.-40.) ((bh r-76.)/2.))
+
 /// <summary>Turns the globe by hand: a pixel of pointer travel is one radius-length of arc, so the surface under the pointer
 /// follows it. The camera jumps straight to the new angle (no easing lag) and auto-rotation holds for a moment.</summary>
 let private turn dx dy state =
-    let degrees=180./(Math.PI*max 40. state.Radius.Value)
+    let globeCard=(frame state.Viewport summary help (leftTools state) (rightTools state) rows).Cells["globe"]
+    let degrees=180./(Math.PI*globeRadius globeCard)
     let lambda=state.Lambda+dx*degrees
     let phi=clamp -tilt tilt (state.Phi-dy*degrees)
     {state with Lambda=lambda;TargetLambda=lambda;Phi=phi;TargetPhi=phi;Held=state.Now+holdSeconds}
@@ -138,6 +156,7 @@ let input message state =
     | Input.Pick id when id.StartsWith "hub:" -> focus (hub (id.Substring 4)).Region {state with Auto=false}
     | Input.Hover id -> {state with Hover=id}
     | Input.Pointer point -> {state with Pointer=point}
+    | Input.Viewport viewport -> {state with Viewport=viewport}
     | _ -> state
 
 let private inRegion state (h:Hub) = state.Region="All" || h.Region=state.Region
@@ -148,9 +167,8 @@ let private globe state (r:Bounds) =
     let w,h=bw r,bh r
     // The globe is centred between the title and the legend and sized from the shorter side; the side margin leaves room for a
     // hub code drawn at the limb.
-    let radius=max 60. (min (w/2.-40.) ((h-76.)/2.))
+    let radius=globeRadius r
     let cx,cy=w/2.,(h+12.)/2.
-    state.Radius.Value<-radius
     let projection=projection radius cx cy state.Lambda state.Phi
     let project position = Projection.project projection position
     let focusHub=hoveredHub state
@@ -293,16 +311,7 @@ let private performance state (r:Bounds) =
     panel "ontime" r "On-time departures" bars
 
 let view viewport state =
-    let status,color,opacity=
-        if held state then "HELD",Theme.warn,1.
-        elif state.Auto then "ROTATING",Theme.good,0.35+0.65*pulse 1.4 state.Now
-        else "FIXED VIEW",Theme.muted,1.
-    page viewport "Global flight tracker" "Twenty-two great-circle routes on an orthographic globe; planes fly scheduled legs while the day/night terminator sweeps." "Choose a region to fly there · drag the globe to turn it · hover planes and hubs · click a hub to focus · arrows rotate · Space toggles auto-rotate · N toggles night"
-        [segmentedTool "region" 84. ["All","All hubs";"Americas","Americas";"EMEA","EMEA";"APAC","Asia-Pacific"] state.Region
-         buttonTool "auto" 104. "Auto-rotate" state.Auto
-         buttonTool "night" 92. "Day/night" state.Night]
-        [statusTool "camera" 112. status color opacity]
-        [[item 640. 420. (cell "globe" 652.); item 344. 290. (column [cell "airborne" 128.;cell "board" 300.;cell "ontime" 192.])]]
+    page viewport "Global flight tracker" summary help (leftTools state) (rightTools state) rows
         (fun cells -> [globe state cells["globe"];airborneCard state cells["airborne"];board state cells["board"];performance state cells["ontime"]])
 
 let model = {Init=init;Tick=tick;Input=input;View=view}

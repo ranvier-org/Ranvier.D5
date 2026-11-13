@@ -73,8 +73,6 @@ let input message state =
 
 let private shown key state = Map.tryFind key state.Shown |> Option.defaultValue 0.
 /// <summary>A page point in card-local coordinates, held inside the card so a tooltip anchored on it stays in the card.</summary>
-let private local (r:Bounds) (p:Point) = pt (clamp 0. (bw r) (p.X-bx r)) (clamp 0. (bh r) (p.Y-by r))
-
 let private funnelCard state (r:Bounds) =
     let w,h=bw r,bh r
     let counts=stages |> List.map(fun s -> shown ("stage:"+s) state)

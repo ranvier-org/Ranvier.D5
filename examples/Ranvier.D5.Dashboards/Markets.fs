@@ -136,13 +136,6 @@ let private change (ticker:Ticker) = ticker.Price/ticker.Session-1.
 /// <summary>How far the charts have faded back in after a book switch, in [0,1] over 250 ms.</summary>
 let private reveal state = outCubic(clamp01((state.Now-state.Switched)/0.25))
 
-/// <summary>Multiplies the opacity of every mark under the nodes, for fading a whole chart in.</summary>
-let rec private dimmed factor nodes =
-    if factor>=0.999 then nodes else
-    nodes |> List.map(function
-        | Group(spec,children) -> Group(spec,dimmed factor children)
-        | Leaf mark -> Leaf(Mark.withOpacity ((Mark.style mark).Opacity*factor) mark))
-
 let private tickerTiles state (cells:Map<string,Bounds>) =
     names |> Array.toList |> List.mapi(fun index name ->
         let r=cells["tile:"+name]

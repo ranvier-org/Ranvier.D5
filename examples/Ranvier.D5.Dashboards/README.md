@@ -27,6 +27,48 @@ Native events reach the model like this:
 - **Pointer position:** every move also sends the position in content coordinates, for crosshairs and scrubbing.
 - **Keys:** keyboard input arrives as `Input.Key`.
 
+Two more inputs support the responsive layout:
+
+- **Drag:** a press that starts on empty space and moves arrives as `Input.Drag`, which the flight tracker uses to turn
+  the globe.
+- **Viewport:** when the content size changes, the model receives `Input.Viewport`. Input handling can then call
+  `Kit.frame`, the layout that `Kit.page` draws from, to find a card's bounds. The flight tracker does this to turn drag
+  pixels into degrees of rotation.
+
+### Responsive layout
+
+Every dashboard's `View` takes the content viewport and returns a `Page`. `Kit.page` builds the page in four parts:
+
+- a title and summary, which wrap to the width;
+- a toolbar of `Tool`s that wraps onto more lines, with right-hand tools aligned right when they fit;
+- a grid of cards described as rows of `item grow min (cell key height)`;
+- the help line at the foot.
+
+A row splits into the fewest balanced lines in which every card keeps its minimum width. Line heights stretch, up to
+double, to fill tall windows. Each card draws from its own bounds, so plots, legends and gauges follow its size while
+text keeps a fixed size.
+
+The shell adapts to the window around the pages:
+
+- Below a 1000-pixel window, the sidebar collapses to a numbered rail.
+- A page taller than the window scrolls with the wheel.
+
+### Shared behaviours
+
+These behaviours live once in the shell or the Kit and apply to every dashboard:
+
+- **Style transitions:** `Kit.Transitions` eases every mark's opacity, fill, stroke and stroke width toward what the view
+  asks for, settling within about 200 ms. Hover emphasis and highlights therefore animate with no dashboard code.
+  Geometry is never eased, so streaming data does not lag.
+- **Geometric hover:** `Kit.Focus` keeps eased hover levels per item for effects such as lifting a donut slice.
+- **Axis extents:** `Kit.Extent` widens an axis at once to take in new values and relaxes it slowly, so the axis remembers
+  recent extremes.
+- **Clipped cards:** every card clips its body, so nothing in transit can draw outside its panel.
+- **Overlays:** groups made with `overlay`, such as crosshairs, cursors and tooltips, let the pointer through to the items
+  underneath.
+- **Preflight stylesheet:** in the spirit of Tailwind's base layer, nothing is selectable and text never takes the pointer.
+  Controls and data items show a pointer cursor, and only a writable field would show a text cursor.
+
 Motion comes from four mechanisms:
 
 - **Smoothing:** displayed values approach their targets with a frame-rate-independent exponential (`Kit.approach`).
@@ -57,9 +99,10 @@ dotnet run --project examples/Ranvier.D5.Dashboards -c Release -- --capture arti
 
 The capture runs in two stages.
 
-1. **Pure soak.** Each model runs for 20 simulated seconds. The soak clicks every control and hovers every item it
-   exposes, and composes a scene every fifth frame. It serialises every path, so duplicate keys and non-finite or
-   extreme coordinates fail with the offending mark's path.
+1. **Pure soak.** Each model runs for 20 simulated seconds. The soak clicks every control, hovers every item it exposes
+   and drags, and composes a scene every fifth frame at five window sizes, from 664 to 1920 pixels wide. It serialises
+   every path, so duplicate keys and non-finite or extreme coordinates fail with the offending mark's path. It also
+   fails on any card that leaves the page, and on any text that spills outside its card or the page.
 2. **Native checks.** For every dashboard, the run checks five things:
    - a real sidebar click opens it;
    - painted pixels keep changing, which shows it animates;
@@ -67,6 +110,10 @@ The capture runs in two stages.
    - a native pointer sweep reaches a hoverable data item;
    - native clicks on its toolbar controls change the view.
 
-   Keyboard navigation is checked once, after the last dashboard.
+   After the last dashboard, the run checks four more things:
+   - controls show a pointer cursor;
+   - each dashboard re-lays out at 1680x1000, 980x760 and 720x900;
+   - a page taller than the window scrolls with the wheel;
+   - keyboard navigation works.
 
-Each dashboard is written to `artifacts/dashboards/<id>.bmp`. Convert the captures with `python tools/document-snapshots.py`.
+Each dashboard is written to `artifacts/dashboards/<id>.bmp`, with `<id>-<W>x<H>.bmp` for the other sizes. Convert the captures with `python tools/document-snapshots.py`.

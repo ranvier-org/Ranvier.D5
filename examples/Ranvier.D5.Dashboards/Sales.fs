@@ -173,8 +173,6 @@ let input message state =
 let private shown key state = Map.tryFind key state.Shown |> Option.defaultValue 0.
 let private categoryColor index = [|Theme.accent;Theme.violet;Theme.teal;Theme.warn;Theme.pink|][index]
 /// <summary>A page point in card-local coordinates, held inside the card so a tooltip anchored on it stays in the card.</summary>
-let private local (r:Bounds) (p:Point) = pt (clamp 0. (bw r) (p.X-bx r)) (clamp 0. (bh r) (p.Y-by r))
-
 // ---------------------------------------------------------------- cards
 
 let private donut state (r:Bounds) =

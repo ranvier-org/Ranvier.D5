@@ -13,6 +13,9 @@ for name in ["gallery","linked","hierarchy","tiling","hierarchy-charts","hierarc
 dashboards=out/"dashboards"
 dashboards.mkdir(parents=True,exist_ok=True)
 for source in sorted((root/"artifacts"/"dashboards").glob("*.bmp")):
+    # Only the default-size capture is documented; <id>-<W>x<H> resize captures and <id>-frozen failures stay in artifacts.
+    if "-" in source.stem:
+        continue
     with Image.open(source) as native:
         native.convert("RGB").save(dashboards/(source.stem+".png"),optimize=True)
         print(f"dashboards/{source.stem}: {native.width}x{native.height}, native capture -> PNG")

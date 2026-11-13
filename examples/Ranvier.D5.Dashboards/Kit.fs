@@ -52,7 +52,7 @@ module Theme =
     let cool=[ (20,29,48);(37,99,235);(56,189,248);(186,230,253) ]
 
 /// <summary>Input delivered to a dashboard: a control button, a picked data item, hover, the pointer in page coordinates, a drag
-/// that started on empty space (the pointer movement in pixels), or a key.</summary>
+/// that started on empty space (the pointer movement in pixels), a key, or the viewport the page is laid out in.</summary>
 [<RequireQualifiedAccess>]
 type Input =
     | Click of string
@@ -61,6 +61,8 @@ type Input =
     | Pointer of Point option
     | Drag of dx:float * dy:float
     | Key of string
+    /// <summary>The content viewport the page is laid out in, sent when it changes, so input can use card geometry.</summary>
+    | Viewport of Viewport
 
 /// <summary>A laid-out dashboard page: its nodes in page coordinates and its total height, which may exceed the viewport and scroll.</summary>
 type Page = { Height:float; Nodes:SceneNode list }
@@ -199,6 +201,14 @@ let card key x y w h (title:string) children =
                 clipped "body" w h children]
 /// <summary>A card filling laid-out bounds.</summary>
 let panel key (bounds:Bounds) title children = card key (bx bounds) (by bounds) (bw bounds) (bh bounds) title children
+/// <summary>A page-coordinate point in card-local coordinates, clamped inside the card so anchored tooltips never leave it.</summary>
+let local (bounds:Bounds) (point:Point) = pt (clamp 0. (bw bounds) (point.X-bx bounds)) (clamp 0. (bh bounds) (point.Y-by bounds))
+/// <summary>Multiplies the opacity of every mark under the nodes, for fading a whole card body in or out after a state change.</summary>
+let rec dimmed factor nodes =
+    if factor>=0.999 then nodes else
+    nodes |> List.map(function
+        | Group(spec,children) -> Group(spec,dimmed factor children)
+        | Leaf mark -> Leaf(Mark.withOpacity (clamp01((Mark.style mark).Opacity*factor)) mark))
 
 /// <summary>A clickable control reported as <c>Input.Click id</c>.</summary>
 let button id x y w (caption:string) active =
@@ -266,7 +276,7 @@ let dodge gap (positions:(string*float) list) =
 let tooltip key limitW limitH (anchor:Point) (lines:string list) =
     let width=12.+(lines |> List.map(fun line -> float line.Length*6.6) |> List.fold max 60.)
     let height=10.+18.*float lines.Length
-    let x=if anchor.X+16.+width>limitW-8. then max 8. (anchor.X-16.-width) else anchor.X+16.
+    let x=clamp 8. (max 8. (limitW-width-8.)) (if anchor.X+16.+width>limitW-8. then anchor.X-16.-width else anchor.X+16.)
     let y=clamp 8. (max 8. (limitH-height-8.)) (anchor.Y-height/2.)
     Group({GroupSpec.create ("x:"+key) with Transform=Transform.translate x y},
         Leaf(rrect "bg" 0. 0. width height 6. Theme.raised |> Mark.withStroke (paint Theme.edge) 1. |> fade 0.96)::
@@ -279,6 +289,10 @@ let Margin,Gap=24.,16.
 
 /// <summary>Approximate rendered width of a string in the UI font; bold text runs about 6% wider.</summary>
 let textWidth size (value:string) = float value.Length*size*0.53
+
+/// <summary>The first phrasing that fits a width at a font size, or the last (shortest) one: secondary text gives way gracefully.</summary>
+let fitting width size (choices:string list) =
+    choices |> List.tryFind(fun choice -> textWidth size choice<=width) |> Option.defaultValue (List.last choices)
 
 /// <summary>Greedy word wrap of a string into lines no wider than <c>width</c> at a font size.</summary>
 let wrap width size (value:string) =
@@ -293,6 +307,12 @@ let tool width draw = {Width=width;Draw=draw}
 let buttonTool id width caption active = tool width (fun x y -> [button id x y width caption active])
 let segmentedTool prefix width (options:(string*string) list) selected =
     tool (float options.Length*(width+6.)-6.) (fun x y -> segmented prefix x y width options selected)
+/// <summary>A minus/plus stepper around a value read-out: buttons <c>prefix:-</c> and <c>prefix:+</c>.</summary>
+let stepperTool prefix key (value:string) =
+    tool 156. (fun x y ->
+        [button (prefix+":-") x y 30. "−" false
+         at key (x+34.) y [Leaf(label "value" 46. 18. 12. Theme.text 700 "middle" value)]
+         button (prefix+":+") (x+126.) y 30. "+" false])
 /// <summary>A non-interactive status pill with a coloured dot.</summary>
 let statusTool key width (caption:string) color dotOpacity =
     tool width (fun x y ->
@@ -356,10 +376,13 @@ let layout (viewport:Viewport) top bottomReserve (rows:Item list list) =
             acc@placed,y+height+Gap) ([],top)
     Map.ofList cells,bottom-Gap
 
-/// <summary>A whole dashboard page for a viewport: a wrapped title and summary, a toolbar that wraps (right-hand tools align right
-/// when they fit), a responsive card grid, and the help line at the foot. <c>draw</c> receives each cell's bounds.</summary>
-let page (viewport:Viewport) (title:string) (summary:string) (help:string) (left:Tool list) (right:Tool list) (rows:Item list list)
-         (draw:Map<string,Bounds> -> SceneNode list) =
+/// <summary>Where a page puts everything for a viewport: wrapped summary and help lines, placed toolbar tools, each card's bounds and
+/// the page height. <c>page</c> draws from it; input handling can call it too when it needs card geometry (see the flight tracker).</summary>
+type Frame = { Summary:string list; Help:string list; ToolbarY:float; Tools:(Tool*float*int) list; Cells:Map<string,Bounds>; Height:float }
+
+/// <summary>Lays out a page for a viewport: the summary wraps, the toolbar wraps (right-hand tools align right when they fit), the
+/// card grid follows, and the help line sits at the foot.</summary>
+let frame (viewport:Viewport) (summary:string) (help:string) (left:Tool list) (right:Tool list) (rows:Item list list) =
     let summaryLines=wrap (viewport.Width-2.*Margin) 13. summary
     let toolbarY=62.+18.*float(summaryLines.Length-1)+22.
     let width=viewport.Width
@@ -368,27 +391,27 @@ let page (viewport:Viewport) (title:string) (summary:string) (help:string) (left
             if x>Margin && x+t.Width>width-Margin then (Margin+t.Width+10.,line+1),acc@[t,Margin,line+1]
             else (x+t.Width+10.,line),acc@[t,x,line]) ((Margin,0),[])
     let rightWidth=(right |> List.sumBy(fun t -> t.Width))+10.*float(max 0 (right.Length-1))
-    let rightPlaced,lastLine=
-        if right.IsEmpty then [],leftLine
-        elif width-Margin-rightWidth>=leftEnd+6. then
-            right |> List.fold(fun (acc,x) t -> acc@[t,x,leftLine],x+t.Width+10.) ([],width-Margin-rightWidth) |> fst,leftLine
-        else
-            right |> List.fold(fun (acc,x) t -> acc@[t,x,leftLine+1],x+t.Width+10.) ([],width-Margin-rightWidth) |> fst,leftLine+1
-    let tools=leftPlaced@rightPlaced |> List.collect(fun (t,x,line) -> t.Draw x (toolbarY+34.*float line))
-    let top=toolbarY+34.*float(lastLine+1)+6.
+    let rightLine=if right.IsEmpty then leftLine elif width-Margin-rightWidth>=leftEnd+6. then leftLine else leftLine+1
+    let rightPlaced=right |> List.fold(fun (acc,x) t -> acc@[t,x,rightLine],x+t.Width+10.) ([],width-Margin-rightWidth) |> fst
+    let top=toolbarY+34.*float(rightLine+1)+6.
     let helpLines=wrap (viewport.Width-2.*Margin) 11. help
     let reserve=16.+16.*float helpLines.Length
     let cells,bottom=layout viewport top reserve rows
-    let height=max viewport.Height (bottom+reserve)
-    let helpTop=height-10.-16.*float(helpLines.Length-1)
-    {Height=height
+    {Summary=summaryLines;Help=helpLines;ToolbarY=toolbarY;Tools=leftPlaced@rightPlaced;Cells=cells;Height=max viewport.Height (bottom+reserve)}
+
+/// <summary>A whole dashboard page for a viewport, laid out by <c>frame</c>; <c>draw</c> receives each cell's bounds.</summary>
+let page (viewport:Viewport) (title:string) (summary:string) (help:string) (left:Tool list) (right:Tool list) (rows:Item list list)
+         (draw:Map<string,Bounds> -> SceneNode list) =
+    let f=frame viewport summary help left right rows
+    let helpTop=f.Height-10.-16.*float(f.Help.Length-1)
+    {Height=f.Height
      Nodes=
         [group "header"
             ([Leaf(label "title" Margin 40. 24. Theme.text 700 "start" title)]
-             @ (summaryLines |> List.mapi(fun index line -> Leaf(text (sprintf "summary%d" index) Margin (62.+18.*float index) 13. Theme.muted line)))
-             @ (helpLines |> List.mapi(fun index line -> Leaf(text (sprintf "help%d" index) Margin (helpTop+16.*float index) 11. Theme.faint line))))
-         group "controls" tools]
-        @ draw cells}
+             @ (f.Summary |> List.mapi(fun index line -> Leaf(text (sprintf "summary%d" index) Margin (62.+18.*float index) 13. Theme.muted line)))
+             @ (f.Help |> List.mapi(fun index line -> Leaf(text (sprintf "help%d" index) Margin (helpTop+16.*float index) 11. Theme.faint line))))
+         group "controls" (f.Tools |> List.collect(fun (t,x,line) -> t.Draw x (f.ToolbarY+34.*float line)))]
+        @ draw f.Cells}
 
 // ---------------------------------------------------------------- reusable behaviours
 
@@ -474,13 +497,3 @@ module Focus =
     let level key (levels:Map<string,float>) = Map.tryFind key levels |> Option.defaultValue 0.
     /// <summary>The largest level: how strongly anything is hovered, for dimming the rest smoothly.</summary>
     let any (levels:Map<string,float>) = if levels.IsEmpty then 0. else levels |> Map.toSeq |> Seq.map snd |> Seq.max
-
-// ---------------------------------------------------------------- transitional fixed-size pages (removed once every page is responsive)
-
-let legacyT key anchor lines = tooltip key 1048. 800. anchor lines
-let header (title:string) (summary:string) (help:string) =
-    group "header"
-        [Leaf(label "title" 24. 40. 24. Theme.text 700 "start" title)
-         Leaf(text "summary" 24. 62. 13. Theme.muted summary)
-         Leaf(text "help" 24. 790. 11. Theme.faint help)]
-let legacy (view:'S -> SceneNode list) = fun (_:Ranvier.D5.Viewport) state -> {Height=800.;Nodes=view state}

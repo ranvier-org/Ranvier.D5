@@ -185,9 +185,6 @@ let private topology state (r:Bounds) =
         ([group "edges" edges;group "nodes" nodeMarks;legend "legend" 18. (h-16.) ["Edge",Theme.accent;"Service",Theme.violet;"Data",Theme.teal;"Internal",Theme.warn;"Hostile",Theme.bad]]@tip)
 
 /// <summary>The first of several phrasings, longest first, that fits a width at a font size; the shortest when none does.</summary>
-let private fitting width size (choices:string list) =
-    choices |> List.tryFind(fun choice -> textWidth size choice<=width) |> Option.defaultValue (List.last choices)
-
 let private threat state (r:Bounds) =
     let w,h=bw r,bh r
     let level=shown "threat" state

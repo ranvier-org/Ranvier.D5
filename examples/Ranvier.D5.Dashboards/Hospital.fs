@@ -316,12 +316,6 @@ let private wardsCard state (r:Bounds) =
     panel "wards" r "Inpatient wards" blocks
 
 /// <summary>A minus/plus stepper with a value read-out between the buttons, as one toolbar entry.</summary>
-let private stepper prefix key (value:string) =
-    tool 156. (fun x y ->
-        [button (prefix+":-") x y 30. "−" false
-         at key (x+34.) y [Leaf(label "value" 46. 18. 12. Theme.text 700 "middle" value)]
-         button (prefix+":+") (x+126.) y 30. "+" false])
-
 let view (viewport:Viewport) state =
     // Two columns while both keep a readable width, otherwise the floor and census stack above the smaller cards.
     let room=viewport.Width-2.*Margin-Gap
@@ -334,8 +328,8 @@ let view (viewport:Viewport) state =
              [item 640. 400. (cell "history" 236.)]
              [item 344. 260. (cell "occupancy" 196.);item 344. 280. (cell "waits" 214.);item 344. 290. (cell "wards" 210.)]]
     page viewport "Emergency department" "Patients arrive, are triaged, wait by acuity for a bay, are treated and go home or to a ward. Staffing and arrival rate reshape the queue live." "Arrivals −/+ (↓/↑) · staff −/+ (←/→) · mass-casualty surge (S) · pause (Space) · hover patients and wards"
-        [stepper "arrivals" "rate" (sprintf "%.0f / h" state.Rate)
-         stepper "staff" "staff" (sprintf "%d staff" state.Staff)
+        [stepperTool "arrivals" "rate" (sprintf "%.0f / h" state.Rate)
+         stepperTool "staff" "staff" (sprintf "%d staff" state.Staff)
          buttonTool "surge" 120. "Surge (8 arrivals)" false
          buttonTool "pause" 74. (if state.Paused then "Resume" else "Pause") state.Paused]
         []

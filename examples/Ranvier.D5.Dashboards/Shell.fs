@@ -139,6 +139,8 @@ let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
         let item=Api.createSignal None
         let window=Api.createSignal (Width,Height)
         let scroll=Api.createSignal 0.
+        // The viewport each dashboard was last told about; the active one hears of every change before its next frame.
+        let told:Viewport option array=Array.create count None
         let content()=let w,h=window.Value in ({Width=w-sidebarWidth w;Height=h}:Viewport)
         let page()=lives[active.Value].Value.View(content())
         let scrollTo value =
@@ -242,7 +244,16 @@ let mount (host:WebCoreHost) (graph:Graph) (dashboards:Dashboard list) =
          Active=(fun () -> run(fun () -> active.Value))
          Select=(fun index -> run(fun () -> select index))
          Reset=(fun () -> run(fun () -> let index=active.Value in lives[index].Value<-(List.item index dashboards).Start()))
-         Advance=(fun dt -> run(fun () -> measure();let index=active.Value in lives[index].Value<-lives[index].Value.Tick dt;scrollTo scroll.Value;present dt))
+         Advance=(fun dt -> run(fun () ->
+            measure()
+            let index=active.Value
+            let viewport=content()
+            if told[index]<>Some viewport then
+                told[index]<-Some viewport
+                send(Input.Viewport viewport)
+            lives[index].Value<-lives[index].Value.Tick dt
+            scrollTo scroll.Value
+            present dt))
          Key=(fun name -> run(fun () -> key name))
          Send=(fun input -> run(fun () -> send input))
          Current=(fun () -> run(fun () -> lives[active.Value].Value))

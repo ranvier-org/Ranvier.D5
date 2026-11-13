@@ -75,6 +75,7 @@ let soak () =
         let mutable frames=0
         let compose window check =
             let viewport=contentOf window
+            live<-live.Send(Input.Viewport viewport)
             let page=live.View viewport
             let scene=try (let eased,_=Transitions.ease 16.7 Transitions.empty (Shell.nodes window Gallery.all index None page 0.) in Shell.compose window dashboard eased) with error -> failwithf "%s: scene failed to compose at %.0fx%.0f: %s" dashboard.Id viewport.Width viewport.Height error.Message
             if check then
@@ -119,7 +120,7 @@ let soak () =
         printfn "soak %-10s %d scenes composed" dashboard.Id frames
     let distinct=failures |> Seq.distinct |> Seq.toList
     if not distinct.IsEmpty then
-        for failure in distinct |> List.truncate 400 do eprintfn "  %s" failure
+        for failure in distinct |> List.truncate 60 do eprintfn "  %s" failure
         failwithf "%d layout problems (first %d shown)." distinct.Length (min 60 distinct.Length)
 
 let private snapshot (host:WebCoreHost) =
@@ -209,7 +210,7 @@ let capture directory (only:Set<string>) =
         | Some _ -> ()
         // Native clicks on toolbar controls: every distinct control is found by native hover, and at least one must change the view.
         let controls=
-            seq { for y in [97;131] do
+            seq { for y in [97;115;133;151] do
                     for x in 250..8..1270 -> x,y }
             |> Seq.choose(fun (x,y) -> host.Mouse(0,x,y,0,0,0) |> ignore; app.Control() |> Option.filter(fun key -> not(key.StartsWith "b:nav:")) |> Option.map(fun key -> key,(x,y)))
             |> Seq.distinctBy fst |> Seq.toList
