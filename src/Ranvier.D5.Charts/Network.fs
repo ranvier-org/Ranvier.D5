@@ -1,5 +1,7 @@
 namespace Ranvier.D5.Charts
 
+open System
+
 open Ranvier.D5
 
 /// <summary>Network chart specification: labels and colors by node ID, selected node IDs to outline, link stroke paint and width in pixels, and whether links merge into one path mark.</summary>
@@ -20,15 +22,15 @@ module NetworkSpec =
 module NetworkChart =
     let private unitCircle=Shape.symbol Symbol.Circle System.Math.PI
     let private build (spec:NetworkSpec) (links:GraphLink list) (snapshot:ForceSnapshot) =
-        let nodes=snapshot.Nodes |> List.sortWith(fun a b -> System.StringComparer.Ordinal.Compare(a.Id,b.Id))
+        let nodes=snapshot.Nodes |> List.sortWith(fun a b -> StringComparer.Ordinal.Compare(a.Id,b.Id))
         let captured=nodes |> List.map(fun node ->
             {GraphNode.create node.Id with Position=Some node.Position;Pinned=node.Pinned;Radius=node.Radius;Mass=node.Mass})
         match GraphData.create captured [] with
         | Error errors -> Error errors
         | Ok _ ->
             Recipe.run spec.Frame (fun (node:ForceNodeState) -> node.Id) nodes (fun bounds ->
-                if not(System.Double.IsFinite spec.LinkWidth) || spec.LinkWidth<0. then invalidArg "spec" "Link width must be finite and nonnegative."
-                let positions=System.Collections.Generic.Dictionary<string,Point>(nodes.Length,System.StringComparer.Ordinal)
+                if not(Double.IsFinite spec.LinkWidth) || spec.LinkWidth<0. then invalidArg "spec" "Link width must be finite and nonnegative."
+                let positions=System.Collections.Generic.Dictionary<string,Point>(nodes.Length,StringComparer.Ordinal)
                 for node in nodes do positions.Add(node.Id,node.Position)
                 let aggregate =
                     if spec.AggregateLinks && not links.IsEmpty then
@@ -62,7 +64,7 @@ module NetworkChart =
 
     /// <summary>Draws the graph's links as straight lines and the snapshot's nodes as circles with disc hit targets; snapshot node IDs that differ from the graph's are InvalidTopology.</summary>
     let network (spec:NetworkSpec) (graph:GraphData) (snapshot:ForceSnapshot) : Result<ChartOutput,LayoutError list> =
-        let expected=System.Collections.Generic.HashSet<string>(GraphData.nodes graph |> Seq.map(fun node -> node.Id),System.StringComparer.Ordinal)
+        let expected=System.Collections.Generic.HashSet<string>(GraphData.nodes graph |> Seq.map(fun node -> node.Id),StringComparer.Ordinal)
         if not(expected.SetEquals(snapshot.Nodes |> Seq.map(fun node -> node.Id))) then Error [InvalidTopology "Snapshot nodes do not match the graph."]
         else build spec (GraphData.links graph) snapshot
 

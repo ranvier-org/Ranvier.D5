@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>Many-body force settings: finite strength (negative repels, positive attracts), nonnegative Barnes–Hut theta (0 is exact pairwise),
 /// positive minimum softening distance and a maximum interaction distance no smaller than it.</summary>
 type ManyBodyConfig = { Strength:float; Theta:float; MinDistance:float; MaxDistance:float }
@@ -20,21 +22,21 @@ module CollisionConfig =
 module internal ForceKernels =
     let private check (token:System.Threading.CancellationToken) i = if i%64=0 then token.ThrowIfCancellationRequested()
     let private near (p:Point) (extent:QuadExtent) =
-        System.Double.Hypot(p.X-max extent.Min.X (min extent.Max.X p.X),p.Y-max extent.Min.Y (min extent.Max.Y p.Y))
+        Double.Hypot(p.X-max extent.Min.X (min extent.Max.X p.X),p.Y-max extent.Min.Y (min extent.Max.Y p.Y))
     let private far (p:Point) (extent:QuadExtent) =
-        System.Double.Hypot(max (abs(p.X-extent.Min.X)) (abs(p.X-extent.Max.X)),max (abs(p.Y-extent.Min.Y)) (abs(p.Y-extent.Max.Y)))
+        Double.Hypot(max (abs(p.X-extent.Min.X)) (abs(p.X-extent.Max.X)),max (abs(p.Y-extent.Min.Y)) (abs(p.Y-extent.Max.Y)))
 
     let manyBody token (config:ManyBodyConfig) alpha (positions:Point[]) (masses:float[]) jitter (vx:float[]) (vy:float[]) =
         let add i source mass sourceIndex =
             let dx,dy=source.X-positions[i].X,source.Y-positions[i].Y
-            let actual=System.Double.Hypot(dx,dy)
+            let actual=Double.Hypot(dx,dy)
             Check.finite "many-body distance" actual
             if actual<=config.MaxDistance then
                 let ux,uy,distance=if actual=0. then let x,y=jitter i sourceIndex in x,y,config.MinDistance else dx/actual,dy/actual,actual
                 let softened=max distance config.MinDistance
                 let magnitude=(config.Strength*alpha/softened)*mass*(distance/softened)
                 vx[i]<-vx[i]+ux*magnitude;vy[i]<-vy[i]+uy*magnitude
-        let bounded=System.Double.IsFinite config.MaxDistance
+        let bounded=Double.IsFinite config.MaxDistance
         if config.Strength<>0. then
             if config.Theta=0. then
                 for i in 0..positions.Length-1 do
@@ -50,9 +52,9 @@ module internal ForceKernels =
                         if bounded && near point cell.Extent>config.MaxDistance then false else
                         let e=cell.Extent
                         let contains=point.X>=e.Min.X && point.X<=e.Max.X && point.Y>=e.Min.Y && point.Y<=e.Max.Y
-                        let distance=System.Double.Hypot(cell.Center.X-point.X,cell.Center.Y-point.Y)
+                        let distance=Double.Hypot(cell.Center.X-point.X,cell.Center.Y-point.Y)
                         let size=max (e.Max.X-e.Min.X) (e.Max.Y-e.Min.Y)
-                        if not contains && System.Double.IsFinite distance && size<config.Theta*distance && (not bounded || far point e<=config.MaxDistance) then
+                        if not contains && Double.IsFinite distance && size<config.Theta*distance && (not bounded || far point e<=config.MaxDistance) then
                             add i cell.Center cell.Mass i
                             false
                         elif not cell.Items.IsEmpty then
@@ -79,7 +81,7 @@ module internal ForceKernels =
                             let j=item.Value
                             if j>i && not(pinned[i] && pinned[j]) then
                                 let dx,dy=predicted[j].X-predicted[i].X,predicted[j].Y-predicted[i].Y
-                                let distance=System.Double.Hypot(dx,dy)
+                                let distance=Double.Hypot(dx,dy)
                                 Check.finite "collision distance" distance
                                 let overlap=radii[i]+radii[j]-distance
                                 if overlap>0. then

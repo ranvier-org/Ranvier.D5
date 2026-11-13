@@ -4,6 +4,15 @@
     <Description>Functional visualization foundations for F#: data, scales, geometry, layouts and reactive scenes using Ranvier signals and Anime.</Description>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
+  <!-- Fable compiles F# sources only. Ranvier.Anime ships none, so under Fable (which passes /p:FABLE_COMPILER=True) the two
+       Anime modules D5 calls are compiled from FableAnime/ instead of referencing the package. -->
+  <ItemGroup>
+    <Compile Include="FableCompat.fs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(FABLE_COMPILER)' == 'True'">
+    <Compile Include="FableAnime/Utils.fs" />
+    <Compile Include="FableAnime/ColorSpace.fs" />
+  </ItemGroup>
   <ItemGroup>
     <Compile Include="Contracts.fs" />
     <Compile Include="Data.fs" />
@@ -49,7 +58,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Ranvier$(RanvierPackageSuffix)" Version="[0.1.1-preview.2]" />
-    <PackageReference Include="Ranvier.Anime$(RanvierPackageSuffix)" Version="[0.1.0-rc.2]" />
+    <PackageReference Include="Ranvier.Anime$(RanvierPackageSuffix)" Version="[0.1.0-rc.2]" Condition="'$(FABLE_COMPILER)' != 'True'" />
     <PackageReference Include="Ranvier.Css$(RanvierPackageSuffix)" Version="[0.1.1-alpha.2]" />
     <None Include="../../tools/reference-fixtures/licenses/d3-sankey.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-chord.txt" Pack="true" PackagePath="licenses/" />

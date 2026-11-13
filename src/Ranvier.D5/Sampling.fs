@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>A series observation with a nonempty unique ID, finite X, and a finite Y or <c>None</c> to mark a gap.</summary>
 type SeriesSample = { Id:string; X:float; Y:float option }
 /// <summary>Downsampling budgets: a nonnegative maximum output count and a positive maximum input count.</summary>
@@ -23,7 +25,7 @@ module Sampling =
         let left,right=(a.X-c.X)*(b.Y-a.Y),(a.X-b.X)*(c.Y-a.Y)
         let area=abs(left-right)
         let bound=(abs left+abs right)*1e-14+16.*System.Double.Epsilon
-        if System.Double.IsFinite area && System.Double.IsFinite bound && area>bound then Approximate area
+        if Double.IsFinite area && Double.IsFinite bound && area>bound then Approximate area
         elif area=0. && Predicates.orient2d a b c=0 then Approximate 0.
         else
             let values,exponent=ExactDyadic.integers [|a.X;a.Y;b.X;b.Y;c.X;c.Y|]
@@ -98,7 +100,7 @@ module Sampling =
         elif samples.Length>config.MaxInput then Error [BudgetExceeded "Sampling input exceeds its budget."]
         else
           try
-            let seen=System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+            let seen=System.Collections.Generic.HashSet<string>(StringComparer.Ordinal)
             let mutable previous=System.Double.NegativeInfinity
             let mutable index=0
             for sample in samples do
@@ -106,7 +108,7 @@ module Sampling =
                 index<-index+1
                 if System.String.IsNullOrWhiteSpace sample.Id then raise(SamplingAbort(InvalidObservation "Sample IDs must not be empty."))
                 if not(seen.Add sample.Id) then raise(SamplingAbort(DuplicateId sample.Id))
-                if not(System.Double.IsFinite sample.X) || sample.Y |> Option.exists(System.Double.IsFinite >> not) then
+                if not(Double.IsFinite sample.X) || sample.Y |> Option.exists(Double.IsFinite >> not) then
                     raise(SamplingAbort(InvalidObservation "Sample coordinates must be finite; use None for missing Y."))
                 if sample.X<previous then raise(SamplingAbort(InvalidObservation "Sampling requires nondecreasing X in original order."))
                 previous<-sample.X

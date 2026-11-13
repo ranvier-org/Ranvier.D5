@@ -36,7 +36,7 @@ module Facet =
                 let rec node = function
                     | Leaf mark -> Leaf(Mark.fillDefinition mark |> Option.map (fun key -> Mark.withFillDefinition (rename key) mark) |> Option.defaultValue mark)
                     | Group(group,children) -> Group({group with Clip=Option.map rename group.Clip},List.map node children)
-                let translate point=Point.create (point.X+x) (point.Y+y)
+                let translate (point:Point)=Point.create (point.X+x) (point.Y+y)
                 let geometry = function
                     | HitRegion(included,excluded,anchor) ->
                         let polygon (p:HitPolygon)={Outer=List.map translate p.Outer;Holes=List.map (List.map translate) p.Holes}

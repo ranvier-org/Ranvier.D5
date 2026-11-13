@@ -1,5 +1,7 @@
 namespace Ranvier.D5
 
+open System
+
 /// <summary>An opaque seed for the deterministic per-ID initial positions and jitter of a force simulation.</summary>
 type Seed = private Seed of uint32
 /// <summary>Constructors for <c>Seed</c>.</summary>
@@ -52,7 +54,7 @@ module Force =
 
     let private validate config =
         let errors=ResizeArray<LayoutError>()
-        let finite name value = if not(System.Double.IsFinite value) then errors.Add(InvalidObservation(name+" must be finite."))
+        let finite name value = if not(Double.IsFinite value) then errors.Add(InvalidObservation(name+" must be finite."))
         let range name lo hi value = finite name value;if value<lo || value>hi then errors.Add(InvalidObservation(name+" is out of range."))
         let strength name value = finite name value;if value<0. then errors.Add(InvalidObservation(name+" must be nonnegative."))
         range "Alpha decay" 0. 1. config.AlphaDecay
@@ -84,7 +86,7 @@ module Force =
                 let values=GraphData.nodes graph |> List.map(fun node ->
                     let position=node.Pinned |> Option.orElse node.Position |> Option.defaultWith(fun () -> initialPosition config seed node.Id)
                     {Id=node.Id;Position=position;Velocity=zero;Pinned=node.Pinned;Radius=node.Radius;Mass=node.Mass}) |> List.toArray
-                let indices=System.Collections.Generic.Dictionary<string,int>(System.StringComparer.Ordinal)
+                let indices=System.Collections.Generic.Dictionary<string,int>(StringComparer.Ordinal)
                 values |> Array.iteri(fun i node -> indices.Add(node.Id,i))
                 let edges=GraphData.links graph |> List.map(fun edge -> struct(indices[edge.Source],indices[edge.Target],edge.Distance,edge.Strength)) |> List.toArray
                 Ok {Config=config;Seed=seed;Graph=graph;Values=values;Edges=edges;Alpha=(if values.Length=0 then 0. else config.InitialAlpha);Iteration=0}
@@ -140,7 +142,7 @@ module Force =
                 yForce |> Option.iter(fun (target,k) -> vy[i]<-vy[i]+(target-node.Position.Y)*k*alpha)
                 radialForce |> Option.iter(fun (center,radius,k) ->
                     let dx,dy=node.Position.X-center.X,node.Position.Y-center.Y
-                    let distance=System.Double.Hypot(dx,dy)
+                    let distance=Double.Hypot(dx,dy)
                     Check.finite "radial distance" distance
                     let ux,uy=if distance=0. then direction state iteration node.Id else dx/distance,dy/distance
                     let force=(radius-distance)*k*alpha
@@ -150,7 +152,7 @@ module Force =
                 let struct(a,b,target,k)=state.Edges[edgeIndex]
                 if a<>b && k>0. then
                     let dx,dy=nodes[b].Position.X-nodes[a].Position.X,nodes[b].Position.Y-nodes[a].Position.Y
-                    let distance=System.Double.Hypot(dx,dy)
+                    let distance=Double.Hypot(dx,dy)
                     Check.finite "link distance" distance
                     let ux,uy=if distance=0. then direction state iteration (nodes[a].Id+"/"+nodes[b].Id) else dx/distance,dy/distance
                     let force=(distance-target)*k*alpha
@@ -194,7 +196,7 @@ module Force =
     /// <summary>Replaces topology, retaining surviving positions and velocities. New graph pins are authoritative; new IDs use deterministic initialization.</summary>
     let updateGraph graph state =
         initialize state.Config state.Seed graph |> Result.map(fun fresh ->
-            let previous=System.Collections.Generic.Dictionary<string,ForceNodeState>(System.StringComparer.Ordinal)
+            let previous=System.Collections.Generic.Dictionary<string,ForceNodeState>(StringComparer.Ordinal)
             for node in state.Values do previous.Add(node.Id,node)
             let values=fresh.Values |> Array.map(fun node ->
                 match previous.TryGetValue node.Id,node.Pinned with

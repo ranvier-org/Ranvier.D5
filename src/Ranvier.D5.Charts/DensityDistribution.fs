@@ -1,5 +1,7 @@
 namespace Ranvier.D5.Charts
 
+open System
+
 open Ranvier.D5
 
 /// <summary>Count, extent, mean and median of the non-missing values; each statistic is None when there are no values.</summary>
@@ -38,7 +40,7 @@ module ViolinChart =
     let buildWithCancellation (token:System.Threading.CancellationToken) (spec:ViolinSpec) (groups:ViolinGroup list) : Result<ViolinOutput,LayoutError list> =
         token.ThrowIfCancellationRequested()
         let low,high=spec.Domain
-        if not(System.Double.IsFinite low && System.Double.IsFinite high && low<high && System.Double.IsFinite spec.Bandwidth) ||
+        if not(Double.IsFinite low && Double.IsFinite high && low<high && Double.IsFinite spec.Bandwidth) ||
            spec.Bandwidth<=0. || spec.Resolution<2 || spec.Resolution>4096 ||
            spec.MaxGroups<1 || spec.MaxSamples<1 || spec.MaxVertices<1 || spec.MaxWork<1L then
             Error [InvalidObservation "Violin requires a finite increasing domain, positive bandwidth and budgets, and resolution 2..4096."]
@@ -46,7 +48,7 @@ module ViolinChart =
         else
           try
             Recipe.run spec.Frame (fun (group:ViolinGroup) -> group.Id) groups (fun bounds ->
-                let ids=System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+                let ids=System.Collections.Generic.HashSet<string>(StringComparer.Ordinal)
                 let mutable count=0
                 let rows=groups |> List.map(fun group ->
                     let values=group.Observations |> List.choose(fun sample ->
@@ -55,7 +57,7 @@ module ViolinChart =
                         if count>spec.MaxSamples then raise(ViolinAbort [BudgetExceeded "Violin observations exceed MaxSamples."])
                         if System.String.IsNullOrWhiteSpace sample.Id || not(ids.Add sample.Id) then invalidArg "groups" "Observation IDs must be globally unique and nonblank."
                         match sample.Value with
-                        | Some value when not(System.Double.IsFinite value) -> invalidArg "groups" "Violin observations must be finite or missing."
+                        | Some value when not(Double.IsFinite value) -> invalidArg "groups" "Violin observations must be finite or missing."
                         | value -> value)
                     group,values)
                 let work=int64 count * (int64 spec.Resolution+int64(ceil(System.Math.Log2(float(max 2 count))))+4L)
@@ -98,7 +100,7 @@ module ViolinChart =
                         let path=Path.ofCommands(MoveTo polygon.Head::(polygon.Tail |> List.map LineTo)@[Close])
                         let mark=Mark.path key path |> Mark.withFill(spec.Color group.Id) |> Mark.withLabel(Some label)
                         let mark=if spec.Selected.Contains key then Mark.withStroke (Paint.rgb 20 20 20) 2. mark else mark
-                        let members=group.Observations |> List.choose(fun sample -> sample.Value |> Option.map(fun _ -> sample.Id)) |> List.sortWith (fun a b -> System.StringComparer.Ordinal.Compare(a,b))
+                        let members=group.Observations |> List.choose(fun sample -> sample.Value |> Option.map(fun _ -> sample.Id)) |> List.sortWith (fun a b -> StringComparer.Ordinal.Compare(a,b))
                         let geometry=HitRegion([{Outer=polygon;Holes=[]}],[],Point.create center anchorY)
                         let caption=Mark.text (Recipe.key ["violin-label";group.Id]) (Point.create center (Bounds.y bounds+Bounds.height bounds+18.)) group.Id |> Mark.withFontSize 12.
                         let caption=Mark.withTextStyle {Mark.textStyle caption with Anchor="middle"} caption

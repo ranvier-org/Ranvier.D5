@@ -122,7 +122,12 @@ module internal Radial =
                 if not(Double.IsFinite value) then invalidArg "data" "Non-finite calendar value."
                 let id=Recipe.key ["day";dataId]
                 let box=Bounds.create (Bounds.x bounds+float((date.DayNumber-first)/7)*cell) (Bounds.y bounds+float(weekday date)*cell) cell cell
+#if FABLE_COMPILER
+                // Fable's DateOnly.ToString takes no custom pattern.
+                let label=sprintf "%04d-%02d-%02d" date.Year date.Month date.Day+": "+Recipe.number value
+#else
                 let label=date.ToString("yyyy-MM-dd",Globalization.CultureInfo.InvariantCulture)+": "+Recipe.number value
+#endif
                 Recipe.rectangle id label (spec.Color value) box,Recipe.semantic id [dataId] label,Recipe.hit id [dataId] (HitBounds box))
             let marks,semantics,hits=List.unzip3 entries
             Recipe.output spec.Frame bounds marks semantics hits [])

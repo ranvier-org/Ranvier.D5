@@ -69,7 +69,13 @@ module ReactiveLayout =
             let rec launch version input =
                 let cancellation=new CancellationTokenSource()
                 active<-Some cancellation
-                ThreadPool.UnsafeQueueUserWorkItem(WaitCallback(fun _ ->
+#if FABLE_COMPILER
+                // JavaScript has no thread pool: the kernel runs as a later task on the dispatcher instead of in parallel.
+                let queue (work:unit->unit) = dispatcher.Post work
+#else
+                let queue (work:unit->unit) = ThreadPool.UnsafeQueueUserWorkItem(WaitCallback(fun _ -> work()),null) |> ignore
+#endif
+                queue(fun () ->
                     let result=
                         try
                             cancellation.Token.ThrowIfCancellationRequested()
@@ -86,7 +92,12 @@ module ReactiveLayout =
                             let next=pending
                             pending<-None
                             next |> Option.iter(fun (version,input) -> launch version input)))
-                    with :? ObjectDisposedException -> cancellation.Dispose()),null) |> ignore
+#if FABLE_COMPILER
+                    // Fable cannot type-test ObjectDisposedException. Post only schedules, so what it throws is the disposed dispatcher.
+                    with _ -> cancellation.Dispose())
+#else
+                    with :? ObjectDisposedException -> cancellation.Dispose())
+#endif
             let request input =
                 generation<-generation+1L
                 publish(WorkState.Running generation)

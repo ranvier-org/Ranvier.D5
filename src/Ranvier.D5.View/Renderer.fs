@@ -117,7 +117,7 @@ module Renderer =
                 | _ -> [||]) stopRow|]
         let linear = make "linearGradient" (fun attr ->
             [|attr "gradientUnits" (fun _ -> "userSpaceOnUse")
-              for name, f in ["x1",(fun (a:Point) _ -> a.X);"y1",(fun a _ -> a.Y);"x2",(fun _ b -> b.X);"y2",(fun _ b -> b.Y)] do
+              for name, f in ["x1",(fun (a:Point) (_:Point) -> a.X);"y1",(fun a _ -> a.Y);"x2",(fun _ b -> b.X);"y2",(fun _ b -> b.Y)] do
                   attr name (function LinearGradient(_,a,b,_) -> number(f a b) | _ -> "0")|]) stops
         let radial = make "radialGradient" (fun attr ->
             [|attr "gradientUnits" (fun _ -> "userSpaceOnUse")

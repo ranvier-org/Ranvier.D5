@@ -60,8 +60,8 @@ module TimeTicks =
         let localA,localB=TimeZoneInfo.ConvertTime(lo,zone).DateTime,TimeZoneInfo.ConvertTime(hi,zone).DateTime
         let mutable start,finish=min localA localB,max localA localB
         // Include a complete fold around either endpoint, then filter by actual instant.
-        if zone.IsAmbiguousTime start then start<-start.Date
-        if zone.IsAmbiguousTime finish then finish<-finish.Date.AddDays(1.).AddTicks(-1L)
+        if Zone.isAmbiguousTime zone start then start<-start.Date
+        if Zone.isAmbiguousTime zone finish then finish<-finish.Date.AddDays(1.).AddTicks(-1L)
         let result=ResizeArray<DateTimeOffset>()
         let mutable current=floorTime spec start
         let mutable finished=false
@@ -69,8 +69,8 @@ module TimeTicks =
         while current<=finish && not finished do
             iterations<-iterations+1
             if iterations>200000 || result.Count>10000 then invalidArg "spec" "Tick generation exceeds capacity."
-            if not(zone.IsInvalidTime current) then
-                let offsets=if zone.IsAmbiguousTime current then zone.GetAmbiguousTimeOffsets current else [|zone.GetUtcOffset current|]
+            if not(Zone.isInvalidTime zone current) then
+                let offsets=if Zone.isAmbiguousTime zone current then Zone.ambiguousOffsets zone current else [|Zone.utcOffset zone current|]
                 for offset in offsets do
                     try
                         let instant=DateTimeOffset(current,offset).ToUniversalTime()
