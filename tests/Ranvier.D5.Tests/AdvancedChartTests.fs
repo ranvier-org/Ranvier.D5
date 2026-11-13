@@ -13,6 +13,12 @@ let private pathOf (output:ChartOutput) (fragment:string) =
 let private commands mark=match Mark.geometry mark with PathGeometry path -> Path.commands path | _ -> []
 let private center = function HitPoint(point,_) -> point | HitBounds bounds -> Point.create (Bounds.x bounds+Bounds.width bounds/2.) (Bounds.y bounds+Bounds.height bounds/2.) | HitRegion(_,_,point) -> point | HitSector(point,_,_,_,_) -> point
 
+/// Every semantic and hit target must name a mark in the scene, so interaction can highlight it.
+let private addressable (output:ChartOutput) =
+    let paths=SceneNode.paths [] (Scene.nodes output.Scene) |> List.map fst |> Set.ofList
+    for item in output.Semantics do Expect.isTrue (paths.Contains item.MarkPath) (sprintf "semantic %A names a scene mark" item.MarkPath)
+    for hit in output.HitTargets do Expect.isTrue (paths.Contains hit.MarkPath) (sprintf "hit target %A names a scene mark" hit.MarkPath)
+
 type private Sample = { Id:string; T:float; X:float option; Y:float option }
 
 /// A caller-written layout: a golden-angle sunflower built only from public scene, path and hit-test APIs.
@@ -40,6 +46,7 @@ let tests = testList "advanced chart recipes" [
         let spec={Frame=frame;Key=(fun row -> row.Id);Order=(fun row -> row.T);X=Encoding.create "X" (fun row -> row.X);Y=Encoding.create "Y" (fun row -> row.Y)
                   Color=Paint.rgb 0 0 0;XDomain=Auto;YDomain=Auto}
         let output=Chart.connectedScatter spec rows |> ok
+        addressable output
         let trail=pathOf output "trail" |> List.head |> commands
         Expect.equal (trail |> List.filter(function MoveTo _ -> true | _ -> false) |> List.length) 2 "gap splits the trail"
         Expect.equal (output.HitTargets |> List.map(fun hit -> hit.DataIds.Head)) ["a";"c";"d"] "points in order, missing omitted"
@@ -47,6 +54,7 @@ let tests = testList "advanced chart recipes" [
     testCase "slope lines pick along their length and skip incomplete items" <| fun _ ->
         let spec={Frame=frame;Key=fst;Before=Encoding.create "2020" (snd >> fst);After=Encoding.create "2025" (snd >> snd);Color=(fun _ -> Paint.rgb 0 0 0);Domain=Auto}
         let output=Chart.slope spec ["up",(Some 1.,Some 5.);"down",(Some 4.,Some 2.);"missing",(None,Some 3.)] |> ok
+        addressable output
         Expect.equal (output.HitTargets |> List.map(fun hit -> hit.DataIds.Head)) ["up";"down"] "complete items only"
         for hit in output.HitTargets do
             Expect.equal (HitTest.at (center hit.Geometry) output |> List.map(fun target -> target.DataIds.Head) |> List.contains hit.DataIds.Head) true "midpoint picks its line"
@@ -54,6 +62,7 @@ let tests = testList "advanced chart recipes" [
         let rows=["a1","A","p1",10.;"b1","B","p1",10.;"c1","C","p1",3.;"a2","A","p2",1.;"b2","B","p2",8.;"c2","C","p2",9.]
         let spec={Frame=frame;Key=(fun (id,_,_,_) -> id);Series=(fun (_,series,_,_) -> series);Period=(fun (_,_,period,_) -> period);Value=(fun (_,_,_,value) -> value);Descending=true;Color=(fun _ -> Paint.rgb 0 0 0)}
         let output=Chart.bump spec rows |> ok
+        addressable output
         let rank id=
             let description=(output.Semantics |> List.find(fun semantic -> semantic.DataIds=[id])).Description
             let after=description.Substring(description.IndexOf "rank "+5)
@@ -73,6 +82,7 @@ let tests = testList "advanced chart recipes" [
         let spec={Frame=frame;Key=(fun (id,_,_,_) -> id);Series=(fun (_,series,_,_) -> series);X=Encoding.create "X" (fun (_,_,x,_) -> x);Y=Encoding.create "Y" (fun (_,_,_,y) -> y)
                   Bands=2;PositiveColor=(fun band -> Paint.rgb 0 0 (100+band*50));NegativeColor=(fun band -> Paint.rgb (100+band*50) 0 0);Extent=Some 4.}
         let output=Chart.horizon spec rows |> ok
+        addressable output
         Expect.equal (pathOf output "horizon").Length 4 "two bands, positive and negative"
         Expect.equal output.HitTargets.Head.DataIds.Length 10 "row target carries its data IDs"
         let top=Bounds.y output.PlotBounds
@@ -88,6 +98,7 @@ let tests = testList "advanced chart recipes" [
         let rows=[for index in 0..299 -> sprintf "b%d" index,Some(Math.Round(random.NextDouble()*20.,1))]
         let spec={Frame=frame;Key=fst;X=Encoding.create "Value" snd;Radius=3.;Color=(fun _ -> Paint.rgb 0 0 0);XDomain=Auto}
         let output=Chart.beeswarm spec rows |> ok
+        addressable output
         let points=output.HitTargets |> List.map(fun hit -> center hit.Geometry) |> List.toArray
         for i in 0..points.Length-1 do
             for j in i+1..points.Length-1 do
@@ -104,6 +115,7 @@ let tests = testList "advanced chart recipes" [
         let nodes=["a","Alpha";"b","Beta";"c","Gamma"]
         let spec={Frame=frame;Nodes=nodes;Links=["ab","a","b",2.;"bc","b","c",1.];Directed=false;Order=MatrixOrder.Degree;Color=(fun t -> Paint.rgb (int(255.*t)) 0 0)}
         let output=Chart.adjacencyMatrix spec |> ok
+        addressable output
         Expect.equal output.HitTargets.Length 4 "two cells per undirected link"
         Expect.equal (Chart.adjacencyMatrix {spec with Directed=true} |> ok).HitTargets.Length 2 "one cell per directed link"
         for hit in output.HitTargets do

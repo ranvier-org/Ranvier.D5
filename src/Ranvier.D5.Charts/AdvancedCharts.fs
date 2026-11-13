@@ -130,7 +130,9 @@ module internal AdvancedCharts =
                 let ids=points |> List.map spec.Key
                 let label=sprintf "%s: %d values, %d bands of %s" name ids.Length spec.Bands (Recipe.number step)
                 let markId=Recipe.key ["row";name]
-                areas,Recipe.semantic markId ids label,Recipe.hit markId ids (HitBounds row))
+                // An unfilled row outline carries the row's label and is the mark that semantics and picking name.
+                let outline=Recipe.rectangle markId label Paint.none row
+                areas@[outline],Recipe.semantic markId ids label,Recipe.hit markId ids (HitBounds row))
             let areas,semantics,hits=List.unzip3 entries
             Recipe.output spec.Frame bounds (List.concat areas) semantics hits [])
 

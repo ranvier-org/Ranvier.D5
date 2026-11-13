@@ -12,8 +12,24 @@ dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --capture-advance
 ```
 
 The gallery composes all six with `Facet` and moves their data through one
-signal. The capture fails unless every cleanly pickable dot and matrix cell
-paints in native pixels at both phases.
+signal. `ChartInteraction.attach` adds hover, keyboard focus and selection.
+Selected, focused and hovered marks are outlined, and a status line reads the
+active item's semantic description. Arrow keys move focus, Enter or Space
+selects, and Escape clears.
+
+The capture fails unless every cleanly pickable dot and matrix cell paints in
+native pixels at both phases. It also fails unless:
+
+- a native hover picks and describes one item in each of the six panels;
+- the hover clears outside the marks;
+- arrow keys and Enter select the focused item;
+- the selection survives the phase change;
+- Escape clears the selection;
+- every picked item names a scene mark that can be outlined.
+
+Every semantic and hit target names a mark in the recipe's scene. Horizon rows
+add an unfilled, labelled outline for this, which gives each row an accessible
+label.
 
 | Recipe | Contract | Limits |
 |---|---|---|

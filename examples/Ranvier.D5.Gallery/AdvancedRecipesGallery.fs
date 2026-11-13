@@ -1,8 +1,13 @@
 module Ranvier.D5.Gallery.AdvancedRecipesGallery
 
 open System
+open Ranvier
 open Ranvier.D5
 open Ranvier.D5.Charts
+open Ranvier.D5.View
+open Ranvier.View
+open Ranvier.View.Dom
+open Ranvier.View.WebCore
 
 let private ok = function Ok value -> value | Error errors -> failwithf "%A" errors
 
@@ -67,12 +72,61 @@ let private build phase (frame:ChartFrame) () (data:Panel list) : Result<ChartOu
 
 /// <summary>The six recipes in a facet grid for a phase.</summary>
 let chart phase =
-    Facet.build {Frame={ChartFrame.create 800. 570. "Advanced recipes" with Margin={Top=70.;Right=10.;Bottom=10.;Left=10.}};Columns=3;Gap=24.
+    Facet.build {Frame={ChartFrame.create 800. 570. "Advanced recipes" with Margin={Top=70.;Right=10.;Bottom=28.;Left=10.}};Columns=3;Gap=24.
                  Domains=FacetDomains.Independent;Domain=(fun _ -> ());Build=build phase} (groups phase) |> ok
 
-let scene phase =
-    let output=chart phase
+/// <summary>Highlight stroke for selected, focused and hovered marks.</summary>
+let highlight=Paint.rgb 230 140 20
+
+/// <summary>Full scene paths of the marks whose semantics carry any of the given data IDs.</summary>
+let highlightedPaths (output:ChartOutput) (ids:Set<string>) =
+    output.Semantics |> List.filter(fun item -> item.DataIds |> List.exists ids.Contains) |> List.map(fun item -> item.MarkPath) |> Set.ofList
+
+/// <summary>Composes the grid with highlighted marks, keyboard help and a status line describing the active item.</summary>
+let compose (output:ChartOutput) phase (ids:Set<string>) status =
+    let paths=highlightedPaths output ids
+    let rec mark prefix node =
+        let path=prefix@[SceneNode.key node]
+        match node with
+        | Leaf item when paths.Contains path -> Leaf(Mark.withStroke highlight 2.5 item)
+        | Leaf item -> Leaf item
+        | Group(group,children) -> Group(group,List.map (mark path) children)
     Scene.compose {Width=800.;Height=570.} "Advanced recipes" (Scene.definitions output.Scene)
-        (Scene.nodes output.Scene@
+        (List.map (mark []) (Scene.nodes output.Scene)@
          [Leaf(Mark.text "title" (Point.create 14. 30.) "Connected scatter, slope, bump, horizon, beeswarm and adjacency matrix" |> Mark.withFontSize 20.)
-          Leaf(Mark.text "subtitle" (Point.create 14. 52.) (sprintf "Six pure recipes composed with Facet; one Ranvier signal moves the data (phase %.2f)." phase) |> Mark.withFontSize 13.)])
+          Leaf(Mark.text "subtitle" (Point.create 14. 52.) (sprintf "Six pure recipes composed with Facet; one Ranvier signal moves the data (phase %.2f). Hover or use arrows and Enter; Escape clears." phase) |> Mark.withFontSize 13.)
+          Leaf(Mark.text "status" (Point.create 14. 560.) status |> Mark.withFontSize 13.)])
+
+/// <summary>The static grid for a phase, with nothing highlighted.</summary>
+let scene phase = compose (chart phase) phase Set.empty ""
+
+/// <summary>The description of the hovered item, else the focused one.</summary>
+let describe (output:ChartOutput) (selection:SelectionState) =
+    match selection.Hovered |> Option.orElse selection.Focused with
+    | None -> "Hover a mark, or focus the chart and press the arrow keys."
+    | Some id ->
+        output.Semantics |> List.tryFind(fun item -> List.contains id item.DataIds)
+        |> Option.map(fun item -> item.Description) |> Option.defaultValue id
+
+/// <summary>Mounts the reactive grid with hover, keyboard focus and selection. Returns the owner, the phase signal, the interaction and a chart reader.</summary>
+let mount (host:WebCoreHost) (graph:Graph) =
+    graph.Run(fun () -> Api.createRoot(fun owner ->
+        let phase=Api.createSignal 0.
+        let output=Reactive.derive (fun () -> phase.Value) chart
+        let current()=output.Value
+        let marked=Api.createSignal Set.empty
+        let status=Api.createSignal ""
+        let container=host.Document.createElement "div"
+        host.Document.body.appendChild container |> ignore
+        let mounted=Mounting.mount graph None (fun errors -> raise(AggregateException errors)) container None
+                        (fun context -> Program.run (Component.render Renderer.passive (fun () -> compose (current()) phase.Value marked.Value status.Value)) context.Backend)
+        Api.onCleanup(fun () -> mounted.Dispose();container.remove())
+        host.Cycle()
+        let svg=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
+        svg.setAttribute("tabindex","0")
+        let input=ChartInteraction.attach svg (fun () -> {Mode=GestureMode.Rectangle;MinZoom=1.;MaxZoom=1.;WheelSensitivity=0.01;MaxLassoPoints=4}) current ignore
+        Api.createEffect(fun () ->
+            let selection=input.Selection
+            marked.Value<-Set.unionMany [selection.Selected;Set.ofList(Option.toList selection.Focused);Set.ofList(Option.toList selection.Hovered)]
+            status.Value<-describe (current()) selection) |> ignore
+        owner,phase,input,current,(fun () -> status.Value)))

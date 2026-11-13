@@ -41,7 +41,7 @@ module Chart =
     let slope spec data = AdvancedCharts.slope spec data
     /// <summary>Per-period ranks joined by bump curves; ties break by ordinal series ID.</summary>
     let bump spec data = AdvancedCharts.bump spec data
-    /// <summary>One folded band row per series, negatives mirrored.</summary>
+    /// <summary>One folded band row per series, negatives mirrored; an unfilled, labelled row outline is the mark that picking and selection name.</summary>
     let horizon spec data = AdvancedCharts.horizon spec data
     /// <summary>Non-overlapping circles dodged from a centre line in X order.</summary>
     let beeswarm spec data = AdvancedCharts.beeswarm spec data
