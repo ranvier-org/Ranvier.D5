@@ -5,7 +5,7 @@ open System.Globalization
 open System.Text
 open Ranvier.D5
 open Ranvier.View
-open Ranvier.View.Sugar
+open Ranvier.View.Dsl
 
 /// <summary>Retained keyed SVG components that render D5 scenes through Ranvier.View.</summary>
 [<RequireQualifiedAccess>]

@@ -57,9 +57,9 @@
     <Compile Include="Sampling.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Ranvier$(RanvierPackageSuffix)" Version="[0.1.1-preview.2]" />
-    <PackageReference Include="Ranvier.Anime$(RanvierPackageSuffix)" Version="[0.1.0-rc.2]" Condition="'$(FABLE_COMPILER)' != 'True'" />
-    <PackageReference Include="Ranvier.Css$(RanvierPackageSuffix)" Version="[0.1.1-alpha.2]" />
+    <PackageReference Include="Ranvier$(RanvierPackageSuffix)" Version="$(RanvierVersion)" />
+    <PackageReference Include="Ranvier.Anime$(RanvierPackageSuffix)" Version="$(RanvierAnimeVersion)" Condition="'$(FABLE_COMPILER)' != 'True'" />
+    <PackageReference Include="Ranvier.Css$(RanvierPackageSuffix)" Version="$(RanvierCssVersion)" />
     <None Include="../../tools/reference-fixtures/licenses/d3-sankey.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-chord.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/d3-shape.txt" Pack="true" PackagePath="licenses/" />

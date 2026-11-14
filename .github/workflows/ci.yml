@@ -115,7 +115,7 @@ jobs:
           if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
           mkdir -p artifacts/consumer
           cat > artifacts/consumer/Consumer.fsproj <<EOF
-          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.0-alpha.10]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.0-alpha.10]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.1.0-alpha.10]" /></ItemGroup></Project>
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.0]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.0]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.1.0]" /></ItemGroup></Project>
           EOF
           cat > artifacts/consumer/Program.fs <<'EOF'
           open Ranvier
@@ -194,6 +194,12 @@ jobs:
           EOF
           dotnet restore artifacts/consumer/Consumer.fsproj --configfile artifacts/consumer/NuGet.Config
           dotnet run --project artifacts/consumer/Consumer.fsproj -c Release --no-restore
+      - name: Fickl JavaScript compile
+        if: matrix.os == 'ubuntu-24.04' && matrix.traced == false
+        run: |
+          dotnet tool restore
+          dotnet fickl src/Ranvier.D5.View -o artifacts/fable/view
+          dotnet fickl src/Ranvier.D5.Geo -o artifacts/fable/geo
       - uses: actions/upload-artifact@v7
         if: always()
         with:

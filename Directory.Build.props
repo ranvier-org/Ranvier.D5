@@ -6,13 +6,20 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarnOn>$(WarnOn);3390</WarnOn>
     <Deterministic>true</Deterministic>
-    <Version>0.1.0-alpha.10</Version>
+    <Version>0.1.0</Version>
     <Authors>Ranvier contributors</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/ranvier-org/Ranvier.D5</RepositoryUrl>
     <PackageProjectUrl>https://github.com/ranvier-org/Ranvier.D5</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Sibling Ranvier package cohort: the one place these versions are set. Plain minimum versions, no exact brackets. -->
+    <RanvierVersion>0.2.0</RanvierVersion>
+    <RanvierAnimeVersion>0.1.0</RanvierAnimeVersion>
+    <RanvierCssVersion>0.1.1</RanvierCssVersion>
+    <RanvierViewVersion>0.1.49</RanvierViewVersion>
+    <RanvierViewWebCoreVersion>0.1.0</RanvierViewWebCoreVersion>
+    <RanvierViewWebCoreSdlVersion>0.1.0</RanvierViewWebCoreSdlVersion>
     <RanvierPackageSuffix Condition="'$(RanvierTrace)' == 'true'">.Traced</RanvierPackageSuffix>
   </PropertyGroup>
 </Project>
