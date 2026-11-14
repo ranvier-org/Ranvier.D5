@@ -20,6 +20,6 @@
     <ProjectReference Include="../../src/Ranvier.D5.Geo/Ranvier.D5.Geo.fsproj" />
     <ProjectReference Include="../../src/Ranvier.D5.View/Ranvier.D5.View.fsproj" />
     <ProjectReference Include="../../src/Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj" />
-    <PackageReference Include="Ranvier.View.WebCore.Sdl$(RanvierPackageSuffix)" Version="[0.1.0-rc.12]" />
+    <PackageReference Include="Ranvier.View.WebCore.Sdl$(RanvierPackageSuffix)" Version="$(RanvierViewWebCoreSdlVersion)" />
   </ItemGroup>
 </Project>

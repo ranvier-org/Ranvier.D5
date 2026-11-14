@@ -13,6 +13,13 @@
     <PackageProjectUrl>https://github.com/ranvier-org/Ranvier.D5</PackageProjectUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Sibling Ranvier package cohort: the one place these versions are set. Plain minimum versions, no exact brackets. -->
+    <RanvierVersion>0.2.0</RanvierVersion>
+    <RanvierAnimeVersion>0.1.0-rc.2</RanvierAnimeVersion>
+    <RanvierCssVersion>0.1.1-alpha.4</RanvierCssVersion>
+    <RanvierViewVersion>0.1.49-rc.5</RanvierViewVersion>
+    <RanvierViewWebCoreVersion>0.1.0-rc.11</RanvierViewWebCoreVersion>
+    <RanvierViewWebCoreSdlVersion>0.1.0-rc.16</RanvierViewWebCoreSdlVersion>
     <RanvierPackageSuffix Condition="'$(RanvierTrace)' == 'true'">.Traced</RanvierPackageSuffix>
   </PropertyGroup>
 </Project>
