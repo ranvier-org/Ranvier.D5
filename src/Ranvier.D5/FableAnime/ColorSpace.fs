@@ -1,4 +1,4 @@
-// Copied from Ranvier.Anime 0.1.0-rc.2 (src/Ranvier.Anime/ColorSpace.fs): that package ships no F# sources for Fable.
+// Copied from Ranvier.Anime 0.1.0 (src/Ranvier.Anime/ColorSpace.fs): that package ships no F# sources for Fable.
 // Compiled only under Fable; .NET builds reference the package.
 namespace Ranvier.Anime
 

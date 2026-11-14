@@ -1,0 +1,13 @@
+version: 2
+# Rolls only the Fickl compiler pinned in .config/dotnet-tools.json. NuGet.Config names nuget.org alone,
+# so no private registries are declared.
+updates:
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: daily
+    allow:
+      - dependency-name: "fickl"
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 1

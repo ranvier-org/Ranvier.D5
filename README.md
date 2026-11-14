@@ -10,7 +10,7 @@ Functional-first visualization foundations for native F# applications. Compose i
 - **Ranvier.D5.Geo**: optional [geographic geometry, interchange and spherical kernels](docs/geographic-kernels.md); full projection and map-chart pipelines are still in development.
 - All packages have a **.Traced** variant. Use one variant throughout the dependency graph.
 
-Target: .NET 10. Version: **0.1.0-alpha.10**. APIs may change during alpha. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
+Target: .NET 10. Version: **0.1.0**. This is a pre-1.0 release: APIs may still change between 0.x versions. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
 
 ## A reactive scene
 
@@ -84,7 +84,7 @@ Append `-p:RanvierTrace=true` for Traced. Native acceptance requires WebCore's p
 python tools/snapshot-kit.py ../snapshots
 ```
 
-Snapshots are reference material; builds use the published cohort set as minimum versions in [Directory.Build.props](Directory.Build.props): Ranvier 0.2.0, Anime 0.1.0-rc.2, CSS 0.1.1-alpha.4, View 0.1.49-rc.5 (its `Ranvier.View.Dsl` surface), View.WebCore 0.1.0-rc.11 and SDL 0.1.0-rc.16. See [design](docs/design.md).
+Snapshots are reference material; builds use the published cohort set as minimum versions in [Directory.Build.props](Directory.Build.props): Ranvier 0.2.0, Anime 0.1.0, CSS 0.1.1, View 0.1.49 (its `Ranvier.View.Dsl` surface), View.WebCore 0.1.0 and SDL 0.1.0. See [design](docs/design.md).
 
 D5 provides reusable foundations, not every D3 algorithm. Spatial indexing, triangulation and force/network layouts are available; see [network examples and measured limits](docs/network.md). [Chord layouts and ribbons](docs/chord.md) provide matrix relationship geometry. [DAG Sankey layouts](docs/sankey.md) support explicit flow imbalance. [Interactive flow recipes](docs/flow-charts.md) include staged alluvial and constrained node dragging. [Density grids, Gaussian blur and 1D KDE](docs/density.md) provide bounded aggregation and an owned-worker native example. [Contour topology](docs/contours.md) provides closed shells and holes with bilinear saddle decisions. [Hexbin and source-preserving line reduction](docs/reduction.md) bound visible data. [Heatmap, hexbin, contour and isoband recipes](docs/density-charts.md) add explicit aggregate membership and region-aware picking, with working native snapshots. [Violin and reduced-series compositions](docs/distribution-series.md) preserve original statistics while bounding visible geometry. Geographic clipping/projections remain planned. Large scenes need aggregation/windowing; SVG does not promise million-mark frame rates.
 

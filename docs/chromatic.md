@@ -1,6 +1,6 @@
 # Palette policy
 
-D5 requires Ranvier.Anime 0.1.0-rc.2 or later for public sRGB, D50 Lab and HCL conversion.
+D5 requires Ranvier.Anime 0.1.0 or later for public sRGB, D50 Lab and HCL conversion.
 The upstream normal/Traced packages passed the six color-contract jobs and full
 Anime CI before publication. The original source snapshot remains recorded in
 kit.lock.json; packageCommit identifies the deliberate compatible upgrade.

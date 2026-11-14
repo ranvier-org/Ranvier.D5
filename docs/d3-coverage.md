@@ -39,7 +39,7 @@ Sankey and hexbin are ecosystem extensions (tasks 8/9), not core-module parity. 
 
 ## Compatibility audit
 
-Current package cohort: Ranvier 0.2.0, Anime 0.1.0-rc.2, CSS 0.1.1-alpha.4, View 0.1.49-rc.5, Dom 0.1.0-rc.1, View.WebCore 0.1.0-rc.11, WebCore managed/native 0.1.1-rc.9 and SDL 0.1.0-rc.16. Anime supplies public perceptual interpolation. Dependencies are minimum versions set in Directory.Build.props. Source snapshot revisions are reference material, not an API compatibility guarantee.
+Current package cohort: Ranvier 0.2.0, Anime 0.1.0, CSS 0.1.1, View 0.1.49, Dom 0.1.0, View.WebCore 0.1.0, WebCore managed/native 0.1.1 and SDL 0.1.0. Anime supplies public perceptual interpolation. Dependencies are minimum versions set in Directory.Build.props. Source snapshot revisions are reference material, not an API compatibility guarantee.
 
 | Need | Audited symbol/source | Decision |
 |---|---|---|

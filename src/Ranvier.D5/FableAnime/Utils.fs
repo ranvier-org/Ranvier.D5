@@ -2,7 +2,7 @@ namespace Ranvier.Anime
 
 open System
 
-/// <summary>The two Ranvier.Anime utilities D5 calls, copied from Ranvier.Anime 0.1.0-rc.2 (src/Ranvier.Anime/Utils.fs) because that package
+/// <summary>The two Ranvier.Anime utilities D5 calls, copied from Ranvier.Anime 0.1.0 (src/Ranvier.Anime/Utils.fs) because that package
 /// ships no F# sources for Fable. Compiled only under Fable; .NET builds reference the package.</summary>
 [<RequireQualifiedAccess>]
 module Utils =

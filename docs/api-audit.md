@@ -62,9 +62,9 @@ mutable working buffers private.
 
 | Package | Depends on |
 |---|---|
-| Ranvier.D5 | Ranvier 0.2.0, Ranvier.Anime 0.1.0-rc.2, Ranvier.Css 0.1.1-alpha.4 (minimum versions) |
+| Ranvier.D5 | Ranvier 0.2.0, Ranvier.Anime 0.1.0, Ranvier.Css 0.1.1 (minimum versions) |
 | Ranvier.D5.Charts | Ranvier.D5 |
-| Ranvier.D5.View | Ranvier.D5, Ranvier.D5.Charts, Ranvier.View 0.1.49-rc.5 (minimum) |
+| Ranvier.D5.View | Ranvier.D5, Ranvier.D5.Charts, Ranvier.View 0.1.49 (minimum) |
 | Ranvier.D5.Geo | Ranvier.D5.Charts |
 
 Core, Charts and View do not depend on Geo. Traced variants mirror these
