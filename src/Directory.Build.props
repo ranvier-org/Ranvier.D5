@@ -1,0 +1,7 @@
+<Project>
+  <Import Project="../Directory.Build.props" />
+  <PropertyGroup>
+    <!-- The package's minimum FSharp.Core: the first .NET 10 SDK's version, so a release does not raise it to the version of the SDK that built it. -->
+    <FSharpCoreImplicitPackageVersion>10.0.100</FSharpCoreImplicitPackageVersion>
+  </PropertyGroup>
+</Project>
