@@ -50,16 +50,18 @@ module Reactive =
     let animate clock target duration ease interpolate =
         Check.finite "duration" duration
         if duration < 0. then invalidArg "duration" "Duration must be nonnegative."
+        let comparer = EqualityComparer<_>.Default
         let state = Api.createMemo (fun previous ->
-            let now, destination = clock (), target ()
+            let now = clock ()
+            let destination = target ()
             Check.finite "clock" now
             let segment =
                 match previous with
                 | ValueNone -> Transition.start now duration ease interpolate destination destination
-                | ValueSome (old, _) when EqualityComparer<_>.Default.Equals(old.Target, destination) -> old
-                | ValueSome (old, _) -> Transition.retarget now destination old
-            segment, Transition.sample now segment)
-        Api.createMemo (fun _ -> snd state.Value)
+                | ValueSome struct (old, _) when comparer.Equals(old.Target, destination) -> old
+                | ValueSome struct (old, _) -> Transition.retarget now destination old
+            struct (segment, Transition.sample now segment))
+        Api.createMemo (fun _ -> let struct (_, value) = state.Value in value)
 
 /// <summary>A uniform scale and translation for reversible pan and zoom.</summary>
 type Zoom = private { Scale: float; X: float; Y: float }

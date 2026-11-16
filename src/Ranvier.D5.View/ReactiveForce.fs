@@ -46,9 +46,9 @@ module ReactiveForce =
             let mutable disposed=false
             let mutable current=initial
             let mutable revision=0L
-            let input=Api.createSignal(revision,initial)
+            let input=Api.createSignal struct (revision,initial)
             let snapshot=Api.createSignal(Force.snapshot initial)
-            let worker=ReactiveLayout.create dispatcher (fun () -> input.Value) (fun token (_,state) ->
+            let worker=ReactiveLayout.create dispatcher (fun () -> input.Value) (fun token struct (_,state) ->
                 let timer=System.Diagnostics.Stopwatch.StartNew()
                 let mutable result=state
                 let mutable steps=0
@@ -59,7 +59,7 @@ module ReactiveForce =
                 Ok result)
             let request state =
                 revision<-revision+1L
-                input.Value<-(revision,state)
+                input.Value<-struct (revision,state)
             Api.onCleanup(fun () -> disposed<-true)
             Api.createEffect(fun () ->
                 let next=worker.LastGood
