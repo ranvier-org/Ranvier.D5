@@ -43,32 +43,32 @@ module ReactiveLayout =
             let lastGood=Api.createSignal None
             let mutable disposed=false
             let mutable generation=0L
-            let mutable active:CancellationTokenSource option=None
-            let mutable pending:(int64*'Input) option=None
-            let mutable publication:WorkState<'Output> option=None
+            let mutable active:CancellationTokenSource voption=ValueNone
+            let mutable pending:struct (int64*'Input) voption=ValueNone
+            let mutable publication:WorkState<'Output> voption=ValueNone
             let mutable frameQueued=false
             let onOwner action =
                 graph.AssertOnGraphThread "ReactiveLayout callback"
                 if not disposed then graph.Run(fun () -> Api.runWithOwner owner (fun () -> Api.untrack action))
             let publish value =
-                publication<-Some value
+                publication<-ValueSome value
                 if not frameQueued then
                     frameQueued<-true
                     dispatcher.RequestFrame(fun () -> onOwner(fun () ->
                         frameQueued<-false
                         let next=publication
-                        publication<-None
+                        publication<-ValueNone
                         match next with
-                        | Some value ->
+                        | ValueSome value ->
                             let version=match value with WorkState.Running g | WorkState.Ready(g,_) | WorkState.Failed(g,_) -> g | WorkState.Idle -> generation
                             if version=generation then
                                 Api.batch(fun () ->
                                     state.Value<-value
                                     match value with WorkState.Ready(_,result) -> lastGood.Value<-Some result | _ -> ())
-                        | None -> ()))
+                        | ValueNone -> ()))
             let rec launch version input =
                 let cancellation=new CancellationTokenSource()
-                active<-Some cancellation
+                active<-ValueSome cancellation
 #if FABLE_COMPILER
                 // JavaScript has no thread pool: the kernel runs as a later task on the dispatcher instead of in parallel.
                 let queue (work:unit->unit) = dispatcher.Post work
@@ -86,12 +86,14 @@ module ReactiveLayout =
                     try dispatcher.Post(fun () ->
                         cancellation.Dispose()
                         onOwner(fun () ->
-                            active<-None
+                            active<-ValueNone
                             if version=generation then
                                 match result with Ok value -> publish(WorkState.Ready(version,value)) | Error errors -> publish(WorkState.Failed(version,errors))
                             let next=pending
-                            pending<-None
-                            next |> Option.iter(fun (version,input) -> launch version input)))
+                            pending<-ValueNone
+                            match next with
+                            | ValueSome struct (version,input) -> launch version input
+                            | ValueNone -> ()))
 #if FABLE_COMPILER
                     // Fable cannot type-test ObjectDisposedException. Post only schedules, so what it throws is the disposed dispatcher.
                     with _ -> cancellation.Dispose())
@@ -102,18 +104,20 @@ module ReactiveLayout =
                 generation<-generation+1L
                 publish(WorkState.Running generation)
                 match active with
-                | Some cancellation ->
-                    pending<-Some(generation,input)
+                | ValueSome cancellation ->
+                    pending<-ValueSome struct (generation,input)
                     cancellation.Cancel()
-                | None -> launch generation input
+                | ValueNone -> launch generation input
             let dispose() =
                 if not disposed then
                     graph.AssertOnGraphThread "ReactiveLayout.Dispose"
                     disposed<-true
                     generation<-generation+1L
-                    pending<-None
-                    publication<-None
-                    active |> Option.iter(fun cancellation -> cancellation.Cancel())
+                    pending<-ValueNone
+                    publication<-ValueNone
+                    match active with
+                    | ValueSome cancellation -> cancellation.Cancel()
+                    | ValueNone -> ()
             Api.onCleanup dispose
             try
                 Api.createEffect(fun () -> let input=readInput() in Api.untrack(fun () -> request input)) |> ignore
