@@ -69,5 +69,7 @@
     <None Include="../../tools/reference-fixtures/licenses/delaunator.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../tools/reference-fixtures/licenses/robust-predicates.txt" Pack="true" PackagePath="licenses/" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildProjectFile);*.fs" Pack="true" PackagePath="fable/" />
+    <None Include="FableAnime/*.fs" Pack="true" PackagePath="fable/FableAnime/" />
   </ItemGroup>
 </Project>
