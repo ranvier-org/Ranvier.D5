@@ -10,6 +10,7 @@
     <Compile Include="SurfaceTests.fs" />
     <Compile Include="Marks3DTests.fs" />
     <Compile Include="VolumeTests.fs" />
+    <Compile Include="Reactive3DTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

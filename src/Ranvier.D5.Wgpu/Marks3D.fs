@@ -9,7 +9,154 @@ open Ranvier.D5.Wgpu.FableCompat3D
 open Ranvier.D5
 open Ranvier.Wgpu
 
-module private MarksKernel =
+/// <summary>Input datum describing a camera-facing SDF scatter disc with optional concentric progress rings and hollow portal.</summary>
+[<Struct>]
+type ScatterDatum3D =
+    {
+        /// <summary>3D position in data coordinates.</summary>
+        Position: Point3
+        /// <summary>Screen-space disc radius in logical pixels (clamped at least <c>0.5f</c>).</summary>
+        RadiusPx: float32
+        /// <summary>Base RGBA fill color; alpha below <c>0.999f</c> triggers back-to-front sorting when a camera position is supplied.</summary>
+        Color: RgbaColor
+        /// <summary>Primary concentric progress ring fraction in <c>[0.0, 1.0]</c>.</summary>
+        RingPrimary: float32
+        /// <summary>Secondary concentric progress ring fraction in <c>[0.0, 1.0]</c>.</summary>
+        RingSecondary: float32
+        /// <summary>Concentric progress ring thickness in pixels (<c>0.0f</c> disables the ring).</summary>
+        RingThicknessPx: float32
+        /// <summary>Hollow portal interior blend factor in <c>[0.0, 1.0]</c>.</summary>
+        PortalHollow: float32
+        /// <summary>Hardware picking identifier (<c>0u</c> disables picking).</summary>
+        PickId: uint32
+        /// <summary>When true, renders the selection halo ring.</summary>
+        Selected: bool
+    }
+
+/// <summary>Constructors and pipeable modifiers for <c>ScatterDatum3D</c>.</summary>
+[<RequireQualifiedAccess>]
+module ScatterDatum3D =
+    /// <summary>Creates a solid unringed scatter disc datum with <c>PickId = 0u</c> and <c>Selected = false</c>.</summary>
+    let create (position: Point3) (radiusPx: float32) (color: RgbaColor) : ScatterDatum3D =
+        {
+            Position = position
+            RadiusPx = radiusPx
+            Color = color
+            RingPrimary = 0.0f
+            RingSecondary = 0.0f
+            RingThicknessPx = 0.0f
+            PortalHollow = 0.0f
+            PickId = 0u
+            Selected = false
+        }
+
+    /// <summary>Configures concentric primary/secondary progress ring fractions and pixel thickness on a scatter datum.</summary>
+    let withRings (primary: float32) (secondary: float32) (thicknessPx: float32) (datum: ScatterDatum3D) : ScatterDatum3D =
+        { datum with
+            RingPrimary = primary
+            RingSecondary = secondary
+            RingThicknessPx = thicknessPx
+        }
+
+    /// <summary>Configures the hollow-portal interior blend factor in <c>[0.0, 1.0]</c> on a scatter datum.</summary>
+    let withHollow (hollow: float32) (datum: ScatterDatum3D) : ScatterDatum3D =
+        { datum with PortalHollow = hollow }
+
+/// <summary>Standard unit-scale 3D glyph geometry primitives.</summary>
+[<RequireQualifiedAccess; Struct>]
+type GlyphShape3D =
+    /// <summary>Smooth unit-radius icosphere.</summary>
+    | Sphere
+    /// <summary>Unit box centered at origin with extent <c>[-0.5, +0.5]^3</c>.</summary>
+    | Box
+    /// <summary>Capped unit cylinder along <c>+Y</c> with radius <c>0.5f</c> and height <c>1.0f</c>.</summary>
+    | Cylinder
+    /// <summary>Capped unit cone along <c>+Y</c> with base radius <c>0.5f</c> at <c>-0.5f</c> and apex at <c>+0.5f</c>.</summary>
+    | Cone
+    /// <summary>Unit torus in the XZ plane with major radius <c>0.5f</c>.</summary>
+    | Torus
+
+/// <summary>Input datum describing an oriented, non-uniformly scaled 3D glyph instance.</summary>
+[<Struct>]
+type GlyphDatum3D =
+    {
+        /// <summary>Glyph anchor position in data coordinates.</summary>
+        Position: Point3
+        /// <summary>Local non-uniform world scale applied before rotation.</summary>
+        Scale: Vector3
+        /// <summary>World-space rotation quaternion.</summary>
+        Rotation: Quaternion
+        /// <summary>Per-instance RGBA albedo color and opacity.</summary>
+        Color: RgbaColor
+        /// <summary>Unlit or directional studio lighting mode.</summary>
+        Shading: ShadingMode
+        /// <summary>Hardware picking identifier (<c>0u</c> disables picking).</summary>
+        PickId: uint32
+        /// <summary>When true, renders selection rim highlighting.</summary>
+        Selected: bool
+    }
+
+/// <summary>Input datum describing an axis-aligned 3D bar/column anchored from <c>Z0</c> to <c>Z1</c>.</summary>
+[<Struct>]
+type BarDatum3D =
+    {
+        /// <summary>Center data X coordinate.</summary>
+        X: float
+        /// <summary>Center data Y coordinate.</summary>
+        Y: float
+        /// <summary>Baseline data Z coordinate (commonly <c>0.0</c>).</summary>
+        Z0: float
+        /// <summary>Top/end data Z coordinate (positive or negative relative to <c>Z0</c>).</summary>
+        Z1: float
+        /// <summary>Bar footprint width along the data X axis.</summary>
+        WidthX: float
+        /// <summary>Bar footprint width along the data Y axis.</summary>
+        WidthY: float
+        /// <summary>Per-instance RGBA albedo color and opacity.</summary>
+        Color: RgbaColor
+        /// <summary>Unlit or directional studio lighting mode.</summary>
+        Shading: ShadingMode
+        /// <summary>Hardware picking identifier (<c>0u</c> disables picking).</summary>
+        PickId: uint32
+        /// <summary>When true, renders selection rim highlighting.</summary>
+        Selected: bool
+    }
+
+/// <summary>Input datum describing a 3D vector field arrow anchored at <c>Origin</c> pointing along <c>Vector</c>.</summary>
+[<Struct>]
+type ArrowDatum3D =
+    {
+        /// <summary>Tail position in data coordinates.</summary>
+        Origin: Point3
+        /// <summary>Displacement vector in data coordinates relative to <c>Origin</c>.</summary>
+        Vector: Point3
+        /// <summary>World-space cylindrical shaft radius.</summary>
+        ShaftRadius: float32
+        /// <summary>Multiplier applied to the mapped world-space vector length.</summary>
+        LengthScale: float32
+        /// <summary>Per-instance RGBA albedo color and opacity.</summary>
+        Color: RgbaColor
+        /// <summary>Unlit or directional studio lighting mode.</summary>
+        Shading: ShadingMode
+        /// <summary>Hardware picking identifier (<c>0u</c> disables picking).</summary>
+        PickId: uint32
+        /// <summary>When true, renders selection rim highlighting.</summary>
+        Selected: bool
+    }
+
+module internal MarksKernel =
+    let inline spanSlice (arr: 'T array) (start: int) (count: int) : ReadOnlySpan<'T> =
+        if count <= 0 then
+            ReadOnlySpan<'T>.Empty
+        elif start = 0 && count = arr.Length then
+            ReadOnlySpan<'T>(arr)
+        else
+#if FABLE_COMPILER
+            ReadOnlySpan<'T>(Array.sub arr start count)
+#else
+            ReadOnlySpan<'T>(arr, start, count)
+#endif
+
     let inline isFiniteColor (c: RgbaColor) =
         Check3D.isFinite32 c.R
         && Check3D.isFinite32 c.G
@@ -103,58 +250,134 @@ module private MarksKernel =
         else
             fallbackPerp v
 
-/// <summary>Input datum describing a camera-facing SDF scatter disc with optional concentric progress rings and hollow portal.</summary>
-[<Struct>]
-type ScatterDatum3D =
-    {
-        /// <summary>3D position in data coordinates.</summary>
-        Position: Point3
-        /// <summary>Screen-space disc radius in logical pixels (clamped at least <c>0.5f</c>).</summary>
-        RadiusPx: float32
-        /// <summary>Base RGBA fill color; alpha below <c>0.999f</c> triggers back-to-front sorting when a camera position is supplied.</summary>
-        Color: RgbaColor
-        /// <summary>Primary concentric progress ring fraction in <c>[0.0, 1.0]</c>.</summary>
-        RingPrimary: float32
-        /// <summary>Secondary concentric progress ring fraction in <c>[0.0, 1.0]</c>.</summary>
-        RingSecondary: float32
-        /// <summary>Concentric progress ring thickness in pixels (<c>0.0f</c> disables the ring).</summary>
-        RingThicknessPx: float32
-        /// <summary>Hollow portal interior blend factor in <c>[0.0, 1.0]</c>.</summary>
-        PortalHollow: float32
-        /// <summary>Hardware picking identifier (<c>0u</c> disables picking).</summary>
-        PickId: uint32
-        /// <summary>When true, renders the selection halo ring.</summary>
-        Selected: bool
-    }
+    let tryPackDisc (scale: Scale3D) (pickId: uint32) (d: ScatterDatum3D) (out: DiscInstance3D array) (slot: int) : bool =
+        if
+            isFinitePoint3 d.Position
+            && Check3D.isFinite32 d.RadiusPx
+            && isFiniteColor d.Color
+            && Check3D.isFinite32 d.RingPrimary
+            && Check3D.isFinite32 d.RingSecondary
+            && Check3D.isFinite32 d.RingThicknessPx
+            && Check3D.isFinite32 d.PortalHollow
+        then
+            match Scale3D.tryMap scale d.Position with
+            | ValueSome worldPos ->
+                let flags = if d.Selected then InstanceFlags.Selected else InstanceFlags.None
 
-/// <summary>Constructors and pipeable modifiers for <c>ScatterDatum3D</c>.</summary>
-[<RequireQualifiedAccess>]
-module ScatterDatum3D =
-    /// <summary>Creates a solid unringed scatter disc datum with <c>PickId = 0u</c> and <c>Selected = false</c>.</summary>
-    let create (position: Point3) (radiusPx: float32) (color: RgbaColor) : ScatterDatum3D =
-        {
-            Position = position
-            RadiusPx = radiusPx
-            Color = color
-            RingPrimary = 0.0f
-            RingSecondary = 0.0f
-            RingThicknessPx = 0.0f
-            PortalHollow = 0.0f
-            PickId = 0u
-            Selected = false
-        }
+                out[slot] <-
+                    DiscInstance3D.create
+                        worldPos
+                        d.RadiusPx
+                        d.Color
+                        d.RingPrimary
+                        d.RingSecondary
+                        d.RingThicknessPx
+                        d.PortalHollow
+                        pickId
+                        flags
 
-    /// <summary>Configures concentric primary/secondary progress ring fractions and pixel thickness on a scatter datum.</summary>
-    let withRings (primary: float32) (secondary: float32) (thicknessPx: float32) (datum: ScatterDatum3D) : ScatterDatum3D =
-        { datum with
-            RingPrimary = primary
-            RingSecondary = secondary
-            RingThicknessPx = thicknessPx
-        }
+                true
+            | ValueNone -> false
+        else
+            false
 
-    /// <summary>Configures the hollow-portal interior blend factor in <c>[0.0, 1.0]</c> on a scatter datum.</summary>
-    let withHollow (hollow: float32) (datum: ScatterDatum3D) : ScatterDatum3D =
-        { datum with PortalHollow = hollow }
+    let tryPackGlyph (scale: Scale3D) (pickId: uint32) (d: GlyphDatum3D) (out: Instance3D array) (slot: int) : bool =
+        let struct (qOk, unitQ) = normalizeOrIdentity d.Rotation
+        let struct (shadeOk, roughness, emissive, flags) = shadingParams d.Shading d.Selected
+
+        if
+            qOk
+            && shadeOk
+            && isFinitePoint3 d.Position
+            && isFiniteVec3 d.Scale
+            && isFiniteColor d.Color
+        then
+            match Scale3D.tryMap scale d.Position with
+            | ValueSome worldPos ->
+                let worldMat =
+                    Matrix4x4.CreateScale d.Scale
+                    * Orientation3D.matrixFromQuaternion unitQ
+                    * Matrix4x4.CreateTranslation worldPos
+
+                out[slot] <- Instance3D.fromMatrix worldMat d.Color roughness pickId flags emissive
+                true
+            | ValueNone -> false
+        else
+            false
+
+    let tryPackBar
+        (scale: Scale3D)
+        (dx: float)
+        (dy: float)
+        (upAxis: UpAxis)
+        (xScale: AxisScale3D)
+        (yScale: AxisScale3D)
+        (pickId: uint32)
+        (d: BarDatum3D)
+        (out: Instance3D array)
+        (slot: int)
+        : bool =
+        let struct (shadeOk, roughness, emissive, flags) = shadingParams d.Shading d.Selected
+
+        if
+            shadeOk
+            && Check3D.isFinite d.X
+            && Check3D.isFinite d.Y
+            && Check3D.isFinite d.Z0
+            && Check3D.isFinite d.Z1
+            && Check3D.isFinite d.WidthX
+            && Check3D.isFinite d.WidthY
+            && d.WidthX > 0.0
+            && d.WidthY > 0.0
+            && isFiniteColor d.Color
+        then
+            let p0 = Point3.create d.X d.Y d.Z0
+            let p1 = Point3.create d.X d.Y d.Z1
+
+            match
+                Scale3D.tryMap scale p0,
+                Scale3D.tryMap scale p1,
+                AxisScale3D.tryMapNormalized xScale (d.X - d.WidthX * 0.5),
+                AxisScale3D.tryMapNormalized xScale (d.X + d.WidthX * 0.5),
+                AxisScale3D.tryMapNormalized yScale (d.Y - d.WidthY * 0.5),
+                AxisScale3D.tryMapNormalized yScale (d.Y + d.WidthY * 0.5)
+            with
+            | ValueSome w0, ValueSome w1, ValueSome txLo, ValueSome txHi, ValueSome tyLo, ValueSome tyHi ->
+                let wxSize = float32 (abs (txHi - txLo) * dx)
+                let wySize = float32 (abs (tyHi - tyLo) * dy)
+
+                if Check3D.isFinite32 wxSize && Check3D.isFinite32 wySize then
+                    let center = (w0 + w1) * 0.5f
+
+                    let boxScale =
+                        match upAxis with
+                        | UpAxis.ZUp -> Vector3 (wxSize, abs (w1.Y - w0.Y), wySize)
+                        | UpAxis.YUp -> Vector3 (wxSize, wySize, abs (w1.Z - w0.Z))
+
+                    let worldMat =
+                        Matrix4x4.CreateScale boxScale
+                        * Matrix4x4.CreateTranslation center
+
+                    out[slot] <- Instance3D.fromMatrix worldMat d.Color roughness pickId flags emissive
+                    true
+                else
+                    false
+            | _ -> false
+        else
+            false
+
+    let tryPackSegment (scale: Scale3D) (pair: struct (Point3 * Point3 * RgbaColor)) (out: LineVertex3D array) (vertexSlot: int) : bool =
+        let struct (pA, pB, col) = pair
+
+        if isFinitePoint3 pA && isFinitePoint3 pB && isFiniteColor col then
+            match Scale3D.tryMap scale pA, Scale3D.tryMap scale pB with
+            | ValueSome wA, ValueSome wB ->
+                out[vertexSlot] <- LineVertex3D (wA, col)
+                out[vertexSlot + 1] <- LineVertex3D (wB, col)
+                true
+            | _ -> false
+        else
+            false
 
 /// <summary>Billboard scatter point packer emitting <c>DiscInstance3D</c> slices with optional translucent depth sorting.</summary>
 [<RequireQualifiedAccess>]
@@ -181,36 +404,11 @@ module Scatter3D =
             for i = 0 to items.Length - 1 do
                 let d = items[i]
 
-                if
-                    MarksKernel.isFinitePoint3 d.Position
-                    && Check3D.isFinite32 d.RadiusPx
-                    && MarksKernel.isFiniteColor d.Color
-                    && Check3D.isFinite32 d.RingPrimary
-                    && Check3D.isFinite32 d.RingSecondary
-                    && Check3D.isFinite32 d.RingThicknessPx
-                    && Check3D.isFinite32 d.PortalHollow
-                then
-                    match Scale3D.tryMap scale d.Position with
-                    | ValueSome worldPos ->
-                        if d.Color.A < 0.999f then
-                            hasTranslucent <- true
+                if MarksKernel.tryPackDisc scale d.PickId d out count then
+                    if d.Color.A < 0.999f then
+                        hasTranslucent <- true
 
-                        let flags = if d.Selected then InstanceFlags.Selected else InstanceFlags.None
-
-                        out[count] <-
-                            DiscInstance3D.create
-                                worldPos
-                                d.RadiusPx
-                                d.Color
-                                d.RingPrimary
-                                d.RingSecondary
-                                d.RingThicknessPx
-                                d.PortalHollow
-                                d.PickId
-                                flags
-
-                        count <- count + 1
-                    | ValueNone -> ()
+                    count <- count + 1
 
             if count = 0 then
                 ReadOnlyMemory<DiscInstance3D>.Empty
@@ -231,88 +429,6 @@ module Scatter3D =
                 | _ -> ()
 
                 ReadOnlyMemory<DiscInstance3D>(trimmed)
-
-/// <summary>Standard unit-scale 3D glyph geometry primitives.</summary>
-[<RequireQualifiedAccess; Struct>]
-type GlyphShape3D =
-    /// <summary>Smooth unit-radius icosphere.</summary>
-    | Sphere
-    /// <summary>Unit box centered at origin with extent <c>[-0.5, +0.5]^3</c>.</summary>
-    | Box
-    /// <summary>Capped unit cylinder along <c>+Y</c> with radius <c>0.5f</c> and height <c>1.0f</c>.</summary>
-    | Cylinder
-    /// <summary>Capped unit cone along <c>+Y</c> with base radius <c>0.5f</c> at <c>-0.5f</c> and apex at <c>+0.5f</c>.</summary>
-    | Cone
-    /// <summary>Unit torus in the XZ plane with major radius <c>0.5f</c>.</summary>
-    | Torus
-
-/// <summary>Input datum describing an oriented, non-uniformly scaled 3D glyph instance.</summary>
-[<Struct>]
-type GlyphDatum3D =
-    {
-        /// <summary>Glyph anchor position in data coordinates.</summary>
-        Position: Point3
-        /// <summary>Local non-uniform world scale applied before rotation.</summary>
-        Scale: Vector3
-        /// <summary>World-space rotation quaternion.</summary>
-        Rotation: Quaternion
-        /// <summary>Per-instance RGBA albedo color and opacity.</summary>
-        Color: RgbaColor
-        /// <summary>Unlit or directional studio lighting mode.</summary>
-        Shading: ShadingMode
-        /// <summary>Hardware picking identifier (<c>0u</c> disables picking).</summary>
-        PickId: uint32
-        /// <summary>When true, renders selection rim highlighting.</summary>
-        Selected: bool
-    }
-
-/// <summary>Input datum describing an axis-aligned 3D bar/column anchored from <c>Z0</c> to <c>Z1</c>.</summary>
-[<Struct>]
-type BarDatum3D =
-    {
-        /// <summary>Center data X coordinate.</summary>
-        X: float
-        /// <summary>Center data Y coordinate.</summary>
-        Y: float
-        /// <summary>Baseline data Z coordinate (commonly <c>0.0</c>).</summary>
-        Z0: float
-        /// <summary>Top/end data Z coordinate (positive or negative relative to <c>Z0</c>).</summary>
-        Z1: float
-        /// <summary>Bar footprint width along the data X axis.</summary>
-        WidthX: float
-        /// <summary>Bar footprint width along the data Y axis.</summary>
-        WidthY: float
-        /// <summary>Per-instance RGBA albedo color and opacity.</summary>
-        Color: RgbaColor
-        /// <summary>Unlit or directional studio lighting mode.</summary>
-        Shading: ShadingMode
-        /// <summary>Hardware picking identifier (<c>0u</c> disables picking).</summary>
-        PickId: uint32
-        /// <summary>When true, renders selection rim highlighting.</summary>
-        Selected: bool
-    }
-
-/// <summary>Input datum describing a 3D vector field arrow anchored at <c>Origin</c> pointing along <c>Vector</c>.</summary>
-[<Struct>]
-type ArrowDatum3D =
-    {
-        /// <summary>Tail position in data coordinates.</summary>
-        Origin: Point3
-        /// <summary>Displacement vector in data coordinates relative to <c>Origin</c>.</summary>
-        Vector: Point3
-        /// <summary>World-space cylindrical shaft radius.</summary>
-        ShaftRadius: float32
-        /// <summary>Multiplier applied to the mapped world-space vector length.</summary>
-        LengthScale: float32
-        /// <summary>Per-instance RGBA albedo color and opacity.</summary>
-        Color: RgbaColor
-        /// <summary>Unlit or directional studio lighting mode.</summary>
-        Shading: ShadingMode
-        /// <summary>Hardware picking identifier (<c>0u</c> disables picking).</summary>
-        PickId: uint32
-        /// <summary>When true, renders selection rim highlighting.</summary>
-        Selected: bool
-    }
 
 /// <summary>Unit mesh constructors and hardware-instanced packers for 3D glyphs, anchored bars, and vector arrows.</summary>
 [<RequireQualifiedAccess>]
@@ -359,26 +475,9 @@ module Glyph3D =
 
             for i = 0 to items.Length - 1 do
                 let d = items[i]
-                let struct (qOk, unitQ) = MarksKernel.normalizeOrIdentity d.Rotation
-                let struct (shadeOk, roughness, emissive, flags) = MarksKernel.shadingParams d.Shading d.Selected
 
-                if
-                    qOk
-                    && shadeOk
-                    && MarksKernel.isFinitePoint3 d.Position
-                    && MarksKernel.isFiniteVec3 d.Scale
-                    && MarksKernel.isFiniteColor d.Color
-                then
-                    match Scale3D.tryMap scale d.Position with
-                    | ValueSome worldPos ->
-                        let worldMat =
-                            Matrix4x4.CreateScale d.Scale
-                            * Orientation3D.matrixFromQuaternion unitQ
-                            * Matrix4x4.CreateTranslation worldPos
-
-                        out[count] <- Instance3D.fromMatrix worldMat d.Color roughness d.PickId flags emissive
-                        count <- count + 1
-                    | ValueNone -> ()
+                if MarksKernel.tryPackGlyph scale d.PickId d out count then
+                    count <- count + 1
 
             MarksKernel.trimMemory out count
 
@@ -401,50 +500,9 @@ module Glyph3D =
 
             for i = 0 to items.Length - 1 do
                 let d = items[i]
-                let struct (shadeOk, roughness, emissive, flags) = MarksKernel.shadingParams d.Shading d.Selected
 
-                if
-                    shadeOk
-                    && Check3D.isFinite d.X
-                    && Check3D.isFinite d.Y
-                    && Check3D.isFinite d.Z0
-                    && Check3D.isFinite d.Z1
-                    && Check3D.isFinite d.WidthX
-                    && Check3D.isFinite d.WidthY
-                    && d.WidthX > 0.0
-                    && d.WidthY > 0.0
-                    && MarksKernel.isFiniteColor d.Color
-                then
-                    let p0 = Point3.create d.X d.Y d.Z0
-                    let p1 = Point3.create d.X d.Y d.Z1
-
-                    match
-                        Scale3D.tryMap scale p0,
-                        Scale3D.tryMap scale p1,
-                        AxisScale3D.tryMapNormalized xScale (d.X - d.WidthX * 0.5),
-                        AxisScale3D.tryMapNormalized xScale (d.X + d.WidthX * 0.5),
-                        AxisScale3D.tryMapNormalized yScale (d.Y - d.WidthY * 0.5),
-                        AxisScale3D.tryMapNormalized yScale (d.Y + d.WidthY * 0.5)
-                    with
-                    | ValueSome w0, ValueSome w1, ValueSome txLo, ValueSome txHi, ValueSome tyLo, ValueSome tyHi ->
-                        let wxSize = float32 (abs (txHi - txLo) * dx)
-                        let wySize = float32 (abs (tyHi - tyLo) * dy)
-
-                        if Check3D.isFinite32 wxSize && Check3D.isFinite32 wySize then
-                            let center = (w0 + w1) * 0.5f
-
-                            let boxScale =
-                                match upAxis with
-                                | UpAxis.ZUp -> Vector3 (wxSize, abs (w1.Y - w0.Y), wySize)
-                                | UpAxis.YUp -> Vector3 (wxSize, wySize, abs (w1.Z - w0.Z))
-
-                            let worldMat =
-                                Matrix4x4.CreateScale boxScale
-                                * Matrix4x4.CreateTranslation center
-
-                            out[count] <- Instance3D.fromMatrix worldMat d.Color roughness d.PickId flags emissive
-                            count <- count + 1
-                    | _ -> ()
+                if MarksKernel.tryPackBar scale dx dy upAxis xScale yScale d.PickId d out count then
+                    count <- count + 1
 
             MarksKernel.trimMemory out count
 
@@ -512,19 +570,8 @@ module Line3D =
             let mutable count = 0
 
             for i = 0 to pairs.Length - 1 do
-                let struct (pA, pB, col) = pairs[i]
-
-                if
-                    MarksKernel.isFinitePoint3 pA
-                    && MarksKernel.isFinitePoint3 pB
-                    && MarksKernel.isFiniteColor col
-                then
-                    match Scale3D.tryMap scale pA, Scale3D.tryMap scale pB with
-                    | ValueSome wA, ValueSome wB ->
-                        out[count] <- LineVertex3D (wA, col)
-                        out[count + 1] <- LineVertex3D (wB, col)
-                        count <- count + 2
-                    | _ -> ()
+                if MarksKernel.tryPackSegment scale pairs[i] out count then
+                    count <- count + 2
 
             MarksKernel.trimMemory out count
 

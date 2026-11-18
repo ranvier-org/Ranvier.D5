@@ -98,6 +98,7 @@ let main args =
                 SurfaceTests.surfaceTests
                 Marks3DTests.marks3DTests
                 VolumeTests.volumeTests
+                Reactive3DTests.reactive3DTests
             ]
 
     runTestsWithCLIArgs [] args allTests

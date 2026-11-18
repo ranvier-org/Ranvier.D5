@@ -15,6 +15,8 @@
     <Compile Include="Surface3D.fs" />
     <Compile Include="Marks3D.fs" />
     <Compile Include="Volume3D.fs" />
+    <Compile Include="Interaction3D.fs" />
+    <Compile Include="Reactive3D.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />
