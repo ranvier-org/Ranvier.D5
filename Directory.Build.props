@@ -19,7 +19,7 @@
     <RanvierCssVersion>0.1.1</RanvierCssVersion>
     <RanvierViewVersion>0.2.0</RanvierViewVersion>
     <RanvierViewWebCoreVersion>0.2.0</RanvierViewWebCoreVersion>
-    <RanvierViewWebCoreSdlVersion>0.2.0</RanvierViewWebCoreSdlVersion>
+    <RanvierViewWebCoreSdlVersion>0.2.1</RanvierViewWebCoreSdlVersion>
     <RanvierWgpuVersion>0.3.0</RanvierWgpuVersion>
     <RanvierWgpuSdlVersion>0.2.2</RanvierWgpuSdlVersion>
     <FableRanvierWgpuVersion>0.2.0</FableRanvierWgpuVersion>
