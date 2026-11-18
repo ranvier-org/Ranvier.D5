@@ -158,8 +158,8 @@ module Quadtree =
     /// <summary>Returns the number of captured items, including those at duplicate positions.</summary>
     let count (Quadtree root) = match root with None -> 0 | Some(QuadNode(cell,_)) -> cell.Count
 
-    // Force passes query the same immutable tree once per node; keep the traversal buffer local to that pass.
-    let internal visitIndexed count visitor (Quadtree root) =
+    /// <summary>Reuses a single traversal stack across <c>0 .. count - 1</c> indexed spatial or Barnes-Hut queries; returning <c>false</c> prunes the cell's children.</summary>
+    let visitIndexed count visitor (Quadtree root) =
         match root with
         | None -> ()
         | Some node ->

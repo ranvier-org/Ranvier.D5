@@ -49,6 +49,8 @@ type HyperbolicLayoutState =
           Nodes: DiagramNode[]
           NodeIndex: Dictionary<string, int>
           Associations: Association[]
+          AssocSrc: int[]
+          AssocDst: int[]
           IsBackbone: bool[]
           Depths: int[]
           BaseRadius: float[]
@@ -82,27 +84,42 @@ module H3 =
         if n = 0 then
             { Bounds = boundBox; Nodes = []; Groups = Kernels3D.computeGroups3D state.Graph [||]; Associations = [] }
         else
-            let tx = Array.zeroCreate<float> n
-            let ty = Array.zeroCreate<float> n
-            let tz = Array.zeroCreate<float> n
-            let tw = Array.zeroCreate<float> n
-            HyperbolicTransform.applySoA state.ViewTransform state.BaseX state.BaseY state.BaseZ state.BaseW tx ty tz tw n
+            let worldCenters = Array.zeroCreate<Point3> n
+            let attens = Array.zeroCreate<float> n
+            let hasGroups = DiagramGraph.groupCount state.Graph > 0
+            let nodeBoxes = if hasGroups then Array.zeroCreate<Bounds3> n else [||]
+            let mutable minX, minY, minZ = infinity, infinity, infinity
+            let mutable maxX, maxY, maxZ = -infinity, -infinity, -infinity
 
-            let minkPts = Array.init n (fun i -> MinkowskiPoint(tx[i], ty[i], tz[i], tw[i]))
-            let nodeBoxes = Array.zeroCreate<Bounds3> n
-            let posNodes =
-                [ for i in 0 .. n - 1 do
+            match cfg.Model with
+            | HyperbolicModel.Klein ->
+                let wx = Array.zeroCreate<float> n
+                let wy = Array.zeroCreate<float> n
+                let wz = Array.zeroCreate<float> n
+                HyperbolicTransform.projectKleinWorldSoA state.ViewTransform bRad state.BaseX state.BaseY state.BaseZ state.BaseW wx wy wz attens n
+
+                let mutable posNodes = []
+                for i = n - 1 downto 0 do
                     let nd = state.Nodes[i]
-                    let unitBallPt, atten = Hyperbolic3D.toBall cfg.Model minkPts[i]
-                    let worldCenter = Point3.create (unitBallPt.X * bRad) (unitBallPt.Y * bRad) (unitBallPt.Z * bRad)
+                    let cx, cy, cz = wx[i], wy[i], wz[i]
+                    let atten = attens[i]
+                    let worldCenter = Point3.create cx cy cz
+                    worldCenters[i] <- worldCenter
                     let clampedScale = max 0.015 (min 1. atten)
                     let effRad = max 1.2 (state.BaseRadius[i] * clampedScale)
                     let sx = max 2.4 (nd.Size.Width * 0.25 * clampedScale)
                     let sy = max 2.4 (nd.Size.Height * 0.25 * clampedScale)
                     let sz = max 2.4 (nd.DepthSize * 0.25 * clampedScale)
-                    let box = Kernels3D.nodeBox worldCenter sx sy sz
-                    nodeBoxes[i] <- box
-                    yield
+                    let hx, hy, hz = sx * 0.5, sy * 0.5, sz * 0.5
+                    if cx - hx < minX then minX <- cx - hx
+                    if cy - hy < minY then minY <- cy - hy
+                    if cz - hz < minZ then minZ <- cz - hz
+                    if cx + hx > maxX then maxX <- cx + hx
+                    if cy + hy > maxY then maxY <- cy + hy
+                    if cz + hz > maxZ then maxZ <- cz + hz
+                    let box = Bounds3.create (cx - hx) (cy - hy) (cz - hz) sx sy sz
+                    if hasGroups then nodeBoxes[i] <- box
+                    posNodes <-
                         { Id = nd.Id
                           Kind = nd.Kind
                           Center = worldCenter
@@ -110,44 +127,127 @@ module H3 =
                           Radius = effRad
                           ScaleFactor = atten
                           ParentGroup = nd.ParentGroup
-                          Layer = Some state.Depths[i] } ]
+                          Layer = Some state.Depths[i] } :: posNodes
 
-            let groups = Kernels3D.computeGroups3D state.Graph nodeBoxes
-            let scaleChain (chain: Point3Chain) =
-                let arr = Array.init chain.Length (fun k ->
-                    let p = chain[k]
-                    Point3.create (p.X * bRad) (p.Y * bRad) (p.Z * bRad))
-                Point3Chain.ofOwnedArray arr, Array.toList arr
+                let groups = if hasGroups then Kernels3D.computeGroups3D state.Graph nodeBoxes else []
+                for g in groups do
+                    let gb = g.Bounds
+                    if Bounds3.minX gb < minX then minX <- Bounds3.minX gb
+                    if Bounds3.minY gb < minY then minY <- Bounds3.minY gb
+                    if Bounds3.minZ gb < minZ then minZ <- Bounds3.minZ gb
+                    if Bounds3.maxX gb > maxX then maxX <- Bounds3.maxX gb
+                    if Bounds3.maxY gb > maxY then maxY <- Bounds3.maxY gb
+                    if Bounds3.maxZ gb > maxZ then maxZ <- Bounds3.maxZ gb
 
-            let routed =
-                [ for e in 0 .. state.Associations.Length - 1 do
-                    let a = state.Associations[e]
-                    let ui = state.NodeIndex[a.Source.NodeId]
-                    let vi = state.NodeIndex[a.Target.NodeId]
+                let m = state.Associations.Length
+                let minVis = cfg.MinVisibleScale
+                let deltaLoop = 0.02 * bRad
+                let mutable routed = []
+                for e = m - 1 downto 0 do
+                    let ui = state.AssocSrc[e]
+                    let vi = state.AssocDst[e]
                     let isTree = state.IsBackbone[e]
-                    let _, sA = Hyperbolic3D.toBall cfg.Model minkPts[ui]
-                    let _, sB = Hyperbolic3D.toBall cfg.Model minkPts[vi]
-                    if isTree || max sA sB >= cfg.MinVisibleScale then
-                        let unitChain =
+                    if isTree || max attens[ui] attens[vi] >= minVis then
+                        let a = state.Associations[e]
+                        let pts, wps =
                             if ui = vi then
-                                let p, _ = Hyperbolic3D.toBall cfg.Model minkPts[ui]
-                                Point3Chain.ofOwnedArray [| p; Point3.create (p.X + 0.02) (p.Y + 0.02) p.Z; p |]
+                                let c = worldCenters[ui]
+                                let loopPt = Point3.create (c.X + deltaLoop) (c.Y + deltaLoop) c.Z
+                                if loopPt.X > maxX then maxX <- loopPt.X
+                                if loopPt.Y > maxY then maxY <- loopPt.Y
+                                if loopPt.X < minX then minX <- loopPt.X
+                                if loopPt.Y < minY then minY <- loopPt.Y
+                                [| c; loopPt; c |], [ c; loopPt; c ]
                             else
-                                Hyperbolic3D.geodesicPoints cfg.Model cfg.PoincareArcSegments minkPts[ui] minkPts[vi]
-                        let pts, wps = scaleChain unitChain
-                        yield
+                                // Klein geodesics are exact Euclidean chords between worldCenters[ui] and worldCenters[vi],
+                                // whose coordinates are already strictly inside nodeBoxes[ui] and nodeBoxes[vi]!
+                                let cu, cv = worldCenters[ui], worldCenters[vi]
+                                [| cu; cv |], [ cu; cv ]
+                        routed <-
                             { Id = a.Id
                               Source = a.Source
                               Target = a.Target
                               Kind = a.Kind
                               IsBackbone = isTree
-                              Points = pts
-                              Waypoints = wps } ]
+                              Points = Point3Chain.ofOwnedArray pts
+                              Waypoints = wps } :: routed
 
-            { Bounds = Kernels3D.computeBounds3D boundBox posNodes groups routed
-              Nodes = posNodes
-              Groups = groups
-              Associations = routed }
+                { Bounds = Bounds3.create minX minY minZ (maxX - minX) (maxY - minY) (maxZ - minZ)
+                  Nodes = posNodes
+                  Groups = groups
+                  Associations = routed }
+
+            | HyperbolicModel.Poincare ->
+                let tx = Array.zeroCreate<float> n
+                let ty = Array.zeroCreate<float> n
+                let tz = Array.zeroCreate<float> n
+                let tw = Array.zeroCreate<float> n
+                HyperbolicTransform.applySoA state.ViewTransform state.BaseX state.BaseY state.BaseZ state.BaseW tx ty tz tw n
+
+                let minkPts = Array.init n (fun i -> MinkowskiPoint(tx[i], ty[i], tz[i], tw[i]))
+                let mutable posNodes = []
+                for i = n - 1 downto 0 do
+                    let nd = state.Nodes[i]
+                    let unitBallPt, atten = Hyperbolic3D.toBall HyperbolicModel.Poincare minkPts[i]
+                    attens[i] <- atten
+                    let worldCenter = Point3.create (unitBallPt.X * bRad) (unitBallPt.Y * bRad) (unitBallPt.Z * bRad)
+                    worldCenters[i] <- worldCenter
+                    let clampedScale = max 0.015 (min 1. atten)
+                    let effRad = max 1.2 (state.BaseRadius[i] * clampedScale)
+                    let sx = max 2.4 (nd.Size.Width * 0.25 * clampedScale)
+                    let sy = max 2.4 (nd.Size.Height * 0.25 * clampedScale)
+                    let sz = max 2.4 (nd.DepthSize * 0.25 * clampedScale)
+                    let box = Kernels3D.nodeBox worldCenter sx sy sz
+                    if hasGroups then nodeBoxes[i] <- box
+                    posNodes <-
+                        { Id = nd.Id
+                          Kind = nd.Kind
+                          Center = worldCenter
+                          Bounds = box
+                          Radius = effRad
+                          ScaleFactor = atten
+                          ParentGroup = nd.ParentGroup
+                          Layer = Some state.Depths[i] } :: posNodes
+
+                let groups = if hasGroups then Kernels3D.computeGroups3D state.Graph nodeBoxes else []
+                let m = state.Associations.Length
+                let minVis = cfg.MinVisibleScale
+                let mutable routed = []
+                for e = m - 1 downto 0 do
+                    let ui = state.AssocSrc[e]
+                    let vi = state.AssocDst[e]
+                    let isTree = state.IsBackbone[e]
+                    if isTree || max attens[ui] attens[vi] >= minVis then
+                        let a = state.Associations[e]
+                        let pts, wps =
+                            if ui = vi then
+                                let c = worldCenters[ui]
+                                let lp = Point3.create (c.X + 0.02 * bRad) (c.Y + 0.02 * bRad) c.Z
+                                [| c; lp; c |], [ c; lp; c ]
+                            else
+                                let unitChain = Hyperbolic3D.geodesicPoints HyperbolicModel.Poincare cfg.PoincareArcSegments minkPts[ui] minkPts[vi]
+                                let len = unitChain.Length
+                                let arr = Array.zeroCreate<Point3> len
+                                let mutable wpL = []
+                                for k = len - 1 downto 0 do
+                                    let p = unitChain[k]
+                                    let wp = Point3.create (p.X * bRad) (p.Y * bRad) (p.Z * bRad)
+                                    arr[k] <- wp
+                                    wpL <- wp :: wpL
+                                arr, wpL
+                        routed <-
+                            { Id = a.Id
+                              Source = a.Source
+                              Target = a.Target
+                              Kind = a.Kind
+                              IsBackbone = isTree
+                              Points = Point3Chain.ofOwnedArray pts
+                              Waypoints = wps } :: routed
+
+                { Bounds = Kernels3D.computeBounds3D boundBox posNodes groups routed
+                  Nodes = posNodes
+                  Groups = groups
+                  Associations = routed }
 
     /// <summary>Returns the current <c>HyperbolicTransform</c> view matrix of the state.</summary>
     let viewTransform (state: HyperbolicLayoutState) = state.ViewTransform
@@ -189,11 +289,11 @@ module H3 =
         | Error e -> Error e
         | Ok () ->
             let resolved = DiagramGraph.resolveCollapsed graph
-            let nodes = DiagramGraph.nodes resolved |> List.toArray
-            let assocs = DiagramGraph.associations resolved |> List.toArray
+            let eff = DiagramGraph.effective resolved
+            let nodes = eff.Nodes
+            let assocs = eff.Associations
             let n = nodes.Length
-            let nodeIdx = Dictionary<string, int>(StringComparer.Ordinal)
-            for i = 0 to n - 1 do nodeIdx.Add(nodes[i].Id, i)
+            let nodeIdx = eff.ReversedIdMap
 
             if n = 0 then
                 Ok
@@ -202,47 +302,59 @@ module H3 =
                       Nodes = [||]
                       NodeIndex = nodeIdx
                       Associations = [||]
+                      AssocSrc = [||]
+                      AssocDst = [||]
                       IsBackbone = [||]
                       Depths = [||]
                       BaseRadius = [||]
                       BaseX = [||]; BaseY = [||]; BaseZ = [||]; BaseW = [||]
                       ViewTransform = HyperbolicTransform.identity }
             else
-                let forest = SpanningTree.extract config.SpanningStrategy config.RootId resolved
-                let children = Array.init n (fun i ->
-                    forest.ChildrenOf
-                    |> Map.tryFind nodes[i].Id
-                    |> Option.defaultValue []
-                    |> List.map (fun cid -> nodeIdx[cid])
-                    |> List.toArray)
-                let depths = Array.init n (fun i -> forest.DepthOf |> Map.tryFind nodes[i].Id |> Option.defaultValue 0)
-                let rootIndices = forest.Roots |> List.map (fun rid -> nodeIdx[rid]) |> List.toArray
+                let csr = GraphKernels.buildCsr eff
+                let rootIndices, _, children, depths, isBackbone =
+                    SpanningTree.extractIndexed config.SpanningStrategy config.RootId eff csr
 
-                // Compute normalized visual size weight per node
-                let meanDiag =
-                    (nodes |> Array.sumBy (fun nd -> sqrt (nd.Size.Width * nd.Size.Width + nd.Size.Height * nd.Size.Height))) / float n
-                let normScale = Array.init n (fun i ->
-                    let diag = sqrt (nodes[i].Size.Width * nodes[i].Size.Width + nodes[i].Size.Height * nodes[i].Size.Height)
-                    if meanDiag <= 1e-6 then 1. else max 0.5 (min 2.5 (diag / meanDiag)))
-
-                // Postorder traversal across forest
-                let postorder = ResizeArray<int>(n)
-                let stack = Stack<struct(int * bool)>()
-                for r = rootIndices.Length - 1 downto 0 do
-                    stack.Push(struct(rootIndices[r], false))
-                while stack.Count > 0 do
-                    let struct(u, doneKids) = stack.Pop()
-                    if doneKids then postorder.Add u
+                // Compute normalized visual size weight per node in single pass
+                let diagArr = Array.zeroCreate<float> n
+                let mutable diagSum = 0.
+                for i = 0 to n - 1 do
+                    let nd = nodes[i]
+                    let d = sqrt (nd.Size.Width * nd.Size.Width + nd.Size.Height * nd.Size.Height)
+                    diagArr[i] <- d
+                    diagSum <- diagSum + d
+                let meanDiag = diagSum / float n
+                let normScale =
+                    if meanDiag <= 1e-6 then Array.create n 1.
                     else
-                        stack.Push(struct(u, true))
+                        let invMean = 1. / meanDiag
+                        Array.init n (fun i -> max 0.5 (min 2.5 (diagArr[i] * invMean)))
+
+                // Postorder traversal across forest via flat stack
+                let postorder = Array.zeroCreate<int> n
+                let mutable postLen = 0
+                let postStack = Array.zeroCreate<int> (max 1 (n * 2))
+                let mutable sp = 0
+                for r = rootIndices.Length - 1 downto 0 do
+                    postStack[sp] <- rootIndices[r]
+                    sp <- sp + 1
+                while sp > 0 do
+                    sp <- sp - 1
+                    let raw = postStack[sp]
+                    if raw < 0 then
+                        postorder[postLen] <- ~~~raw
+                        postLen <- postLen + 1
+                    else
+                        let u = raw
+                        postStack[sp] <- ~~~u
+                        sp <- sp + 1
                         let ch = children[u]
                         for k = ch.Length - 1 downto 0 do
-                            stack.Push(struct(ch[k], false))
+                            postStack[sp] <- ch[k]
+                            sp <- sp + 1
 
                 // Pass 1 (Bottom-Up): Munzner H3 Appendix A hyperbolic hemisphere radius synthesis
-                // Hemisphere surface area in H^3: H_p = 2 * pi * sinh^2(r_p) => r_p = asinh(sqrt(H_p / (2 * pi)))
                 let hemiRadius = Array.zeroCreate<float> n
-                for idx = 0 to postorder.Count - 1 do
+                for idx = 0 to postLen - 1 do
                     Kernels3D.check token idx
                     let u = postorder[idx]
                     let rLeaf = config.LeafHyperbolicRadius * normScale[u]
@@ -250,13 +362,12 @@ module H3 =
                     if ch.Length = 0 then
                         hemiRadius[u] <- rLeaf
                     else
-                        let mutable areaSum = 0.
-                        for c in ch do
-                            let s = sinh (min 12. hemiRadius[c])
-                            let childArea = 2. * Math.PI * s * s
-                            areaSum <- areaSum + childArea
-                        let totalArea = config.HemisphereAreaScale * areaSum
-                        let reqR = Math.Asinh(sqrt (totalArea / (2. * Math.PI)))
+                        let mutable sSqSum = 0.
+                        for k = 0 to ch.Length - 1 do
+                            let s = sinh (min 12. hemiRadius[ch[k]])
+                            sSqSum <- sSqSum + s * s
+                        // H_p = AreaScale * sum(2 * pi * s^2) => H_p / (2 * pi) = AreaScale * sSqSum!
+                        let reqR = Math.Asinh(sqrt (config.HemisphereAreaScale * sSqSum))
                         hemiRadius[u] <- max rLeaf (min 12. reqR)
 
                 // Pass 2 (Top-Down): Concentric spherical-cap band packing on parent hemispheres in H^3
@@ -264,22 +375,43 @@ module H3 =
                 let baseY = Array.zeroCreate<float> n
                 let baseZ = Array.zeroCreate<float> n
                 let baseW = Array.create n 1.
+                let zUnit = Point3.create 0. 0. 1.
 
-                // Pack `kids` onto a hemisphere (maxPhi = pi/2) or full sphere (maxPhi = pi at root!) around parent frame `parentFrame`
+                let qNodes = Array.zeroCreate<int> n
+                let qFrames = Array.zeroCreate<HyperbolicTransform> n
+                let mutable qHead = 0
+                let mutable qTail = 0
+                let bandMembers = ResizeArray<struct(int * float)>(32)
+
                 let packChildrenOnCap (parentFrame: HyperbolicTransform) (parentR: float) (maxPhi: float) (kids: int[]) =
-                    if kids.Length > 0 then
-                        // Sort children by descending hemisphere radius so dominant subtrees sit near the pole!
-                        let sorted = Array.copy kids
-                        Array.Sort(sorted, Comparer<int>.Create(fun a b ->
-                            let c = compare hemiRadius[b] hemiRadius[a]
-                            if c <> 0 then c else compare a b))
+                    let kLen = kids.Length
+                    if kLen > 0 then
+                        let sorted =
+                            if kLen = 1 then kids
+                            elif kLen <= 16 then
+                                let cp = Array.copy kids
+                                for a = 1 to kLen - 1 do
+                                    let kv = cp[a]
+                                    let kr = hemiRadius[kv]
+                                    let mutable b = a - 1
+                                    while b >= 0 && (hemiRadius[cp[b]] < kr || (hemiRadius[cp[b]] = kr && cp[b] > kv)) do
+                                        cp[b + 1] <- cp[b]
+                                        b <- b - 1
+                                    cp[b + 1] <- kv
+                                cp
+                            else
+                                let cp = Array.copy kids
+                                Array.Sort(cp, Comparer<int>.Create(fun a b ->
+                                    let c = compare hemiRadius[b] hemiRadius[a]
+                                    if c <> 0 then c else compare a b))
+                                cp
 
                         let sinhRp = max 0.05 (sinh (min 12. parentR))
+                        let invSinhRp = 1. / sinhRp
                         let mutable cursorIdx = 0
                         let mutable phi = 0.
 
-                        // Place largest child right at pole (phi = 0) when there is 1 child or when packing a hemisphere
-                        if sorted.Length = 1 || maxPhi <= Math.PI * 0.6 then
+                        if kLen = 1 || maxPhi <= Math.PI * 0.6 then
                             let poleChild = sorted[0]
                             let rc = hemiRadius[poleChild]
                             let stepD = parentR + rc + config.RadialGap
@@ -287,39 +419,39 @@ module H3 =
                             let worldPt = HyperbolicTransform.apply parentFrame localPt
                             baseX[poleChild] <- worldPt.X; baseY[poleChild] <- worldPt.Y
                             baseZ[poleChild] <- worldPt.Z; baseW[poleChild] <- worldPt.W
-                            let dPhi0 = atan (tanh rc / sinhRp)
+                            let dPhi0 = atan (tanh rc * invSinhRp)
                             phi <- max 0.18 (2. * dPhi0 + 0.06)
                             cursorIdx <- 1
+                            if children[poleChild].Length > 0 then
+                                let cFrame =
+                                    HyperbolicTransform.boostFromOrigin localPt
+                                    |> HyperbolicTransform.thenApply parentFrame
+                                    |> HyperbolicTransform.orthonormalize
+                                qNodes[qTail] <- poleChild
+                                qFrames[qTail] <- cFrame
+                                qTail <- qTail + 1
                         else
                             phi <- 0.35
 
-                        // Pack remaining children into concentric latitude bands (phi, theta)
-                        let childFrames = ResizeArray<struct(int * HyperbolicTransform)>(sorted.Length)
-                        if cursorIdx = 1 then
-                            let poleChild = sorted[0]
-                            let pLocal = Hyperbolic3D.fromSpherical (parentR + hemiRadius[poleChild] + config.RadialGap) 0. 0.
-                            let cFrame =
-                                HyperbolicTransform.boostFromOrigin pLocal
-                                |> HyperbolicTransform.thenApply parentFrame
-                                |> HyperbolicTransform.orthonormalize
-                            childFrames.Add(struct(poleChild, cFrame))
-
-                        while cursorIdx < sorted.Length do
+                        while cursorIdx < kLen do
                             let firstC = sorted[cursorIdx]
-                            let dPhiFirst = atan (tanh hemiRadius[firstC] / sinhRp)
+                            let dPhiFirst = atan (tanh hemiRadius[firstC] * invSinhRp)
                             let bandPhi = min maxPhi (max 0.12 (phi + dPhiFirst))
+                            let spBand = sin bandPhi
+                            let cpBand = cos bandPhi
                             let sinhRPhi = max 0.04 (sinhRp * sin (min (Math.PI - 0.08) bandPhi))
+                            let invSinhRPhi = 1. / sinhRPhi
 
-                            // Greedily collect children that fit in the 2*pi azimuth circumference of this band
-                            let bandMembers = ResizeArray<struct(int * float)>()
+                            bandMembers.Clear()
                             let mutable thetaUsed = 0.
                             let mutable bandMaxDPhi = dPhiFirst
                             let mutable bandFull = false
-                            while cursorIdx < sorted.Length && not bandFull do
+                            while cursorIdx < kLen && not bandFull do
                                 let c = sorted[cursorIdx]
                                 let rc = hemiRadius[c]
-                                let dTheta = max 0.08 (atan (tanh rc / sinhRPhi))
-                                let dPhi = atan (tanh rc / sinhRp)
+                                let tanhRc = tanh rc
+                                let dTheta = max 0.08 (atan (tanhRc * invSinhRPhi))
+                                let dPhi = atan (tanhRc * invSinhRp)
                                 if bandMembers.Count > 0 && thetaUsed + 2. * dTheta > 2. * Math.PI + 1e-6 then
                                     bandFull <- true
                                 else
@@ -328,11 +460,11 @@ module H3 =
                                     if dPhi > bandMaxDPhi then bandMaxDPhi <- dPhi
                                     cursorIdx <- cursorIdx + 1
 
-                            // Distribute band members evenly around [0, 2*pi) azimuth
-                            let slack = if thetaUsed < 2. * Math.PI then (2. * Math.PI - thetaUsed) / float bandMembers.Count else 0.
+                            let bmCount = bandMembers.Count
+                            let slack = if thetaUsed < 2. * Math.PI then (2. * Math.PI - thetaUsed) / float bmCount else 0.
                             let scaleAz = if thetaUsed > 2. * Math.PI then (2. * Math.PI) / thetaUsed else 1.
-                            let mutable theta = (float bandMembers.Count * 0.61803398875) % (2. * Math.PI)
-                            for m = 0 to bandMembers.Count - 1 do
+                            let mutable theta = (float bmCount * 0.61803398875) % (2. * Math.PI)
+                            for m = 0 to bmCount - 1 do
                                 let struct(c, dTheta) = bandMembers[m]
                                 let halfSpan = dTheta * scaleAz + slack * 0.5
                                 let az = theta + halfSpan
@@ -340,57 +472,51 @@ module H3 =
 
                                 let stepD = parentR + hemiRadius[c] + config.RadialGap
                                 let localPt = Hyperbolic3D.fromSpherical stepD bandPhi az
-                                let dir =
-                                    let sp = sin bandPhi
-                                    Point3.create (sp * cos az) (sp * sin az) (cos bandPhi)
-                                let orient = Quaternion.fromUnitVectors (Point3.create 0. 0. 1.) dir
-                                let localFrame =
-                                    HyperbolicTransform.ofRotation orient
-                                    |> HyperbolicTransform.thenApply (HyperbolicTransform.boostFromOrigin localPt)
-                                let cFrame =
-                                    localFrame
-                                    |> HyperbolicTransform.thenApply parentFrame
-                                    |> HyperbolicTransform.orthonormalize
-                                let worldOrigin = HyperbolicTransform.apply cFrame Hyperbolic3D.origin
-                                baseX[c] <- worldOrigin.X; baseY[c] <- worldOrigin.Y
-                                baseZ[c] <- worldOrigin.Z; baseW[c] <- worldOrigin.W
-                                childFrames.Add(struct(c, cFrame))
+                                if children[c].Length > 0 then
+                                    let dir = Point3.create (spBand * cos az) (spBand * sin az) cpBand
+                                    let orient = Quaternion.fromUnitVectors zUnit dir
+                                    let localFrame =
+                                        HyperbolicTransform.ofRotation orient
+                                        |> HyperbolicTransform.thenApply (HyperbolicTransform.boostFromOrigin localPt)
+                                    let cFrame =
+                                        localFrame
+                                        |> HyperbolicTransform.thenApply parentFrame
+                                        |> HyperbolicTransform.orthonormalize
+                                    let worldOrigin = HyperbolicTransform.apply cFrame Hyperbolic3D.origin
+                                    baseX[c] <- worldOrigin.X; baseY[c] <- worldOrigin.Y
+                                    baseZ[c] <- worldOrigin.Z; baseW[c] <- worldOrigin.W
+                                    qNodes[qTail] <- c
+                                    qFrames[qTail] <- cFrame
+                                    qTail <- qTail + 1
+                                else
+                                    // Leaf node: cFrame * origin == parentFrame * (boostFromOrigin localPt * origin) == parentFrame * localPt!
+                                    let worldOrigin = HyperbolicTransform.apply parentFrame localPt
+                                    baseX[c] <- worldOrigin.X; baseY[c] <- worldOrigin.Y
+                                    baseZ[c] <- worldOrigin.Z; baseW[c] <- worldOrigin.W
 
                             phi <- min (maxPhi - 0.05) (bandPhi + bandMaxDPhi + 0.08)
 
-                        childFrames.ToArray()
-                    else [||]
-
-                // Traverse top-down with an explicit queue of (nodeIdx, frame)
-                let frameQueue = Queue<struct(int * HyperbolicTransform)>()
                 if rootIndices.Length = 1 then
                     let r0 = rootIndices[0]
                     baseX[r0] <- 0.; baseY[r0] <- 0.; baseZ[r0] <- 0.; baseW[r0] <- 1.
-                    // At root, utilize full sphere (maxPhi = pi * 0.88) so branches fan out isotropically in 3D!
-                    let rootKids = packChildrenOnCap HyperbolicTransform.identity (hemiRadius[r0] * 0.5) (Math.PI * 0.88) children[r0]
-                    for item in rootKids do frameQueue.Enqueue item
+                    packChildrenOnCap HyperbolicTransform.identity (hemiRadius[r0] * 0.5) (Math.PI * 0.88) children[r0]
                 else
-                    // Multiple forest roots: place them around a virtual origin sphere
                     let virtualR =
-                        let mutable a = 0.
+                        let mutable sSq = 0.
                         for r in rootIndices do
                             let s = sinh (min 10. hemiRadius[r])
-                            a <- a + 2. * Math.PI * s * s
-                        Math.Asinh(sqrt (config.HemisphereAreaScale * a / (4. * Math.PI)))
-                    let placedRoots = packChildrenOnCap HyperbolicTransform.identity (max 0.25 virtualR) (Math.PI * 0.88) rootIndices
-                    for item in placedRoots do frameQueue.Enqueue item
+                            sSq <- sSq + s * s
+                        Math.Asinh(sqrt (config.HemisphereAreaScale * sSq * 0.5))
+                    packChildrenOnCap HyperbolicTransform.identity (max 0.25 virtualR) (Math.PI * 0.88) rootIndices
 
-                let mutable visitedCount = 0
-                while frameQueue.Count > 0 do
-                    Kernels3D.check token visitedCount
-                    visitedCount <- visitedCount + 1
-                    let struct(u, uFrame) = frameQueue.Dequeue()
-                    if children[u].Length > 0 then
-                        let sub = packChildrenOnCap uFrame hemiRadius[u] (Math.PI * 0.48) children[u]
-                        for item in sub do frameQueue.Enqueue item
+                while qHead < qTail do
+                    Kernels3D.check token qHead
+                    let u = qNodes[qHead]
+                    let uFrame = qFrames[qHead]
+                    qHead <- qHead + 1
+                    packChildrenOnCap uFrame hemiRadius[u] (Math.PI * 0.48) children[u]
 
                 let baseRadii = Array.init n (fun i -> max 3.5 (10. * normScale[i]))
-                let isBackbone = assocs |> Array.map (fun a -> forest.TreeAssociationIds.Contains a.Id)
 
                 Ok
                     { Config = config
@@ -398,6 +524,8 @@ module H3 =
                       Nodes = nodes
                       NodeIndex = nodeIdx
                       Associations = assocs
+                      AssocSrc = csr.Src
+                      AssocDst = csr.Dst
                       IsBackbone = isBackbone
                       Depths = depths
                       BaseRadius = baseRadii

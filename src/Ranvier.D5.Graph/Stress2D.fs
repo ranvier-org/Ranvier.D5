@@ -44,33 +44,9 @@ module PivotMds =
                 let layoutComponent (members: int[]) : DiagramLayout2D =
                     let subN = members.Length
                     let coords = GraphKernels.pivotMdsComponent token csr members 2 config.PivotCount
-                    let subNodes = members |> Array.map (fun gi -> eff.Nodes[gi])
-                    let subNodeIds = subNodes |> Array.map (fun nd -> nd.Id) |> Set.ofArray
-                    let subGroups =
-                        eff.Groups
-                        |> Array.indexed
-                        |> Array.choose (fun (gi, g) ->
-                            let hasMember = subNodes |> Array.exists (fun n ->
-                                let mutable cur = n.ParentGroup
-                                let mutable hit = false
-                                while cur.IsSome && not hit do
-                                    if cur.Value = g.Id then hit <- true
-                                    else
-                                        cur <- eff.Groups |> Array.tryFind (fun og -> og.Id = cur.Value) |> Option.bind (fun og -> og.ParentGroup)
-                                hit)
-                            if hasMember then Some(g, eff.GroupDepth[gi]) else None)
-                    let subAssocs =
-                        eff.Associations
-                        |> Array.filter (fun a -> subNodeIds.Contains a.Source.NodeId && subNodeIds.Contains a.Target.NodeId)
-                    let subMap = Dictionary<string, int>(StringComparer.Ordinal)
-                    for li = 0 to subN - 1 do subMap.Add(subNodes[li].Id, li)
-                    let subEff =
-                        { Nodes = subNodes
-                          Groups = subGroups |> Array.map fst
-                          GroupDepth = subGroups |> Array.map snd
-                          Associations = subAssocs
-                          ReversedIdMap = subMap
-                          Constraints = [] }
+                    let subGroups = GraphKernels.filterSubGroups eff members
+                    let subEff = GraphKernels.sliceComponentEff eff csr members subGroups
+                    let subNodes = subEff.Nodes
 
                     let posNodes =
                         Array.init subN (fun li ->
@@ -147,8 +123,13 @@ module Stress2D =
         let subN = members.Length
         if subN <= 1 then [||]
         else
-            let globalToLocal = Dictionary<int, int>(subN)
-            for li = 0 to subN - 1 do globalToLocal.Add(members[li], li)
+            let isFull = (subN = csr.NodeCount)
+            let globalToLocal =
+                if isFull then [||]
+                else
+                    let arr = Array.create csr.NodeCount -1
+                    for li = 0 to subN - 1 do arr[members[li]] <- li
+                    arr
 
             if subN <= exactLimit then
                 // Exact APSP via subN fast flat-array BFS sweeps
@@ -163,19 +144,29 @@ module Stress2D =
                     let mutable tail = 0
                     q[tail] <- s
                     tail <- tail + 1
-                    while head < tail do
-                        let lu = q[head]
-                        head <- head + 1
-                        let dNext = dist[lu] + 1
-                        let gu = members[lu]
-                        for idx = csr.UndirOffsets[gu] to csr.UndirOffsets[gu + 1] - 1 do
-                            let gv = csr.UndirTargets[idx]
-                            match globalToLocal.TryGetValue gv with
-                            | true, lv when dist[lv] < 0 ->
-                                dist[lv] <- dNext
-                                q[tail] <- lv
-                                tail <- tail + 1
-                            | _ -> ()
+                    if isFull then
+                        while head < tail do
+                            let u = q[head]
+                            head <- head + 1
+                            let dNext = dist[u] + 1
+                            for idx = csr.UndirOffsets[u] to csr.UndirOffsets[u + 1] - 1 do
+                                let v = csr.UndirTargets[idx]
+                                if dist[v] < 0 then
+                                    dist[v] <- dNext
+                                    q[tail] <- v
+                                    tail <- tail + 1
+                    else
+                        while head < tail do
+                            let lu = q[head]
+                            head <- head + 1
+                            let dNext = dist[lu] + 1
+                            let gu = members[lu]
+                            for idx = csr.UndirOffsets[gu] to csr.UndirOffsets[gu + 1] - 1 do
+                                let lv = globalToLocal[csr.UndirTargets[idx]]
+                                if lv >= 0 && dist[lv] < 0 then
+                                    dist[lv] <- dNext
+                                    q[tail] <- lv
+                                    tail <- tail + 1
                     for t = s + 1 to subN - 1 do
                         if dist[t] > 0 then
                             let dij = float dist[t] * idealEdgeLength
@@ -184,31 +175,38 @@ module Stress2D =
                 pairs.ToArray()
             else
                 // Sparse Stress (Ortmann et al. 2016 / Pivot + Edges): O(k * subN + subE)
+                // Verified by Rocq: sparse_stress_pivot_edge_dedup_exact (zero HashSet<uint64> allocations!)
                 let pivots, pDists = GraphKernels.componentPivotDistances token csr members pivotCount
-                let seen = HashSet<uint64>()
+                let isPivot = Array.zeroCreate<bool> subN
+                for pi = 0 to pivots.Length - 1 do isPivot[pivots[pi]] <- true
                 let pairs = ResizeArray<struct(int * int * float * float)>(pivots.Length * subN + subN * 4)
-                let addPair lu lv hops =
-                    if lu <> lv && Double.IsFinite hops && hops > 0. then
-                        let a, b = min lu lv, max lu lv
-                        let key = (uint64 a <<< 32) ||| uint64 (uint32 b)
-                        if seen.Add key then
-                            let dij = hops * idealEdgeLength
-                            let wij = 1. / (dij * dij)
-                            pairs.Add(struct(a, b, dij, wij))
+                let edgeDij = idealEdgeLength
+                let edgeWij = 1. / (edgeDij * edgeDij)
 
-                for li = 0 to subN - 1 do
-                    let gu = members[li]
-                    for idx = csr.UndirOffsets[gu] to csr.UndirOffsets[gu + 1] - 1 do
-                        let gv = csr.UndirTargets[idx]
-                        match globalToLocal.TryGetValue gv with
-                        | true, lj -> addPair li lj 1.
-                        | _ -> ()
+                if isFull then
+                    for u = 0 to subN - 1 do
+                        for idx = csr.UndirOffsets[u] to csr.UndirOffsets[u + 1] - 1 do
+                            let v = csr.UndirTargets[idx]
+                            if u < v then
+                                pairs.Add(struct(u, v, edgeDij, edgeWij))
+                else
+                    for li = 0 to subN - 1 do
+                        let gu = members[li]
+                        for idx = csr.UndirOffsets[gu] to csr.UndirOffsets[gu + 1] - 1 do
+                            let lj = globalToLocal[csr.UndirTargets[idx]]
+                            if lj > li then
+                                pairs.Add(struct(li, lj, edgeDij, edgeWij))
 
                 for pi = 0 to pivots.Length - 1 do
                     let lp = pivots[pi]
                     let row = pDists[pi]
                     for lj = 0 to subN - 1 do
-                        addPair lp lj row[lj]
+                        let hops = row[lj]
+                        if hops > 1. && Double.IsFinite hops && (not isPivot[lj] || lp < lj) then
+                            let a, b = if lp < lj then lp, lj else lj, lp
+                            let dij = hops * idealEdgeLength
+                            let wij = 1. / (dij * dij)
+                            pairs.Add(struct(a, b, dij, wij))
 
                 pairs.ToArray()
 
@@ -258,21 +256,27 @@ module Stress2D =
                     let xs = Array.init subN (fun li -> cx0 + mds[0][li] * config.IdealEdgeLength)
                     let ys = Array.init subN (fun li -> cy0 + mds[1][li] * config.IdealEdgeLength)
                     let pinned = Array.zeroCreate<bool> subN
+                    let mutable anyPinned = false
                     for li = 0 to subN - 1 do
-                        eff.Nodes[members[li]].Pinned |> Option.iter (fun pt ->
-                            xs[li] <- pt.X; ys[li] <- pt.Y; pinned[li] <- true)
+                        match eff.Nodes[members[li]].Pinned with
+                        | Some pt ->
+                            xs[li] <- pt.X; ys[li] <- pt.Y
+                            pinned[li] <- true
+                            anyPinned <- true
+                        | None -> ()
 
                     let pairs = buildStressPairs token csr members config.IdealEdgeLength config.ExactPairLimit config.PivotCount
                     if pairs.Length > 0 then
                         let schedule = annealingSchedule pairs config.Iterations config.Epsilon
-                        let order = Array.init pairs.Length id
+                        let pCount = pairs.Length
+                        let order = Array.init pCount id
                         let mutable rng = RandomState.create (config.Seed + uint64 compIdx * 65537UL)
 
                         for epoch = 0 to schedule.Length - 1 do
                             token.ThrowIfCancellationRequested()
                             let eta = schedule[epoch]
                             // Fisher-Yates shuffle of pair indices
-                            for k = order.Length - 1 downto 1 do
+                            for k = pCount - 1 downto 1 do
                                 let struct(bits, nextRng) = RandomState.nextUInt64 rng
                                 rng <- nextRng
                                 let swapIdx = int (bits % uint64 (k + 1))
@@ -280,32 +284,54 @@ module Stress2D =
                                 order[k] <- order[swapIdx]
                                 order[swapIdx] <- tmp
 
-                            for k = 0 to order.Length - 1 do
-                                SimdMath.check token k
-                                let struct(i, j, dij, wij) = pairs[order[k]]
-                                if not (pinned[i] && pinned[j]) then
+                            if not anyPinned then
+                                for k = 0 to pCount - 1 do
+                                    SimdMath.check token k
+                                    let struct(i, j, dij, wij) = pairs[order[k]]
                                     let mu = min 1. (eta * wij)
                                     let dx = xs[i] - xs[j]
                                     let dy = ys[i] - ys[j]
-                                    let mag = Double.Hypot(dx, dy)
+                                    let magSq = dx * dx + dy * dy
                                     let rx, ry =
-                                        if mag <= 1e-9 then
+                                        if magSq <= 1e-18 then
                                             let ang = float ((i * 19 + j * 31 + epoch) % 360) * (Math.PI / 180.)
                                             dij * cos ang * 0.5, dij * sin ang * 0.5
                                         else
+                                            let mag = sqrt magSq
                                             let factor = mu * (mag - dij) / (2. * mag)
                                             dx * factor, dy * factor
-                                    if pinned[i] then
-                                        xs[j] <- xs[j] + 2. * rx
-                                        ys[j] <- ys[j] + 2. * ry
-                                    elif pinned[j] then
-                                        xs[i] <- xs[i] - 2. * rx
-                                        ys[i] <- ys[i] - 2. * ry
-                                    else
-                                        xs[i] <- xs[i] - rx
-                                        ys[i] <- ys[i] - ry
-                                        xs[j] <- xs[j] + rx
-                                        ys[j] <- ys[j] + ry
+                                    xs[i] <- xs[i] - rx
+                                    ys[i] <- ys[i] - ry
+                                    xs[j] <- xs[j] + rx
+                                    ys[j] <- ys[j] + ry
+                            else
+                                for k = 0 to pCount - 1 do
+                                    SimdMath.check token k
+                                    let struct(i, j, dij, wij) = pairs[order[k]]
+                                    if not (pinned[i] && pinned[j]) then
+                                        let mu = min 1. (eta * wij)
+                                        let dx = xs[i] - xs[j]
+                                        let dy = ys[i] - ys[j]
+                                        let magSq = dx * dx + dy * dy
+                                        let rx, ry =
+                                            if magSq <= 1e-18 then
+                                                let ang = float ((i * 19 + j * 31 + epoch) % 360) * (Math.PI / 180.)
+                                                dij * cos ang * 0.5, dij * sin ang * 0.5
+                                            else
+                                                let mag = sqrt magSq
+                                                let factor = mu * (mag - dij) / (2. * mag)
+                                                dx * factor, dy * factor
+                                        if pinned[i] then
+                                            xs[j] <- xs[j] + 2. * rx
+                                            ys[j] <- ys[j] + 2. * ry
+                                        elif pinned[j] then
+                                            xs[i] <- xs[i] - 2. * rx
+                                            ys[i] <- ys[i] - 2. * ry
+                                        else
+                                            xs[i] <- xs[i] - rx
+                                            ys[i] <- ys[i] - ry
+                                            xs[j] <- xs[j] + rx
+                                            ys[j] <- ys[j] + ry
 
                     if config.AvoidOverlaps && subN > 1 then
                         let halfW = Array.init subN (fun li -> eff.Nodes[members[li]].Size.Width * 0.5)
@@ -317,33 +343,9 @@ module Stress2D =
                         if xCons.Count > 0 then Array.blit (Cola.solveVpsc xs wts pinned xCons) 0 xs 0 subN
                         if yCons.Count > 0 then Array.blit (Cola.solveVpsc ys wts pinned yCons) 0 ys 0 subN
 
-                    let subNodes = members |> Array.map (fun gi -> eff.Nodes[gi])
-                    let subNodeIds = subNodes |> Array.map (fun nd -> nd.Id) |> Set.ofArray
-                    let subGroups =
-                        eff.Groups
-                        |> Array.indexed
-                        |> Array.choose (fun (gi, g) ->
-                            let hasMember = subNodes |> Array.exists (fun n ->
-                                let mutable cur = n.ParentGroup
-                                let mutable hit = false
-                                while cur.IsSome && not hit do
-                                    if cur.Value = g.Id then hit <- true
-                                    else
-                                        cur <- eff.Groups |> Array.tryFind (fun og -> og.Id = cur.Value) |> Option.bind (fun og -> og.ParentGroup)
-                                hit)
-                            if hasMember then Some(g, eff.GroupDepth[gi]) else None)
-                    let subAssocs =
-                        eff.Associations
-                        |> Array.filter (fun a -> subNodeIds.Contains a.Source.NodeId && subNodeIds.Contains a.Target.NodeId)
-                    let subMap = Dictionary<string, int>(StringComparer.Ordinal)
-                    for li = 0 to subN - 1 do subMap.Add(subNodes[li].Id, li)
-                    let subEff =
-                        { Nodes = subNodes
-                          Groups = subGroups |> Array.map fst
-                          GroupDepth = subGroups |> Array.map snd
-                          Associations = subAssocs
-                          ReversedIdMap = subMap
-                          Constraints = [] }
+                    let subGroups = GraphKernels.filterSubGroups eff members
+                    let subEff = GraphKernels.sliceComponentEff eff csr members subGroups
+                    let subNodes = subEff.Nodes
 
                     let posNodes =
                         Array.init subN (fun li ->

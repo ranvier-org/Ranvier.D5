@@ -54,82 +54,90 @@ module RadialTree =
             Error [ InvalidObservation "RadialTree requires positive finite LevelStep and nonnegative finite NodeGap." ]
         else
             let eff = DiagramGraph.effective graph
-            if eff.Nodes.Length = 0 then
+            let n = eff.Nodes.Length
+            if n = 0 then
                 Ok { Bounds = config.Bounds; Nodes = []; Groups = GraphKernels.computeGroupBounds eff [||]; Associations = [] }
             else
-                let forest = SpanningTree.extract config.SpanningStrategy config.RootId graph
-                let nodeMap = eff.ReversedIdMap
-                let childrenOf idx =
-                    forest.ChildrenOf
-                    |> Map.tryFind eff.Nodes[idx].Id
-                    |> Option.defaultValue []
-                    |> List.map (fun cid -> nodeMap[cid])
+                let csr = GraphKernels.buildCsr eff
+                let rootIndices, _, childrenIdx, depthArr, _ =
+                    SpanningTree.extractIndexed config.SpanningStrategy config.RootId eff csr
+
+                let span = Array.zeroCreate<float> n
+                let centers = Array.zeroCreate<Point> n
+                let postStack = Array.zeroCreate<int> (max 1 (n * 2))
 
                 let layoutSingleTree (rootIdx: int) : DiagramLayout2D =
                     token.ThrowIfCancellationRequested()
-                    // Postorder traversal for subtree leaf/span sizing
+                    // Postorder traversal for subtree leaf/span sizing via flat stack
                     let order = ResizeArray<int>()
-                    let depth = Dictionary<int, int>()
-                    let stack = Stack<int * bool>()
-                    depth[rootIdx] <- 0
-                    stack.Push(rootIdx, false)
-                    while stack.Count > 0 do
-                        let u, expanded = stack.Pop()
-                        if expanded then order.Add u
+                    let mutable sp = 0
+                    // Encode (u, expanded) as u (unexpanded >= 0) and ~~~u (expanded < 0)
+                    postStack[sp] <- rootIdx
+                    sp <- sp + 1
+                    while sp > 0 do
+                        sp <- sp - 1
+                        let raw = postStack[sp]
+                        if raw < 0 then
+                            order.Add (~~~raw)
                         else
-                            stack.Push(u, true)
-                            let ch = childrenOf u
+                            let u = raw
+                            postStack[sp] <- ~~~u
+                            sp <- sp + 1
+                            let ch = childrenIdx[u]
                             for k = ch.Length - 1 downto 0 do
-                                depth[ch[k]] <- depth[u] + 1
-                                stack.Push(ch[k], false)
+                                postStack[sp] <- ch[k]
+                                sp <- sp + 1
 
-                    let span = Dictionary<int, float>()
-                    for u in order do
+                    for oi = 0 to order.Count - 1 do
+                        let u = order[oi]
                         let nd = eff.Nodes[u]
                         let ownExtent =
                             match config.Mode with
-                            | RadialMode.Concentric -> Double.Hypot(nd.Size.Width, nd.Size.Height) + config.NodeGap
+                            | RadialMode.Concentric -> sqrt (nd.Size.Width * nd.Size.Width + nd.Size.Height * nd.Size.Height) + config.NodeGap
                             | RadialMode.BidirectionalMindmap -> nd.Size.Height + config.NodeGap
-                        let ch = childrenOf u
-                        if ch.IsEmpty then
+                        let ch = childrenIdx[u]
+                        if ch.Length = 0 then
                             span[u] <- ownExtent
                         else
-                            let childSum = ch |> List.sumBy (fun c -> span[c])
+                            let mutable childSum = 0.
+                            for k = 0 to ch.Length - 1 do childSum <- childSum + span[ch[k]]
                             span[u] <- max ownExtent childSum
 
-                    let centers = Dictionary<int, Point>()
                     let cx0 = Bounds.x config.Bounds + Bounds.width config.Bounds * 0.5
                     let cy0 = Bounds.y config.Bounds + Bounds.height config.Bounds * 0.5
 
                     match config.Mode with
                     | RadialMode.Concentric ->
                         centers[rootIdx] <- Point.create cx0 cy0
-                        // Ensure ring radius at each depth d can accommodate total circumference sum at depth d
-                        let circByDepth = Dictionary<int, float>()
-                        for u in order do
-                            let d = depth[u]
+                        let mutable maxDepth = 0
+                        for oi = 0 to order.Count - 1 do
+                            let d = depthArr[order[oi]]
+                            if d > maxDepth then maxDepth <- d
+                        let circByDepth = Array.zeroCreate<float> (maxDepth + 1)
+                        for oi = 0 to order.Count - 1 do
+                            let u = order[oi]
+                            let d = depthArr[u]
                             if d > 0 then
                                 let nd = eff.Nodes[u]
-                                let w = Double.Hypot(nd.Size.Width, nd.Size.Height) + config.NodeGap
-                                circByDepth[d] <- (match circByDepth.TryGetValue d with true, prev -> prev | _ -> 0.) + w
-                        let maxDepth = order |> Seq.map (fun u -> depth[u]) |> Seq.max
+                                let w = sqrt (nd.Size.Width * nd.Size.Width + nd.Size.Height * nd.Size.Height) + config.NodeGap
+                                circByDepth[d] <- circByDepth[d] + w
                         let radiusAt = Array.zeroCreate<float> (maxDepth + 1)
+                        let invTwoPi = 1. / (2. * Math.PI)
                         for d = 1 to maxDepth do
-                            let minR =
-                                match circByDepth.TryGetValue d with
-                                | true, c -> c / (2. * Math.PI)
-                                | _ -> 0.
+                            let minR = circByDepth[d] * invTwoPi
                             radiusAt[d] <- max (radiusAt[d - 1] + config.LevelStep) minR
 
                         let rec assignWedge u a0 a1 =
-                            let ch = childrenOf u
-                            if not ch.IsEmpty then
-                                let total = ch |> List.sumBy (fun c -> span[c])
+                            let ch = childrenIdx[u]
+                            if ch.Length > 0 then
+                                let mutable total = 0.
+                                for k = 0 to ch.Length - 1 do total <- total + span[ch[k]]
                                 let mutable curA = a0
-                                for c in ch do
+                                for k = 0 to ch.Length - 1 do
+                                    let c = ch[k]
                                     let share = if total <= 1e-9 then (a1 - a0) / float ch.Length else (a1 - a0) * (span[c] / total)
                                     let midA = curA + share * 0.5
-                                    let r = radiusAt[depth[c]]
+                                    let r = radiusAt[depthArr[c]]
                                     centers[c] <- Point.create (cx0 + r * cos midA) (cy0 + r * sin midA)
                                     assignWedge c curA (curA + share)
                                     curA <- curA + share
@@ -138,13 +146,14 @@ module RadialTree =
 
                     | RadialMode.BidirectionalMindmap ->
                         centers[rootIdx] <- Point.create cx0 cy0
-                        let rootChildren = childrenOf rootIdx
+                        let rootChildren = childrenIdx[rootIdx]
                         // Balance root's direct subtrees across right (+1) and left (-1) sides by greedy partition
-                        let rightKids = ResizeArray<int>()
-                        let leftKids = ResizeArray<int>()
+                        let rightKids = ResizeArray<int>(rootChildren.Length)
+                        let leftKids = ResizeArray<int>(rootChildren.Length)
                         let mutable rightSpan = 0.
                         let mutable leftSpan = 0.
-                        for c in rootChildren do
+                        for k = 0 to rootChildren.Length - 1 do
+                            let c = rootChildren[k]
                             if rightSpan <= leftSpan then
                                 rightKids.Add c
                                 rightSpan <- rightSpan + span[c]
@@ -152,86 +161,63 @@ module RadialTree =
                                 leftKids.Add c
                                 leftSpan <- leftSpan + span[c]
 
-                        let rec placeBranch (dir: float) (parentX: float) (parentW: float) (kids: int list) (topY: float) =
+                        let rec placeBranch (dir: float) (parentX: float) (parentW: float) (kids: int[]) (topY: float) =
                             let mutable cursorY = topY
-                            for u in kids do
+                            for k = 0 to kids.Length - 1 do
+                                let u = kids[k]
                                 let s = span[u]
                                 let midY = cursorY + s * 0.5
                                 let nd = eff.Nodes[u]
                                 let cx = parentX + dir * (parentW * 0.5 + config.LevelStep + nd.Size.Width * 0.5)
                                 centers[u] <- Point.create cx midY
-                                let subKids = childrenOf u
-                                if not subKids.IsEmpty then
-                                    let childTotal = subKids |> List.sumBy (fun k -> span[k])
+                                let subKids = childrenIdx[u]
+                                if subKids.Length > 0 then
+                                    let mutable childTotal = 0.
+                                    for sk = 0 to subKids.Length - 1 do childTotal <- childTotal + span[subKids[sk]]
                                     placeBranch dir cx nd.Size.Width subKids (midY - childTotal * 0.5)
                                 cursorY <- cursorY + s
 
                         let rootW = eff.Nodes[rootIdx].Size.Width
                         if rightKids.Count > 0 then
-                            placeBranch 1. cx0 rootW (List.ofSeq rightKids) (cy0 - rightSpan * 0.5)
+                            placeBranch 1. cx0 rootW (rightKids.ToArray()) (cy0 - rightSpan * 0.5)
                         if leftKids.Count > 0 then
-                            placeBranch -1. cx0 rootW (List.ofSeq leftKids) (cy0 - leftSpan * 0.5)
+                            placeBranch -1. cx0 rootW (leftKids.ToArray()) (cy0 - leftSpan * 0.5)
 
-                    let treeSet = HashSet<int>(order)
-                    let subIndices = order |> Seq.sort |> Seq.toArray
+                    let subIndices =
+                        if order.Count = n then Array.init n id
+                        else
+                            let arr = order.ToArray()
+                            Array.Sort(arr)
+                            arr
                     let posNodes =
-                        subIndices
-                        |> Array.map (fun idx ->
+                        Array.init subIndices.Length (fun li ->
+                            let idx = subIndices[li]
                             let nd = eff.Nodes[idx]
-                            let c = nd.Pinned |> Option.defaultValue centers[idx]
+                            let c = match nd.Pinned with Some p -> p | None -> centers[idx]
                             let b = Bounds.create (c.X - nd.Size.Width * 0.5) (c.Y - nd.Size.Height * 0.5) nd.Size.Width nd.Size.Height
                             { Id = nd.Id
                               Kind = nd.Kind
                               Bounds = b
                               Center = c
                               ParentGroup = nd.ParentGroup
-                              Layer = Some depth[idx]
+                              Layer = Some depthArr[idx]
                               Ports = GraphKernels.resolveNodePorts nd b Map.empty })
 
-                    // Filter effective diagram to this component for routing & group bounds
-                    let subNodes = subIndices |> Array.map (fun i -> eff.Nodes[i])
-                    let subNodeIds = subNodes |> Array.map (fun n -> n.Id) |> Set.ofArray
-                    let subGroups =
-                        eff.Groups
-                        |> Array.indexed
-                        |> Array.choose (fun (gi, g) ->
-                            // Include group if any descendant node is in this component
-                            let hasMember = subNodes |> Array.exists (fun n ->
-                                let mutable cur = n.ParentGroup
-                                let mutable hit = false
-                                while cur.IsSome && not hit do
-                                    if cur.Value = g.Id then hit <- true
-                                    else
-                                        cur <- eff.Groups |> Array.tryFind (fun og -> og.Id = cur.Value) |> Option.bind (fun og -> og.ParentGroup)
-                                hit)
-                            if hasMember then Some(g, eff.GroupDepth[gi]) else None)
-                    let subAssocs =
-                        eff.Associations
-                        |> Array.filter (fun a -> subNodeIds.Contains a.Source.NodeId && subNodeIds.Contains a.Target.NodeId)
-                    let subMap = Dictionary<string, int>(StringComparer.Ordinal)
-                    for i = 0 to subNodes.Length - 1 do subMap.Add(subNodes[i].Id, i)
-                    let subEff =
-                        { Nodes = subNodes
-                          Groups = subGroups |> Array.map fst
-                          GroupDepth = subGroups |> Array.map snd
-                          Associations = subAssocs
-                          ReversedIdMap = subMap
-                          Constraints = [] }
+                    let subGroups = GraphKernels.filterSubGroups eff subIndices
+                    let subEff = GraphKernels.sliceComponentEff eff csr subIndices subGroups
 
-                    let nBounds = posNodes |> Array.map (fun pn -> pn.Bounds)
-                    let groups = GraphKernels.computeGroupBounds subEff nBounds
+                    let groups =
+                        if subEff.Groups.Length = 0 then []
+                        else GraphKernels.computeGroupBounds subEff (Array.init posNodes.Length (fun i -> posNodes[i].Bounds))
                     let routed = GraphKernels.routeDirectAssociations subEff posNodes None
-                    let nList = Array.toList posNodes
-                    let _ = treeSet
+                    let mutable nList = []
+                    for i = posNodes.Length - 1 downto 0 do nList <- posNodes[i] :: nList
                     { Bounds = GraphKernels.computeDiagramBounds config.Bounds nList groups routed
                       Nodes = nList
                       Groups = groups
                       Associations = routed }
 
-                let compLayouts =
-                    forest.Roots
-                    |> List.map (fun rid -> layoutSingleTree nodeMap[rid])
-                    |> List.toArray
+                let compLayouts = Array.init rootIndices.Length (fun r -> layoutSingleTree rootIndices[r])
                 Ok(BoxPack.packComponentLayouts config.Bounds (max 24. config.NodeGap) compLayouts)
 
     /// <summary>Runs radial or bidirectional mindmap layout without cancellation.</summary>

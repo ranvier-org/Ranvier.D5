@@ -181,11 +181,11 @@ module internal Kernels3D =
         Bounds3.create (center.X - sx * 0.5) (center.Y - sy * 0.5) (center.Z - sz * 0.5) sx sy sz
 
     let computeGroups3D (resolvedGraph: DiagramGraph) (nodeBoxes: Bounds3[]) : PositionedGroup3D list =
-        let groups = DiagramGraph.groups resolvedGraph |> List.toArray
-        let nodes = DiagramGraph.nodes resolvedGraph |> List.toArray
+        let groups = DiagramGraph.groupArray resolvedGraph
         let gCount = groups.Length
         if gCount = 0 then []
         else
+            let nodes = DiagramGraph.nodeArray resolvedGraph
             let gMap = Dictionary<string, int>(StringComparer.Ordinal)
             for gi = 0 to gCount - 1 do gMap.Add(groups[gi].Id, gi)
             let rec depthOf gi =
@@ -257,12 +257,30 @@ module internal Kernels3D =
         (assocs: RoutedAssociation3D list)
         : Bounds3 =
         let mutable hasAny = false
-        let mutable acc = Bounds3.create 0. 0. 0. 0. 0. 0.
-        let add b = acc <- if not hasAny then (hasAny <- true; b) else Bounds3.union acc b
-        for n in nodes do add n.Bounds
-        for g in groups do add g.Bounds
+        let mutable minX, minY, minZ = infinity, infinity, infinity
+        let mutable maxX, maxY, maxZ = -infinity, -infinity, -infinity
+        let inline addBox (b: Bounds3) =
+            let x0, y0, z0 = Bounds3.minX b, Bounds3.minY b, Bounds3.minZ b
+            let x1, y1, z1 = Bounds3.maxX b, Bounds3.maxY b, Bounds3.maxZ b
+            hasAny <- true
+            if x0 < minX then minX <- x0
+            if y0 < minY then minY <- y0
+            if z0 < minZ then minZ <- z0
+            if x1 > maxX then maxX <- x1
+            if y1 > maxY then maxY <- y1
+            if z1 > maxZ then maxZ <- z1
+        for n in nodes do addBox n.Bounds
+        for g in groups do addBox g.Bounds
         for a in assocs do
-            for i = 0 to a.Points.Length - 1 do
-                let p = a.Points[i]
-                add (Bounds3.create p.X p.Y p.Z 0. 0. 0.)
-        if hasAny then acc else fallback
+            let pts = a.Points
+            for i = 0 to pts.Length - 1 do
+                let p = pts[i]
+                hasAny <- true
+                if p.X < minX then minX <- p.X
+                if p.Y < minY then minY <- p.Y
+                if p.Z < minZ then minZ <- p.Z
+                if p.X > maxX then maxX <- p.X
+                if p.Y > maxY then maxY <- p.Y
+                if p.Z > maxZ then maxZ <- p.Z
+        if hasAny then Bounds3.create minX minY minZ (maxX - minX) (maxY - minY) (maxZ - minZ)
+        else fallback

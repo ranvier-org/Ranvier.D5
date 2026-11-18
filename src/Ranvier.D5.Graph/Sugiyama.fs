@@ -168,91 +168,83 @@ module Sugiyama =
 
     /// <summary>Forster-style hierarchical group-contiguous ordering within a single layer.</summary>
     let private sortLayerRespectingGroups
+        (hasGroups: bool)
         (layerNodes: int[])
         (bary: float[])
         (nodeGroupChain: string list[])
         : int[] =
         if layerNodes.Length <= 1 then Array.copy layerNodes
+        elif not hasGroups then
+            let n = layerNodes.Length
+            let out = Array.copy layerNodes
+            // Stable insertion sort on small layers, index-tie-broken sort on larger layers
+            if n <= 32 then
+                for i = 1 to n - 1 do
+                    let kv = out[i]
+                    let kb = bary[kv]
+                    let mutable j = i - 1
+                    while j >= 0 && bary[out[j]] > kb do
+                        out[j + 1] <- out[j]
+                        j <- j - 1
+                    out[j + 1] <- kv
+                out
+            else
+                let keys = Array.init n (fun i -> bary[out[i]])
+                let orig = Array.init n id
+                Array.Sort(orig, Comparer<int>.Create(fun a b ->
+                    let c = compare keys[a] keys[b]
+                    if c <> 0 then c else compare a b))
+                Array.init n (fun i -> layerNodes[orig[i]])
         else
             let rec orderSlice (depth: int) (items: int[]) : int[] =
                 if items.Length <= 1 then items
                 else
                     // Partition into buckets by group ID at `depth` (None = ungrouped leaf item at this level)
                     let groupBuckets = Dictionary<string, ResizeArray<int>>(StringComparer.Ordinal)
-                    let entries = ResizeArray<Choice<int, string>>()
-                    for v in items do
+                    let entries = ResizeArray<Choice<int, string>>(items.Length)
+                    for k = 0 to items.Length - 1 do
+                        let v = items[k]
                         let chain = nodeGroupChain[v]
                         if depth >= chain.Length then
                             entries.Add(Choice1Of2 v)
                         else
                             let gid = chain[depth]
-                            if not (groupBuckets.ContainsKey gid) then
-                                groupBuckets.Add(gid, ResizeArray<int>())
+                            match groupBuckets.TryGetValue gid with
+                            | true, b -> b.Add v
+                            | _ ->
+                                let b = ResizeArray<int>()
+                                b.Add v
+                                groupBuckets.Add(gid, b)
                                 entries.Add(Choice2Of2 gid)
-                            groupBuckets[gid].Add v
 
-                    let scored =
-                        entries.ToArray()
-                        |> Array.mapi (fun origPos entry ->
-                            match entry with
-                            | Choice1Of2 v -> bary[v], origPos, [| v |]
-                            | Choice2Of2 gid ->
-                                let sub = groupBuckets[gid].ToArray()
-                                let sortedSub = orderSlice (depth + 1) sub
-                                let meanB = (sortedSub |> Array.sumBy (fun v -> bary[v])) / float sortedSub.Length
-                                meanB, origPos, sortedSub)
+                    let eCount = entries.Count
+                    let scored = Array.zeroCreate<struct(float * int * int[])> eCount
+                    for origPos = 0 to eCount - 1 do
+                        match entries[origPos] with
+                        | Choice1Of2 v -> scored[origPos] <- struct(bary[v], origPos, [| v |])
+                        | Choice2Of2 gid ->
+                            let sub = groupBuckets[gid].ToArray()
+                            let sortedSub = orderSlice (depth + 1) sub
+                            let mutable s = 0.
+                            for k = 0 to sortedSub.Length - 1 do s <- s + bary[sortedSub[k]]
+                            scored[origPos] <- struct(s / float sortedSub.Length, origPos, sortedSub)
 
-                    Array.Sort(scored, Comparer<float * int * int[]>.Create(fun (ba, pa, _) (bb, pb, _) ->
+                    Array.Sort(scored, Comparer<struct(float * int * int[])>.Create(fun x y ->
+                        let struct(ba, pa, _) = x
+                        let struct(bb, pb, _) = y
                         let c = compare ba bb
                         if c <> 0 then c else compare pa pb))
 
-                    let out = ResizeArray<int>(items.Length)
-                    for (_, _, arr) in scored do
-                        for v in arr do out.Add v
-                    out.ToArray()
+                    let out = Array.zeroCreate<int> items.Length
+                    let mutable w = 0
+                    for k = 0 to eCount - 1 do
+                        let struct(_, _, arr) = scored[k]
+                        for j = 0 to arr.Length - 1 do
+                            out[w] <- arr[j]
+                            w <- w + 1
+                    out
 
             orderSlice 0 layerNodes
-
-    /// <summary>Counts crossings between two adjacent ordered layers via Fenwick binary indexed tree in O(|E| log |L|).</summary>
-    let private countBipartiteCrossings (upper: int[]) (lower: int[]) (posInLower: int[]) (downNeighbors: ResizeArray<int>[]) : int =
-        if upper.Length <= 1 || lower.Length <= 1 then 0
-        else
-            let pairs = ResizeArray<struct(int * int)>()
-            for ui = 0 to upper.Length - 1 do
-                let u = upper[ui]
-                for v in downNeighbors[u] do
-                    let lj = posInLower[v]
-                    if lj >= 0 then pairs.Add(struct(ui, lj))
-            if pairs.Count <= 1 then 0
-            else
-                let arr = pairs.ToArray()
-                Array.Sort(arr, Comparer<struct(int * int)>.Create(fun a b ->
-                    let struct(ua, la) = a
-                    let struct(ub, lb) = b
-                    let c = compare ua ub
-                    if c <> 0 then c else compare la lb))
-                let size = lower.Length + 2
-                let bit = Array.zeroCreate<int> size
-                let add idx =
-                    let mutable i = idx + 1
-                    while i < size do
-                        bit[i] <- bit[i] + 1
-                        i <- i + (i &&& -i)
-                let sum idx =
-                    let mutable s = 0
-                    let mutable i = idx + 1
-                    while i > 0 do
-                        s <- s + bit[i]
-                        i <- i - (i &&& -i)
-                    s
-                let mutable crossings = 0
-                let mutable seen = 0
-                for p in arr do
-                    let struct(_, lj) = p
-                    crossings <- crossings + (seen - sum lj)
-                    add lj
-                    seen <- seen + 1
-                crossings
 
     /// <summary>Brandes &amp; Köpf (2001) 4-pass O(V + E) horizontal coordinate assignment for heterogeneous node widths and group borders.</summary>
     let private brandesKoepfCoordinates
@@ -678,56 +670,79 @@ module Sugiyama =
                         downAdj[u].Add(struct(v, pOff))
                         downPlain[u].Add v
 
-                    // Phase 4: Crossing minimization (Port-aware Barycenter/Median + Forster group contiguity + Transpose polish)
+                    // Phase 4: Crossing minimization (Port-aware Barycenter/Median + Forster group contiguity + O(deg_a * deg_b) Transpose polish)
+                    let hasGroups = eff.Groups.Length > 0
                     let pos = Array.create totalV -1
                     let refreshLayerPos li =
                         let row = layers[li]
                         for k = 0 to row.Length - 1 do pos[row[k]] <- k
+                    let initBary = Array.init totalV float
                     for li = 0 to numLayers - 1 do
-                        layers[li] <- sortLayerRespectingGroups layers[li] (Array.init totalV float) vGroupChains
+                        layers[li] <- sortLayerRespectingGroups hasGroups layers[li] initBary vGroupChains
                         refreshLayerPos li
 
                     let bary = Array.zeroCreate<float> totalV
+                    let mutable valsBuf = Array.zeroCreate<float> 16
+                    let inline computeBaryMed (len: int) =
+                        if len = 1 then valsBuf[0]
+                        elif len = 2 then 0.5 * (valsBuf[0] + valsBuf[1])
+                        else
+                            // Sort valsBuf[0 .. len - 1] in-place via insertion sort for small degrees
+                            if len <= 24 then
+                                for a = 1 to len - 1 do
+                                    let kv = valsBuf[a]
+                                    let mutable b = a - 1
+                                    while b >= 0 && valsBuf[b] > kv do
+                                        valsBuf[b + 1] <- valsBuf[b]
+                                        b <- b - 1
+                                    valsBuf[b + 1] <- kv
+                            else
+                                Array.Sort(valsBuf, 0, len)
+                            let mutable s = 0.
+                            for k = 0 to len - 1 do s <- s + valsBuf[k]
+                            let mean = s / float len
+                            let mid = len >>> 1
+                            let med = if (len &&& 1) = 1 then valsBuf[mid] else 0.5 * (valsBuf[mid - 1] + valsBuf[mid])
+                            0.5 * mean + 0.5 * med
+
                     for sweep = 0 to config.CrossingSweeps - 1 do
                         token.ThrowIfCancellationRequested()
                         if sweep % 2 = 0 then
                             for li = 1 to numLayers - 1 do
-                                for v in layers[li] do
+                                let row = layers[li]
+                                for ri = 0 to row.Length - 1 do
+                                    let v = row[ri]
                                     let preds = upAdj[v]
-                                    if preds.Count = 0 then
+                                    let pc = preds.Count
+                                    if pc = 0 then
                                         bary[v] <- float pos[v]
                                     else
-                                        let vals = Array.init preds.Count (fun k ->
+                                        if valsBuf.Length < pc then valsBuf <- Array.zeroCreate<float> (max pc (valsBuf.Length * 2))
+                                        for k = 0 to pc - 1 do
                                             let struct(u, off) = preds[k]
-                                            float pos[u] + off)
-                                        Array.Sort(vals)
-                                        let mean = (vals |> Array.sum) / float vals.Length
-                                        let med =
-                                            let mid = vals.Length / 2
-                                            if vals.Length % 2 = 1 then vals[mid] else 0.5 * (vals[mid - 1] + vals[mid])
-                                        bary[v] <- 0.5 * mean + 0.5 * med
-                                layers[li] <- sortLayerRespectingGroups layers[li] bary vGroupChains
+                                            valsBuf[k] <- float pos[u] + off
+                                        bary[v] <- computeBaryMed pc
+                                layers[li] <- sortLayerRespectingGroups hasGroups row bary vGroupChains
                                 refreshLayerPos li
                         else
                             for li = numLayers - 2 downto 0 do
-                                for u in layers[li] do
+                                let row = layers[li]
+                                for ri = 0 to row.Length - 1 do
+                                    let u = row[ri]
                                     let succs = downAdj[u]
-                                    if succs.Count = 0 then
+                                    let sc = succs.Count
+                                    if sc = 0 then
                                         bary[u] <- float pos[u]
                                     else
-                                        let vals = Array.init succs.Count (fun k ->
+                                        if valsBuf.Length < sc then valsBuf <- Array.zeroCreate<float> (max sc (valsBuf.Length * 2))
+                                        for k = 0 to sc - 1 do
                                             let struct(v, off) = succs[k]
-                                            float pos[v] - off)
-                                        Array.Sort(vals)
-                                        let mean = (vals |> Array.sum) / float vals.Length
-                                        let med =
-                                            let mid = vals.Length / 2
-                                            if vals.Length % 2 = 1 then vals[mid] else 0.5 * (vals[mid - 1] + vals[mid])
-                                        bary[u] <- 0.5 * mean + 0.5 * med
-                                layers[li] <- sortLayerRespectingGroups layers[li] bary vGroupChains
+                                            valsBuf[k] <- float pos[v] - off
+                                        bary[u] <- computeBaryMed sc
+                                layers[li] <- sortLayerRespectingGroups hasGroups row bary vGroupChains
                                 refreshLayerPos li
 
-                        // Local adjacent-swap crossing reduction within identical compound group siblings
+                        // Local adjacent-swap crossing reduction via exact O(deg(a) * deg(b)) incident inversion delta (Rocq: sugiyama_adjacent_swap_crossing_delta)
                         if numLayers >= 2 && totalV <= 600 then
                             for li = 0 to numLayers - 1 do
                                 let row = layers[li]
@@ -735,22 +750,33 @@ module Sugiyama =
                                     for k = 0 to row.Length - 2 do
                                         let a, b = row[k], row[k + 1]
                                         if vParentGroup[a] = vParentGroup[b] then
-                                            let before =
-                                                (if li > 0 then countBipartiteCrossings layers[li - 1] row pos downPlain else 0)
-                                                + (if li < numLayers - 1 then countBipartiteCrossings row layers[li + 1] pos downPlain else 0)
-                                            if before > 0 then
+                                            let mutable crossBefore = 0
+                                            let mutable crossAfter = 0
+                                            if li > 0 then
+                                                let uaList = upAdj[a]
+                                                let ubList = upAdj[b]
+                                                for ia = 0 to uaList.Count - 1 do
+                                                    let struct(ua, _) = uaList[ia]
+                                                    let pua = pos[ua]
+                                                    for ib = 0 to ubList.Count - 1 do
+                                                        let struct(ub, _) = ubList[ib]
+                                                        let pub = pos[ub]
+                                                        if pua > pub then crossBefore <- crossBefore + 1
+                                                        elif pua < pub then crossAfter <- crossAfter + 1
+                                            if li < numLayers - 1 then
+                                                let daList = downPlain[a]
+                                                let dbList = downPlain[b]
+                                                for ia = 0 to daList.Count - 1 do
+                                                    let pva = pos[daList[ia]]
+                                                    for ib = 0 to dbList.Count - 1 do
+                                                        let pvb = pos[dbList[ib]]
+                                                        if pva > pvb then crossBefore <- crossBefore + 1
+                                                        elif pva < pvb then crossAfter <- crossAfter + 1
+                                            if crossAfter < crossBefore then
                                                 row[k] <- b
                                                 row[k + 1] <- a
                                                 pos[b] <- k
                                                 pos[a] <- k + 1
-                                                let after =
-                                                    (if li > 0 then countBipartiteCrossings layers[li - 1] row pos downPlain else 0)
-                                                    + (if li < numLayers - 1 then countBipartiteCrossings row layers[li + 1] pos downPlain else 0)
-                                                if after > before then
-                                                    row[k] <- a
-                                                    row[k + 1] <- b
-                                                    pos[a] <- k
-                                                    pos[b] <- k + 1
 
                     let upPlain = Array.init totalV (fun v -> upAdj[v] |> Seq.map (fun (struct(u, _)) -> u) |> Seq.distinct |> Seq.toArray)
                     let dnPlain = Array.init totalV (fun v -> downAdj[v] |> Seq.map (fun (struct(w, _)) -> w) |> Seq.distinct |> Seq.toArray)
@@ -793,29 +819,20 @@ module Sugiyama =
                     for li = 0 to numLayers - 1 do
                         for v in layers[li] do vLayerOf[v] <- li
 
-                    let subNodes = members |> Array.map (fun gi -> eff.Nodes[gi])
-                    let subNodeIds = subNodes |> Array.map (fun n -> n.Id) |> Set.ofArray
-                    let subGroups =
-                        eff.Groups
-                        |> Array.indexed
-                        |> Array.choose (fun (gi, g) ->
-                            let hasMember = subNodes |> Array.exists (fun n ->
-                                let mutable cur = n.ParentGroup
-                                let mutable hit = false
-                                while cur.IsSome && not hit do
-                                    if cur.Value = g.Id then hit <- true
-                                    else
-                                        cur <- eff.Groups |> Array.tryFind (fun og -> og.Id = cur.Value) |> Option.bind (fun og -> og.ParentGroup)
-                                hit)
-                            if hasMember then Some(g, eff.GroupDepth[gi]) else None)
-                    let subAssocs = subEdgeIndices |> Seq.map (fun e -> eff.Associations[e]) |> Seq.toArray
-                    let subRevFlags = subEdgeIndices |> Seq.map (fun e -> reversedGlobal[e]) |> Seq.toArray
-                    let subMap = Dictionary<string, int>(StringComparer.Ordinal)
-                    for li = 0 to subN - 1 do subMap.Add(subNodes[li].Id, li)
+                    let subNodes = if subN = eff.Nodes.Length then eff.Nodes else Array.init subN (fun li -> eff.Nodes[members[li]])
+                    let subGroups = GraphKernels.filterSubGroups eff members
+                    let subAssocs = Array.init subEdgeIndices.Count (fun i -> eff.Associations[subEdgeIndices[i]])
+                    let subRevFlags = Array.init subEdgeIndices.Count (fun i -> reversedGlobal[subEdgeIndices[i]])
+                    let subMap =
+                        if subN = eff.Nodes.Length then eff.ReversedIdMap
+                        else
+                            let m = Dictionary<string, int>(StringComparer.Ordinal)
+                            for li = 0 to subN - 1 do m.Add(subNodes[li].Id, li)
+                            m
                     let subEff =
                         { Nodes = subNodes
-                          Groups = subGroups |> Array.map fst
-                          GroupDepth = subGroups |> Array.map snd
+                          Groups = Array.init subGroups.Length (fun gi -> fst subGroups[gi])
+                          GroupDepth = Array.init subGroups.Length (fun gi -> snd subGroups[gi])
                           Associations = subAssocs
                           ReversedIdMap = subMap
                           Constraints = [] }

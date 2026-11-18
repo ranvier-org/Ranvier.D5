@@ -366,3 +366,120 @@ module HyperbolicTransform =
                 dx[idx] <- p.X; dy[idx] <- p.Y; dz[idx] <- p.Z; dw[idx] <- p.W
                 idx <- idx + 1
 #endif
+
+    /// <summary>Fused 3-tier SIMD Lorentz boost + Beltrami-Klein unit-ball projection + world-radius scaling directly into destination arrays (Rocq: minkowski_sheet_ball_and_klein_chord_identities).</summary>
+    let internal projectKleinWorldSoA
+        (m: HyperbolicTransform)
+        (bRad: float)
+        (sx: float[]) (sy: float[]) (sz: float[]) (sw: float[])
+        (wx: float[]) (wy: float[]) (wz: float[]) (atten: float[])
+        (count: int)
+        : unit =
+#if FABLE_COMPILER
+        for i = 0 to count - 1 do
+            let x, y, z, w = sx[i], sy[i], sz[i], sw[i]
+            let nx = m.M00 * x + m.M01 * y + m.M02 * z + m.M03 * w
+            let ny = m.M10 * x + m.M11 * y + m.M12 * z + m.M13 * w
+            let nz = m.M20 * x + m.M21 * y + m.M22 * z + m.M23 * w
+            let nw = max 1. (sqrt (1. + nx * nx + ny * ny + nz * nz))
+            let invW = 1. / nw
+            let s = invW * bRad
+            wx[i] <- nx * s; wy[i] <- ny * s; wz[i] <- nz * s; atten[i] <- invW
+#else
+        if count > 0 then
+            let rsx = &MemoryMarshal.GetArrayDataReference(sx)
+            let rsy = &MemoryMarshal.GetArrayDataReference(sy)
+            let rsz = &MemoryMarshal.GetArrayDataReference(sz)
+            let rsw = &MemoryMarshal.GetArrayDataReference(sw)
+            let rwx = &MemoryMarshal.GetArrayDataReference(wx)
+            let rwy = &MemoryMarshal.GetArrayDataReference(wy)
+            let rwz = &MemoryMarshal.GetArrayDataReference(wz)
+            let rat = &MemoryMarshal.GetArrayDataReference(atten)
+            let mutable i = 0u
+            let ulen = uint32 count
+
+            if Vector512.IsHardwareAccelerated && Vector512<float>.IsSupported then
+                let step = uint32 Vector512<float>.Count
+                let m00, m01, m02, m03 = Vector512.Create m.M00, Vector512.Create m.M01, Vector512.Create m.M02, Vector512.Create m.M03
+                let m10, m11, m12, m13 = Vector512.Create m.M10, Vector512.Create m.M11, Vector512.Create m.M12, Vector512.Create m.M13
+                let m20, m21, m22, m23 = Vector512.Create m.M20, Vector512.Create m.M21, Vector512.Create m.M22, Vector512.Create m.M23
+                let one = Vector512.Create 1.
+                let vbRad = Vector512.Create bRad
+                while i + step <= ulen do
+                    let off = unativeint i
+                    let vx = Vector512.LoadUnsafe(&rsx, off)
+                    let vy = Vector512.LoadUnsafe(&rsy, off)
+                    let vz = Vector512.LoadUnsafe(&rsz, off)
+                    let vw = Vector512.LoadUnsafe(&rsw, off)
+                    let nx = m00 * vx + m01 * vy + m02 * vz + m03 * vw
+                    let ny = m10 * vx + m11 * vy + m12 * vz + m13 * vw
+                    let nz = m20 * vx + m21 * vy + m22 * vz + m23 * vw
+                    let nw = Vector512.Max(one, Vector512.Sqrt(one + nx * nx + ny * ny + nz * nz))
+                    let invW = one / nw
+                    let scale = invW * vbRad
+                    (nx * scale).StoreUnsafe(&rwx, off)
+                    (ny * scale).StoreUnsafe(&rwy, off)
+                    (nz * scale).StoreUnsafe(&rwz, off)
+                    invW.StoreUnsafe(&rat, off)
+                    i <- i + step
+            elif Vector256.IsHardwareAccelerated && Vector256<float>.IsSupported then
+                let step = uint32 Vector256<float>.Count
+                let m00, m01, m02, m03 = Vector256.Create m.M00, Vector256.Create m.M01, Vector256.Create m.M02, Vector256.Create m.M03
+                let m10, m11, m12, m13 = Vector256.Create m.M10, Vector256.Create m.M11, Vector256.Create m.M12, Vector256.Create m.M13
+                let m20, m21, m22, m23 = Vector256.Create m.M20, Vector256.Create m.M21, Vector256.Create m.M22, Vector256.Create m.M23
+                let one = Vector256.Create 1.
+                let vbRad = Vector256.Create bRad
+                while i + step <= ulen do
+                    let off = unativeint i
+                    let vx = Vector256.LoadUnsafe(&rsx, off)
+                    let vy = Vector256.LoadUnsafe(&rsy, off)
+                    let vz = Vector256.LoadUnsafe(&rsz, off)
+                    let vw = Vector256.LoadUnsafe(&rsw, off)
+                    let nx = m00 * vx + m01 * vy + m02 * vz + m03 * vw
+                    let ny = m10 * vx + m11 * vy + m12 * vz + m13 * vw
+                    let nz = m20 * vx + m21 * vy + m22 * vz + m23 * vw
+                    let nw = Vector256.Max(one, Vector256.Sqrt(one + nx * nx + ny * ny + nz * nz))
+                    let invW = one / nw
+                    let scale = invW * vbRad
+                    (nx * scale).StoreUnsafe(&rwx, off)
+                    (ny * scale).StoreUnsafe(&rwy, off)
+                    (nz * scale).StoreUnsafe(&rwz, off)
+                    invW.StoreUnsafe(&rat, off)
+                    i <- i + step
+            elif Vector128.IsHardwareAccelerated && Vector128<float>.IsSupported then
+                let step = uint32 Vector128<float>.Count
+                let m00, m01, m02, m03 = Vector128.Create m.M00, Vector128.Create m.M01, Vector128.Create m.M02, Vector128.Create m.M03
+                let m10, m11, m12, m13 = Vector128.Create m.M10, Vector128.Create m.M11, Vector128.Create m.M12, Vector128.Create m.M13
+                let m20, m21, m22, m23 = Vector128.Create m.M20, Vector128.Create m.M21, Vector128.Create m.M22, Vector128.Create m.M23
+                let one = Vector128.Create 1.
+                let vbRad = Vector128.Create bRad
+                while i + step <= ulen do
+                    let off = unativeint i
+                    let vx = Vector128.LoadUnsafe(&rsx, off)
+                    let vy = Vector128.LoadUnsafe(&rsy, off)
+                    let vz = Vector128.LoadUnsafe(&rsz, off)
+                    let vw = Vector128.LoadUnsafe(&rsw, off)
+                    let nx = m00 * vx + m01 * vy + m02 * vz + m03 * vw
+                    let ny = m10 * vx + m11 * vy + m12 * vz + m13 * vw
+                    let nz = m20 * vx + m21 * vy + m22 * vz + m23 * vw
+                    let nw = Vector128.Max(one, Vector128.Sqrt(one + nx * nx + ny * ny + nz * nz))
+                    let invW = one / nw
+                    let scale = invW * vbRad
+                    (nx * scale).StoreUnsafe(&rwx, off)
+                    (ny * scale).StoreUnsafe(&rwy, off)
+                    (nz * scale).StoreUnsafe(&rwz, off)
+                    invW.StoreUnsafe(&rat, off)
+                    i <- i + step
+
+            let mutable idx = int i
+            while idx < count do
+                let x, y, z, w = sx[idx], sy[idx], sz[idx], sw[idx]
+                let nx = m.M00 * x + m.M01 * y + m.M02 * z + m.M03 * w
+                let ny = m.M10 * x + m.M11 * y + m.M12 * z + m.M13 * w
+                let nz = m.M20 * x + m.M21 * y + m.M22 * z + m.M23 * w
+                let p = Hyperbolic3D.ofSpacelike nx ny nz
+                let invW = 1. / max 1. p.W
+                let s = invW * bRad
+                wx[idx] <- p.X * s; wy[idx] <- p.Y * s; wz[idx] <- p.Z * s; atten[idx] <- invW
+                idx <- idx + 1
+#endif

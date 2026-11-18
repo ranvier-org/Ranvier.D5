@@ -728,3 +728,79 @@ Proof.
   destruct (Hbwd diags rxs rys axn ayn Hlen) as [B1 B2].
   split; [exact F1 | split; [exact F2 | split; [exact B1 | exact B2]]].
 Qed.
+
+(** ** 7. Batch D6 refinements: SIMD `PivotMDS` double-centering and single-pass bounding-box extrema fold *)
+
+Fixpoint double_center_scalar (offset : Z) (r rm : list Z) : list Z :=
+  match r, rm with
+  | x :: xr, m :: mr => (x - m + offset) :: double_center_scalar offset xr mr
+  | _, _ => []
+  end.
+
+Fixpoint simd_double_center (fuel width : nat) (offset : Z) (r rm : list Z) : list Z :=
+  match fuel with
+  | 0%nat => double_center_scalar offset r rm
+  | S f =>
+    if Nat.ltb (length r) width || Nat.eqb width 0%nat then double_center_scalar offset r rm
+    else
+      double_center_scalar offset (firstn width r) (firstn width rm) ++
+      simd_double_center f width offset (skipn width r) (skipn width rm)
+  end.
+
+Lemma double_center_scalar_app (offset : Z) (r1 r2 m1 m2 : list Z) :
+  length r1 = length m1 ->
+  double_center_scalar offset (r1 ++ r2) (m1 ++ m2) =
+  double_center_scalar offset r1 m1 ++ double_center_scalar offset r2 m2.
+Proof.
+  revert m1.
+  induction r1 as [|x xr IH]; intros [|m mr] Hlen; simpl in *; try discriminate; [reflexivity |].
+  f_equal. apply IH. lia.
+Qed.
+
+(**md
+**SIMD `W`-lane `PivotMDS` row double-centering plus scalar remainder equals elementwise `double_center_scalar`.**
+
+Vectorizing `r[i] - rowMean[i] + (grandMean - colMean[p])` across `Vector512`/`Vector256`/`Vector128` chunks followed by the scalar remainder yields the exact double-centered landmark distance row in `GraphKernels.pivotMdsComponent`.
+
+- [fuel:] maximum number of SIMD vector iterations.
+- [width:] SIMD lane count (`2`, `4`, or `8`).
+- [offset:] precomputed scalar row offset `grandMean - colMean[p]`.
+- [r:] squared landmark distance row of length `subN`.
+- [rm:] per-column mean vector of length `subN`.
+*)
+Theorem simd_double_centering_row_eq_scalar
+    (fuel width : nat) (offset : Z) (r rm : list Z) :
+  length r = length rm ->
+  simd_double_center fuel width offset r rm = double_center_scalar offset r rm.
+Proof.
+  revert r rm.
+  induction fuel as [|f IH]; intros r rm Hlen; simpl; [reflexivity |].
+  destruct (Nat.ltb (length r) width || Nat.eqb width 0%nat) eqn:Hstop; [reflexivity |].
+  apply orb_false_iff in Hstop as [Hge Hpos].
+  apply Nat.ltb_ge in Hge.
+  rewrite IH; [| rewrite !length_skipn; lia].
+  rewrite <- double_center_scalar_app; [| rewrite !length_firstn; lia].
+  rewrite !firstn_skipn. reflexivity.
+Qed.
+
+Definition interval_union (a b : Z * Z) : Z * Z :=
+  (Z.min (fst a) (fst b), Z.max (snd a) (snd b)).
+
+(**md
+**Single-pass running `(min, max)` scalar accumulation equals repeated `Bounds.union` / `Bounds3.union` folding.**
+
+Tracking scalar coordinate extrema in registers across nodes, groups, and association waypoints constructs the exact same enclosing bounding interval as allocating and unioning intermediate `Bounds` / `Bounds3` records at every element (`GraphKernels.computeDiagramBounds`, `Kernels3D.computeBounds3D`).
+
+- [b0:] initial `(min_coord, max_coord)` interval.
+- [rest:] remaining `(min_coord, max_coord)` intervals.
+*)
+Theorem running_extrema_union_eq_box_fold (b0 : Z * Z) (rest : list (Z * Z)) :
+  fold_left interval_union rest b0 =
+  (fold_left Z.min (List.map fst rest) (fst b0),
+   fold_left Z.max (List.map snd rest) (snd b0)).
+Proof.
+  revert b0.
+  induction rest as [|[lo hi] tl IH]; intros [lo0 hi0]; simpl; [reflexivity |].
+  unfold interval_union at 2; simpl.
+  apply IH.
+Qed.

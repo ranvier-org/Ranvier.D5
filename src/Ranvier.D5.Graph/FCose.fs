@@ -130,36 +130,21 @@ module FCose =
                     let edgesArr = compEdges.ToArray()
 
                     // Group membership lists for compound gravity & sibling-group separation
-                    let subGroupsWithDepth =
-                        eff.Groups
-                        |> Array.indexed
-                        |> Array.choose (fun (gi, g) ->
-                            let hasMember = members |> Array.exists (fun mi ->
-                                let mutable cur = eff.Nodes[mi].ParentGroup
-                                let mutable hit = false
-                                while cur.IsSome && not hit do
-                                    if cur.Value = g.Id then hit <- true
-                                    else
-                                        cur <- eff.Groups |> Array.tryFind (fun og -> og.Id = cur.Value) |> Option.bind (fun og -> og.ParentGroup)
-                                hit)
-                            if hasMember then Some(g, eff.GroupDepth[gi]) else None)
-
+                    let subGroupsWithDepth = GraphKernels.filterSubGroups eff members
+                    let groupMembers = GraphKernels.subGroupMemberLists eff members subGroupsWithDepth
                     let gCount = subGroupsWithDepth.Length
-                    let groupMembers = Array.init gCount (fun gi ->
-                        let gid = (fst subGroupsWithDepth[gi]).Id
-                        [| for li = 0 to subN - 1 do
-                            let mutable cur = eff.Nodes[members[li]].ParentGroup
-                            let mutable inside = false
-                            while cur.IsSome && not inside do
-                                if cur.Value = gid then inside <- true
-                                else
-                                    cur <- eff.Groups |> Array.tryFind (fun og -> og.Id = cur.Value) |> Option.bind (fun og -> og.ParentGroup)
-                            if inside then yield li |])
 
                     // Phase 2: Iterative CoSE compound polish
                     let fx = Array.zeroCreate<float> subN
                     let fy = Array.zeroCreate<float> subN
-                    let pts = Array.zeroCreate<Point> subN
+                    let bhWs = if config.Repulsion > 0. && subN > 32 && config.Theta > 0. then BhQuadtree2D.create subN else Unchecked.defaultof<_>
+                    let gCx = if gCount > 0 then Array.zeroCreate<float> gCount else [||]
+                    let gCy = if gCount > 0 then Array.zeroCreate<float> gCount else [||]
+                    let gMinX = if gCount > 0 then Array.zeroCreate<float> gCount else [||]
+                    let gMaxX = if gCount > 0 then Array.zeroCreate<float> gCount else [||]
+                    let gMinY = if gCount > 0 then Array.zeroCreate<float> gCount else [||]
+                    let gMaxY = if gCount > 0 then Array.zeroCreate<float> gCount else [||]
+                    let thetaSq = config.Theta * config.Theta
                     let mutable rng = RandomState.create (config.Seed + uint64 compIdx * 104729UL)
 
                     for iter = 0 to config.Iterations - 1 do
@@ -169,14 +154,14 @@ module FCose =
                         Array.fill fx 0 subN 0.
                         Array.fill fy 0 subN 0.
 
-                        // 1. Repulsion via Quadtree Barnes-Hut (or exact for tiny components)
+                        // 1. Repulsion via zero-alloc arena Quadtree Barnes-Hut (or exact for tiny components)
                         if config.Repulsion > 0. && subN > 1 then
                             if subN <= 32 || config.Theta = 0. then
                                 for i = 0 to subN - 1 do
                                     for j = i + 1 to subN - 1 do
                                         let dx = xs[i] - xs[j]
                                         let dy = ys[i] - ys[j]
-                                        let dist = Double.Hypot(dx, dy)
+                                        let dist = sqrt (dx * dx + dy * dy)
                                         let ux, uy, effD =
                                             if dist < 1e-4 then
                                                 let struct(r, nextRng) = RandomState.nextFloat rng
@@ -191,57 +176,71 @@ module FCose =
                                         fx[j] <- fx[j] - ux * rep
                                         fy[j] <- fy[j] - uy * rep
                             else
-                                for i = 0 to subN - 1 do pts[i] <- Point.create xs[i] ys[i]
-                                let qtree = Quadtree.buildWithCancellation token (fun i -> pts[i]) (fun i -> masses[i]) (seq { 0 .. subN - 1 })
+                                BhQuadtree2D.rebuildInPlace bhWs token xs ys masses subN
+                                let qNodes = bhWs.Nodes
+                                let perm = bhWs.Perm
+                                let stack = bhWs.Stack
                                 for i = 0 to subN - 1 do
-                                    let pi = pts[i]
-                                    Quadtree.visit (fun cell ->
-                                        let dx = pi.X - cell.Center.X
-                                        let dy = pi.Y - cell.Center.Y
-                                        let dist = Double.Hypot(dx, dy)
-                                        let e = cell.Extent
-                                        let cellSize = max (e.Max.X - e.Min.X) (e.Max.Y - e.Min.Y)
-                                        let contains = pi.X >= e.Min.X && pi.X <= e.Max.X && pi.Y >= e.Min.Y && pi.Y <= e.Max.Y
-                                        if not contains && dist > 1e-4 && cellSize < config.Theta * dist then
-                                            let effD = max 1. (dist - radii[i] * 0.5)
-                                            let rep = config.Repulsion * masses[i] * cell.Mass / (effD * effD)
-                                            fx[i] <- fx[i] + (dx / dist) * rep
-                                            fy[i] <- fy[i] + (dy / dist) * rep
-                                            false
-                                        elif not cell.Items.IsEmpty then
-                                            for item in cell.Items do
-                                                let j = item.Value
+                                    let pix, piy = xs[i], ys[i]
+                                    let mi = masses[i]
+                                    let ri = radii[i]
+                                    let mutable accX, accY = 0., 0.
+                                    stack[0] <- 0
+                                    let mutable sp = 1
+                                    while sp > 0 do
+                                        sp <- sp - 1
+                                        let nd = qNodes[stack[sp]]
+                                        let dx = pix - nd.Cx
+                                        let dy = piy - nd.Cy
+                                        let dSq = dx * dx + dy * dy
+                                        let cellSize = max (nd.MaxX - nd.MinX) (nd.MaxY - nd.MinY)
+                                        let contains = pix >= nd.MinX && pix <= nd.MaxX && piy >= nd.MinY && piy <= nd.MaxY
+                                        if not contains && dSq > 1e-8 && cellSize * cellSize < thetaSq * dSq then
+                                            let dist = sqrt dSq
+                                            let effD = max 1. (dist - ri * 0.5)
+                                            let s = config.Repulsion * mi * nd.Mass / (effD * effD * dist)
+                                            accX <- accX + dx * s
+                                            accY <- accY + dy * s
+                                        elif nd.ItemCount > 0 then
+                                            for k = nd.ItemStart to nd.ItemStart + nd.ItemCount - 1 do
+                                                let j = perm[k]
                                                 if j <> i then
-                                                    let idx = pi.X - item.Position.X
-                                                    let idy = pi.Y - item.Position.Y
-                                                    let idist = Double.Hypot(idx, idy)
-                                                    let ux, uy, effD =
-                                                        if idist < 1e-4 then
-                                                            let ang = float ((i * 37 + j * 13) % 360) * (Math.PI / 180.)
-                                                            cos ang, sin ang, 1.
-                                                        else
-                                                            idx / idist, idy / idist, max 1. (idist - (radii[i] + radii[j]) * 0.5)
-                                                    let rep = config.Repulsion * masses[i] * item.Mass / (effD * effD)
-                                                    fx[i] <- fx[i] + ux * rep
-                                                    fy[i] <- fy[i] + uy * rep
-                                            false
-                                        else true) qtree
+                                                    let idx = pix - xs[j]
+                                                    let idy = piy - ys[j]
+                                                    let idSq = idx * idx + idy * idy
+                                                    if idSq < 1e-8 then
+                                                        let ang = float ((i * 37 + j * 13) % 360) * (Math.PI / 180.)
+                                                        let rep = config.Repulsion * mi * masses[j]
+                                                        accX <- accX + cos ang * rep
+                                                        accY <- accY + sin ang * rep
+                                                    else
+                                                        let idist = sqrt idSq
+                                                        let effD = max 1. (idist - (ri + radii[j]) * 0.5)
+                                                        let s = config.Repulsion * mi * masses[j] / (effD * effD * idist)
+                                                        accX <- accX + idx * s
+                                                        accY <- accY + idy * s
+                                        elif nd.ChildCount > 0 then
+                                            for c = nd.FirstChild + nd.ChildCount - 1 downto nd.FirstChild do
+                                                stack[sp] <- c
+                                                sp <- sp + 1
+                                    fx[i] <- fx[i] + accX
+                                    fy[i] <- fy[i] + accY
 
                         // 2. Hooke spring attraction on intra-group & inter-group associations
                         for e = 0 to edgesArr.Length - 1 do
                             let struct(u, v, w, sameGroup) = edgesArr[e]
                             let dx = xs[v] - xs[u]
                             let dy = ys[v] - ys[u]
-                            let dist = Double.Hypot(dx, dy)
-                            if dist > 1e-6 then
+                            let dSq = dx * dx + dy * dy
+                            if dSq > 1e-12 then
+                                let dist = sqrt dSq
                                 let ideal = (if sameGroup then 0.8 else 1.15) * config.IdealEdgeLength + (radii[u] + radii[v]) * 0.6
                                 let springK = 0.12 * w * (if sameGroup then 1.35 else 0.85)
-                                let f = springK * (dist - ideal)
-                                let ux, uy = dx / dist, dy / dist
-                                fx[u] <- fx[u] + ux * f
-                                fy[u] <- fy[u] + uy * f
-                                fx[v] <- fx[v] - ux * f
-                                fy[v] <- fy[v] - uy * f
+                                let s = springK * (dist - ideal) / dist
+                                fx[u] <- fx[u] + dx * s
+                                fy[u] <- fy[u] + dy * s
+                                fx[v] <- fx[v] - dx * s
+                                fy[v] <- fy[v] - dy * s
 
                         // 3. Central gravity + Compound group cohesion & sibling-group overlap repulsion
                         for i = 0 to subN - 1 do
@@ -249,35 +248,33 @@ module FCose =
                             fy[i] <- fy[i] + (cy0 - ys[i]) * config.Gravity
 
                         if gCount > 0 then
-                            let gCx = Array.zeroCreate<float> gCount
-                            let gCy = Array.zeroCreate<float> gCount
-                            let gMinX = Array.zeroCreate<float> gCount
-                            let gMaxX = Array.zeroCreate<float> gCount
-                            let gMinY = Array.zeroCreate<float> gCount
-                            let gMaxY = Array.zeroCreate<float> gCount
                             for gi = 0 to gCount - 1 do
                                 let mems = groupMembers[gi]
                                 let g = fst subGroupsWithDepth[gi]
                                 if mems.Length > 0 then
                                     let mutable sx, sy = 0., 0.
                                     let mutable lx, rx, ty, by = infinity, -infinity, infinity, -infinity
-                                    for li in mems do
-                                        sx <- sx + xs[li]; sy <- sy + ys[li]
-                                        lx <- min lx (xs[li] - halfW[li])
-                                        rx <- max rx (xs[li] + halfW[li])
-                                        ty <- min ty (ys[li] - halfH[li])
-                                        by <- max by (ys[li] + halfH[li])
-                                    let mx, my = sx / float mems.Length, sy / float mems.Length
+                                    for k = 0 to mems.Length - 1 do
+                                        let li = mems[k]
+                                        let x, y, hw, hh = xs[li], ys[li], halfW[li], halfH[li]
+                                        sx <- sx + x; sy <- sy + y
+                                        if x - hw < lx then lx <- x - hw
+                                        if x + hw > rx then rx <- x + hw
+                                        if y - hh < ty then ty <- y - hh
+                                        if y + hh > by then by <- y + hh
+                                    let invM = 1. / float mems.Length
+                                    let mx, my = sx * invM, sy * invM
                                     gCx[gi] <- mx; gCy[gi] <- my
                                     gMinX[gi] <- lx - g.Padding.Left
                                     gMaxX[gi] <- rx + g.Padding.Right
                                     gMinY[gi] <- ty - g.Padding.Top
                                     gMaxY[gi] <- by + g.Padding.Bottom
-                                    for li in mems do
+                                    for k = 0 to mems.Length - 1 do
+                                        let li = mems[k]
                                         fx[li] <- fx[li] + (mx - xs[li]) * config.CompoundGravity
                                         fy[li] <- fy[li] + (my - ys[li]) * config.CompoundGravity
 
-                            // Repel overlapping sibling groups (plus ungrouped nodes invading a group box!)
+                            // Repel overlapping sibling groups
                             for a = 0 to gCount - 1 do
                                 for b = a + 1 to gCount - 1 do
                                     if (fst subGroupsWithDepth[a]).ParentGroup = (fst subGroupsWithDepth[b]).ParentGroup
@@ -294,18 +291,23 @@ module FCose =
                                                 else
                                                     let s = if gCy[b] >= gCy[a] then 1. else -1.
                                                     0., s * penY * 0.45
-                                            for li in groupMembers[a] do
+                                            let memA = groupMembers[a]
+                                            for k = 0 to memA.Length - 1 do
+                                                let li = memA[k]
                                                 fx[li] <- fx[li] - pushX; fy[li] <- fy[li] - pushY
-                                            for li in groupMembers[b] do
+                                            let memB = groupMembers[b]
+                                            for k = 0 to memB.Length - 1 do
+                                                let li = memB[k]
                                                 fx[li] <- fx[li] + pushX; fy[li] <- fy[li] + pushY
 
                         // Apply clamped displacements
                         for i = 0 to subN - 1 do
-                            let mag = Double.Hypot(fx[i], fy[i])
-                            if mag > 1e-9 then
-                                let step = min maxDisp mag
-                                if not pinnedX[i] then xs[i] <- xs[i] + (fx[i] / mag) * step
-                                if not pinnedY[i] then ys[i] <- ys[i] + (fy[i] / mag) * step
+                            let magSq = fx[i] * fx[i] + fy[i] * fy[i]
+                            if magSq > 1e-18 then
+                                let mag = sqrt magSq
+                                let scale = if mag > maxDisp then maxDisp / mag else 1.
+                                if not pinnedX[i] then xs[i] <- xs[i] + fx[i] * scale
+                                if not pinnedY[i] then ys[i] <- ys[i] + fy[i] * scale
 
                         // Project hard user constraints at every 4th iteration and final iterations
                         if (hardX.Count > 0 || hardY.Count > 0) && (iter % 4 = 3 || iter = config.Iterations - 1) then
@@ -329,20 +331,8 @@ module FCose =
                                 let py = Cola.solveVpsc ys masses pinnedY cy
                                 Array.blit py 0 ys 0 subN
 
-                    let subNodes = members |> Array.map (fun gi -> eff.Nodes[gi])
-                    let subNodeIds = subNodes |> Array.map (fun nd -> nd.Id) |> Set.ofArray
-                    let subAssocs =
-                        eff.Associations
-                        |> Array.filter (fun a -> subNodeIds.Contains a.Source.NodeId && subNodeIds.Contains a.Target.NodeId)
-                    let subMap = Dictionary<string, int>(StringComparer.Ordinal)
-                    for li = 0 to subN - 1 do subMap.Add(subNodes[li].Id, li)
-                    let subEff =
-                        { Nodes = subNodes
-                          Groups = subGroupsWithDepth |> Array.map fst
-                          GroupDepth = subGroupsWithDepth |> Array.map snd
-                          Associations = subAssocs
-                          ReversedIdMap = subMap
-                          Constraints = [] }
+                    let subEff = GraphKernels.sliceComponentEff eff csr members subGroupsWithDepth
+                    let subNodes = subEff.Nodes
 
                     let posNodes =
                         Array.init subN (fun li ->
