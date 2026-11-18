@@ -95,6 +95,7 @@ let main args =
                 contracts3DTests
                 ScaleAxisTests.scaleAxisTests
                 ChannelTests.channelTests
+                SurfaceTests.surfaceTests
             ]
 
     runTestsWithCLIArgs [] args allTests

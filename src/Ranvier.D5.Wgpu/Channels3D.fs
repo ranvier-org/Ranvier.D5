@@ -114,11 +114,34 @@ type ShadingMode =
     | Lit of roughness: float32 * emissive: float32
 
 [<Struct>]
-type private RampTransform =
+type internal RampTransform =
     | Linear of x0: float * span: float * clamped: bool
     | Log of sign: float * logAbs0: float * logSpan: float * clamped: bool
     | Constant of value: float
     | General of scale: Continuous
+
+module internal RampTransform =
+    let inline eval (transform: RampTransform) (value: float) : float =
+        if not (Check3D.isFinite value) then
+            Double.NaN
+        else
+            match transform with
+            | RampTransform.Linear (x0, span, clamped) ->
+                let raw = (value - x0) / span
+                let t = if clamped then Math.Clamp (raw, 0.0, 1.0) else raw
+                if Check3D.isFinite t then t else Double.NaN
+            | RampTransform.Log (sign, la, lSpan, clamped) ->
+                if value * sign <= 0.0 then
+                    Double.NaN
+                else
+                    let raw = (Math.Log (abs value) - la) / lSpan
+                    let t = if clamped then Math.Clamp (raw, 0.0, 1.0) else raw
+                    if Check3D.isFinite t then t else Double.NaN
+            | RampTransform.Constant t -> t
+            | RampTransform.General scale ->
+                match Scale.tryMap scale value with
+                | Some t when Check3D.isFinite t -> t
+                | _ -> Double.NaN
 
 /// <summary>Immutable 256-entry GPU colormap lookup table paired with a continuous scale and clipping policy.</summary>
 type ColorRamp =
@@ -197,7 +220,7 @@ module ColorRamp =
         | Some actual -> approxEq actual expected
         | None -> false
 
-    let private classifyTransform (scale: Continuous) : RampTransform =
+    let internal classifyTransform (scale: Continuous) : RampTransform =
         try
             let x0 = Scale.invert scale 0.0
             let x1 = Scale.invert scale 1.0
@@ -362,26 +385,11 @@ module ColorRamp =
 
     /// <summary>Maps a scalar <c>value</c> into an <c>RgbaColor</c> in <c>O(1)</c> with zero heap allocations on linear, logarithmic, and constant scales.</summary>
     let tryMap (ramp: ColorRamp) (value: float) : RgbaColor voption =
-        if not (Check3D.isFinite value) then
-            missingColor ramp.Clip.Missing
+        let t = RampTransform.eval ramp.Transform value
+        if Check3D.isFinite t then
+            mapNormalized ramp t
         else
-            match ramp.Transform with
-            | RampTransform.Linear (x0, span, clamped) ->
-                let raw = (value - x0) / span
-                let t = if clamped then Math.Clamp (raw, 0.0, 1.0) else raw
-                mapNormalized ramp t
-            | RampTransform.Log (sign, la, lSpan, clamped) ->
-                if value * sign <= 0.0 then
-                    missingColor ramp.Clip.Missing
-                else
-                    let raw = (Math.Log (abs value) - la) / lSpan
-                    let t = if clamped then Math.Clamp (raw, 0.0, 1.0) else raw
-                    mapNormalized ramp t
-            | RampTransform.Constant t -> mapNormalized ramp t
-            | RampTransform.General scale ->
-                match Scale.tryMap scale value with
-                | Some t -> mapNormalized ramp t
-                | None -> missingColor ramp.Clip.Missing
+            missingColor ramp.Clip.Missing
 
     /// <summary>Maps a scalar <c>value</c> through <c>ramp</c>, returning <c>fallback</c> when <c>tryMap</c> yields <c>ValueNone</c>.</summary>
     let mapOrFallback (ramp: ColorRamp) (value: float) (fallback: RgbaColor) : RgbaColor =
