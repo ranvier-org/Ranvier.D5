@@ -342,8 +342,81 @@ let acceptance () =
         Expect.equal (graph.Run(fun () -> flowState.Value)) movedFlow "disposed flow input does not publish"
         host.Cycle()
 
+// Mark events are heard on the svg root. A mark has no listener of its own: in WebCore, a wheel listener that
+// comes or goes with a mark makes the next page update restyle the whole document.
+let markEvents () =
+        use host = WebCoreHost.Create(320, 200)
+        use graph = new Graph()
+        let mount view (read:unit -> Scene) =
+            let container = host.Document.createElement "div"
+            host.Document.body.appendChild container |> ignore
+            let mounted =
+                Mounting.mount graph None (fun errors -> raise (AggregateException errors)) container None
+                    (fun context -> Program.run (Component.render view read) context.Backend)
+            host.Cycle()
+            host.Frame()
+            container,mounted
+        let unmount (container:Ranvier.Dom.Element,mounted:Mounting.Mounted) =
+            mounted.Dispose()
+            host.Document.body.removeChild container |> ignore
+            host.Cycle()
+        let box key x y = Shape.rectangle (Bounds.create x y 40. 40.) |> Mark.path key |> Mark.withFill (Paint.rgb 255 0 0)
+        let flat = Scene.create 300. 180. "Flat" [box "a" 10. 10.; box "b" 90. 10.]
+        let grouped =
+            Scene.compose {Width=300.;Height=180.} "Grouped" []
+                [Group(GroupSpec.create "outer",
+                       [Group({GroupSpec.create "inner" with Transform=Transform.translate 100. 60.},[Leaf(box "leaf" 0. 0.)])
+                        Leaf(box "sibling" 10. 10.)])]
+        let centre (container:Ranvier.Dom.Element) selector =
+            let bounds=(container.querySelector selector).getBoundingClientRect()
+            int(bounds.x+bounds.width/2.),int(bounds.y+bounds.height/2.)
+        let clickAndWheel (x,y) =
+            host.Click(x,y) |> ignore
+            host.Wheel(x,y,0.f,1.f,0) |> ignore
+        let send (target:Ranvier.Dom.Element) name bubbles =
+            let event = host.Document.createEvent "Event"
+            event.initEvent(name,bubbles,false)
+            target.dispatchEvent event |> ignore
+
+        let scopedEvents = ResizeArray<string list * string>()
+        let scene = graph.Run(fun () -> Api.createSignal flat)
+        let scoped = mount (Renderer.createScoped (fun path name _ -> scopedEvents.Add(path,name))) (fun () -> scene.Value)
+        let markA = (fst scoped).querySelector "[data-d5-key='a']"
+        clickAndWheel (centre (fst scoped) "[data-d5-key='a']")
+        Expect.contains scopedEvents (["a"],"click") "flat mark click carries the mark key alone"
+        Expect.contains scopedEvents (["a"],"wheel") "flat mark wheel carries the mark key alone"
+        send (markA.querySelector "path") "pointercancel" true
+        Expect.contains scopedEvents (["a"],"pointercancel") "an event that bubbles from inside a mark reaches dispatch"
+        scopedEvents.Clear()
+        // Only a listener on the mark itself hears an event that does not bubble.
+        for name in ["wheel";"pointercancel"] do send markA name false
+        Expect.isEmpty scopedEvents "a mark has no listener of its own"
+        let background=(fst scoped).querySelector("svg").getBoundingClientRect()
+        clickAndWheel (int background.x+250,int background.y+150)
+        Expect.isEmpty scopedEvents "an event outside every mark is not dispatched"
+        graph.Run(fun () -> scene.Value <- grouped)
+        host.Cycle()
+        host.Frame()
+        clickAndWheel (centre (fst scoped) "[data-d5-key='leaf']")
+        Expect.contains scopedEvents (["outer";"inner";"leaf"],"click") "nested mark click carries its group keys, outermost first"
+        Expect.contains scopedEvents (["outer";"inner";"leaf"],"wheel") "nested mark wheel carries its group keys, outermost first"
+        clickAndWheel (centre (fst scoped) "[data-d5-key='sibling']")
+        Expect.contains scopedEvents (["outer";"sibling"],"click") "a mark directly under a group carries that group alone"
+        unmount scoped
+        let count = scopedEvents.Count
+        send markA "wheel" true
+        Expect.equal scopedEvents.Count count "a disposed mount dispatches nothing"
+
+        let leafEvents = ResizeArray<string * string>()
+        let leafOnly = mount (Renderer.create (fun key name _ -> leafEvents.Add(key,name))) (fun () -> grouped)
+        clickAndWheel (centre (fst leafOnly) "[data-d5-key='leaf']")
+        Expect.contains leafEvents ("leaf","click") "create drops the group scope of a click"
+        Expect.contains leafEvents ("leaf","wheel") "create drops the group scope of a wheel"
+        unmount leafOnly
+
 [<EntryPoint>]
 let main _ =
     acceptance ()
+    markEvents ()
     printfn "Native scene acceptance passed: namespace, identity, reorder, paint, events, escaping and disposal."
     0

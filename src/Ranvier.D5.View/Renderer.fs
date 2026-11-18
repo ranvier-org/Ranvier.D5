@@ -12,13 +12,39 @@ open Ranvier.View.Dsl
 module Renderer =
     let private number (value: float) = value.ToString("G17", CultureInfo.InvariantCulture)
 
-    type private RenderMark = { Mark:Mark; Namespace:string; Path:string list }
-    type private RenderNode = { Node:SceneNode; Namespace:string; Path:string list }
+    type private RenderMark = { Mark:Mark; Namespace:string }
+    type private RenderNode = { Node:SceneNode; Namespace:string }
     type private Appearance = { Fill:string option; Stroke:string option; StrokeWidth:string option; Opacity:string option; FillOpacity:string option; StrokeOpacity:string option; FontSize:string option; Family:string option; Weight:string option; Anchor:string option; Baseline:string option }
     type private RenderRow = { Read:unit -> RenderMark; Appearance:unit -> Appearance; Transform:unit -> string option }
     let private definitionId prefix (key:string) = prefix + (key |> Seq.map(fun code -> (int code).ToString("X4",CultureInfo.InvariantCulture)) |> String.concat "")
 
-    let private row (dispatch: string list -> string -> Ranvier.Dom.Event -> unit) =
+    let private markEvents = ["click"; "pointerdown"; "pointermove"; "pointerup"; "pointercancel"; "wheel"; "keydown"]
+
+    // Ranvier.Dom types are interfaces. .NET type-tests the target; under Fable it is a plain DOM object with no runtime
+    // type to test, and the mark events target elements.
+#if FABLE_COMPILER
+    let private targetElement (event:Ranvier.Dom.Event) = unbox<Ranvier.Dom.Element> event.target
+#else
+    let private targetElement (event:Ranvier.Dom.Event) =
+        match event.target with :? Ranvier.Dom.Element as element -> element | _ -> null
+#endif
+
+    /// The keys of the groups around the mark an event came from, outermost first, then the mark's key; None when
+    /// the target is outside every mark. The walk ends at the scene's svg root.
+    let private markPath (event:Ranvier.Dom.Event) =
+        let mutable element=targetElement event
+        let mutable path=[]
+        while not(isNull element) && element.localName<>"svg" do
+            if path.IsEmpty then
+                if element.hasAttribute "data-d5-key" then path<-[element.getAttribute "data-d5-key"]
+            elif element.hasAttribute "data-d5-group" then path<-element.getAttribute "data-d5-group"::path
+            element<-element.parentElement
+        if path.IsEmpty then None else Some path
+
+    // A mark carries no listener of its own. In WebCore a wheel listener that comes or goes with a node makes the next
+    // page update restyle the whole document, so a listener per mark costs a page redo for every mark entering or
+    // leaving a scene.
+    let private row =
         Component.define (fun _ (read: unit -> RenderMark) ->
             let mutable cached=ValueNone
             let mutable cachedTransform=ValueNone
@@ -87,8 +113,6 @@ module Renderer =
                 appearance "text-anchor" (fun style -> style.Anchor)
                 appearance "dominant-baseline" (fun style -> style.Baseline)
                 t.Attrs.attribute("aria-label", fun row -> Mark.label (row.Read()).Mark)
-                for event in ["click"; "pointerdown"; "pointermove"; "pointerup"; "pointercancel"; "wheel"; "keydown"] do
-                    t.Events.on(event, fun row payload -> dispatch (row.Read()).Path event payload)
             |]) [| path; text |])
 
     let private definitionRow =
@@ -131,9 +155,7 @@ module Renderer =
                 | LinearGradient _ -> t.arm linear value
                 | RadialGradient _ -> t.arm radial value))
 
-    /// <summary>Creates retained keyed scenes with mount-local definitions and scoped group identities.</summary>
-    let createScoped dispatch =
-        let marks = row dispatch
+    let private build (dispatch:(string list -> string -> Ranvier.Dom.Event -> unit) option) =
         let mutable groupDefinition : Component<unit -> RenderNode> option = None
         let leaf =
             Component.define (fun _ (read:unit -> RenderNode) ->
@@ -145,10 +167,10 @@ module Renderer =
                     | _ ->
                         let value=
                             match item.Node with
-                            | Leaf mark -> {Mark=mark;Namespace=item.Namespace;Path=item.Path}
+                            | Leaf mark -> {Mark=mark;Namespace=item.Namespace}
                             | _ -> invalidOp "Expected a leaf."
                         cached<-ValueSome struct(item,value)
-                        value) (fun t -> t.render marks id)
+                        value) (fun t -> t.render row id)
         let node =
             Component.define (fun _ (read:unit -> RenderNode) -> read) (fun t ->
                 t.matchWith (fun read -> read()) (fun item ->
@@ -165,26 +187,32 @@ module Renderer =
                     [|t.each (fun item -> SceneNode.key item.Node) (fun read ->
                         let item=read()
                         match item.Node with
-                        | Group(_,children) -> children |> List.map (fun child -> {item with Node=child;Path=item.Path@[SceneNode.key child]}) |> List.toArray
+                        | Group(_,children) -> children |> List.map (fun child -> {item with Node=child}) |> List.toArray
                         | _ -> [||]) node|])
         groupDefinition <- Some group
         let flat =
             Component.define (fun _ (read:unit -> string * Scene) -> read) (fun t ->
                 t.each (fun item -> Mark.key item.Mark) (fun read ->
                     let ns,scene=read()
-                    Scene.marks scene |> List.map (fun mark -> {Mark=mark;Namespace=ns;Path=[Mark.key mark]}) |> List.toArray) marks)
+                    Scene.marks scene |> List.map (fun mark -> {Mark=mark;Namespace=ns}) |> List.toArray) row)
         let composed =
             Component.define (fun _ (read:unit -> string * Scene) -> read) (fun t ->
                 t.each (fun item -> SceneNode.key item.Node) (fun read ->
                     let ns,scene=read()
-                    Scene.nodes scene |> List.map (fun n -> {Node=n;Namespace=ns;Path=[SceneNode.key n]}) |> List.toArray) node)
+                    Scene.nodes scene |> List.map (fun n -> {Node=n;Namespace=ns}) |> List.toArray) node)
         Component.define (fun _ (read:unit -> Scene) -> "d5-"+Guid.NewGuid().ToString("N")+"-",read) (fun t ->
             svg<string * (unit -> Scene)>(
-                t.Attrs.attribute("role","img"),
-                t.Attrs.attribute("aria-label", fun (_,read) -> Some(Scene.title(read()))),
-                t.Attrs.attribute("width",fun (_,read) -> Some(number(Scene.width(read())))),
-                t.Attrs.attribute("height",fun (_,read) -> Some(number(Scene.height(read())))),
-                t.Attrs.attribute("viewBox",fun (_,read) -> let s=read() in Some("0 0 "+number(Scene.width s)+" "+number(Scene.height s)))
+                [|t.Attrs.attribute("role","img")
+                  t.Attrs.attribute("aria-label", fun (_,read) -> Some(Scene.title(read())))
+                  t.Attrs.attribute("width",fun (_,read) -> Some(number(Scene.width(read()))))
+                  t.Attrs.attribute("height",fun (_,read) -> Some(number(Scene.height(read()))))
+                  t.Attrs.attribute("viewBox",fun (_,read) -> let s=read() in Some("0 0 "+number(Scene.width s)+" "+number(Scene.height s)))
+                  // One listener per event type on the root hears every mark and finds it from the event target.
+                  match dispatch with
+                  | Some dispatch ->
+                      for name in markEvents do
+                          t.Events.on(name, fun _ event -> markPath event |> Option.iter (fun path -> dispatch path name event))
+                  | None -> ()|]
             ).Run
                 [|t.element (HtmlTag "defs") [||]
                     [|t.each (snd >> SceneDefinition.key) (fun (ns,read) -> Scene.definitions(read()) |> List.map (fun d -> ns,d) |> List.toArray) definitionRow|]
@@ -192,8 +220,11 @@ module Renderer =
                     if Scene.isComposed scene
                     then t.arm composed value else t.arm flat value)|])
 
+    /// <summary>Creates retained keyed scenes with mount-local definitions and scoped group identities. Each mark event reaches dispatch with the keys of the groups around the mark, outermost first, then the mark key, and the event name. The listeners are on the scene's svg root, one per event type; a mark has none of its own.</summary>
+    let createScoped dispatch = build (Some dispatch)
+
     /// <summary>A reusable scene component that forwards each mark event to dispatch with the leaf mark key and event name; group scopes are dropped.</summary>
     let create dispatch = createScoped (fun path name event -> dispatch (List.last path) name event)
 
-    /// <summary>A shared renderer component that ignores mark events.</summary>
-    let passive = create (fun _ _ _ -> ())
+    /// <summary>A shared renderer component that ignores mark events and adds no event listeners.</summary>
+    let passive = build None
