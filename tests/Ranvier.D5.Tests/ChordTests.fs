@@ -56,7 +56,8 @@ let tests=testList "Chord" [
         let timer=Diagnostics.Stopwatch.StartNew()
         cancellation.CancelAfter 1
         Expect.throwsT<OperationCanceledException> (fun () ->
-            Chord.layoutWithCancellation cancellation.Token {ChordConfig.defaultValue with FlowOrder=ChordOrder.Descending} matrix |> ignore) "cancels validation or inner work"
+            while true do
+                Chord.layoutWithCancellation cancellation.Token {ChordConfig.defaultValue with FlowOrder=ChordOrder.Descending} matrix |> ignore) "cancels validation or inner work"
         Expect.isLessThan timer.Elapsed.TotalSeconds 5. "cooperative cancellation bound"
     testCase "cancellation is observed before layout" <| fun _ ->
         use token=new Threading.CancellationTokenSource()

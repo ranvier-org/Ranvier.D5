@@ -51,83 +51,149 @@ module Chord =
             Error [InvalidObservation "Chord values must be finite and nonnegative."]
         elif n=0 then Ok {Groups=[];Flows=[]}
         else
-            let check i=if i%64=0 then token.ThrowIfCancellationRequested()
-            let rows=matrix |> List.mapi(fun i row -> check i;List.toArray row) |> List.toArray
-            let value i j=if config.Mode=ChordMode.Transposed then rows[j][i] else rows[i][j]
+            let inline check i=if (i &&& 63)=0 then token.ThrowIfCancellationRequested()
+            let flat=Array.zeroCreate<float>(n*n)
+            let transposed=config.Mode=ChordMode.Transposed
             let directed=config.Mode=ChordMode.Directed
             let mutable largest=0.
-            for i in 0..n-1 do
-                check i
-                for j in 0..n-1 do
-                    check j
-                    largest<-max largest (value i j)
+            let mutable rIdx=0
+            for row in matrix do
+                check rIdx
+                let mutable cIdx=0
+                let rowBase=rIdx*n
+                for v in row do
+                    if transposed then flat[cIdx*n+rIdx]<-v
+                    else flat[rowBase+cIdx]<-v
+                    if v>largest then largest<-v
+                    cIdx<-cIdx+1
+                rIdx<-rIdx+1
             let sums=Array.zeroCreate<float> n
             let mutable scaledTotal=0.
-            for i in 0..n-1 do
+            for i=0 to n-1 do
                 check i
-                for j in 0..n-1 do
+                let rowBase=i*n
+                let mutable rowSum=0.
+                for j=0 to n-1 do
                     check j
-                    let outgoing=value i j
-                    let incoming=if directed then value j i else 0.
-                    sums[i]<-sums[i]+outgoing+incoming
+                    let outgoing=flat[rowBase+j]
+                    let incoming=if directed then flat[j*n+i] else 0.
+                    rowSum<-rowSum+outgoing+incoming
                     if largest>0. then scaledTotal<-scaledTotal+outgoing/largest+incoming/largest
+                sums[i]<-rowSum
             if sums |> Array.exists(fun sum -> not(Double.IsFinite sum)) then
                 Error [InvalidObservation "A group flow total exceeds the finite numeric range."]
             else
-                let sort order weight items =
-                    let mutable comparisons=0
-                    if order=ChordOrder.Input then items else
-                    items |> List.mapi(fun index item -> index,item)
-                    |> List.sortWith(fun (ia,a) (ib,b) ->
-                        check comparisons
-                        comparisons<-comparisons+1
-                        let comparison=
-                            match order with
-                            | ChordOrder.Input -> 0
-                            | ChordOrder.Ascending -> compare (weight a) (weight b)
-                            | ChordOrder.Descending -> compare (weight b) (weight a)
-                        if comparison=0 then compare ia ib else comparison)
-                    |> List.map snd
+                let sortArray (order:ChordOrder) (weight:'T -> 'W) (arr:'T array) =
+                    if order=ChordOrder.Input || arr.Length<=1 then arr
+                    else
+                        let indexed=Array.init arr.Length (fun idx -> struct(idx,arr[idx]))
+                        let mutable comparisons=0
+                        Array.sortInPlaceWith(fun struct(ia,a) struct(ib,b) ->
+                            check comparisons
+                            comparisons<-comparisons+1
+                            let comparison=
+                                match order with
+                                | ChordOrder.Input -> 0
+                                | ChordOrder.Ascending -> compare (weight a) (weight b)
+                                | ChordOrder.Descending -> compare (weight b) (weight a)
+                            if comparison=0 then compare ia ib else comparison) indexed
+                        Array.init indexed.Length (fun k -> let struct(_,v)=indexed[k] in v)
                 let groups=Array.zeroCreate<ChordArc> n
-                let sources=Array.create<ChordArc option> (n*n) None
-                let targets=Array.create<ChordArc option> (n*n) None
+                let cellCount=n*n
+                let hasSource=Array.zeroCreate<bool> cellCount
+                let sources=Array.zeroCreate<ChordArc> cellCount
+                let hasTarget=Array.zeroCreate<bool> cellCount
+                let targets=Array.zeroCreate<ChordArc> cellCount
                 let space=max 0. (tau-config.PadAngle*float n)
                 let gap=if scaledTotal=0. || space=0. then tau/float n else config.PadAngle
                 let mutable angle=0.
-                for i in sort config.GroupOrder (fun i -> sums[i]) [0..n-1] do
+                let groupIndices =
+                    if config.GroupOrder=ChordOrder.Input then Array.init n id
+                    else sortArray config.GroupOrder (fun i -> sums[i]) (Array.init n id)
+                let entriesBuf=ResizeArray<struct(int*int*bool*float)>(2*n)
+                for gIdx=0 to groupIndices.Length-1 do
+                    let i=groupIndices[gIdx]
                     token.ThrowIfCancellationRequested()
                     let start=angle
-                    let entries=
-                        if directed then
-                            [for j in n-1 .. -1 .. 0 do if value j i>0. then yield j,i,false,value j i
-                             for j in 0..n-1 do if value i j>0. then yield i,j,true,value i j]
-                        else
-                            [for j in 0..n-1 do
-                                if value i j>0. || value j i>0. then yield min i j,max i j,i<j,value i j]
-                    let entries=entries |> sort config.SubgroupOrder (fun (_,_,outgoing,v) -> if directed && not outgoing then -v else v)
-                    for index,(a,b,outgoing,v) in List.indexed entries do
-                        check index
-                        let next=if scaledTotal=0. then angle else angle+space*(v/largest)/scaledTotal
-                        let arc={Index=i;StartAngle=angle;EndAngle=next;Value=v}
-                        angle<-next
-                        let slot=a*n+b
-                        if outgoing then sources[slot]<-Some arc else targets[slot]<-Some arc
-                        if not directed && a=b then sources[slot]<-Some arc
+                    entriesBuf.Clear()
+                    let rowBase=i*n
+                    if directed then
+                        for j=n-1 downto 0 do
+                            let v=flat[j*n+i]
+                            if v>0. then entriesBuf.Add(struct(j,i,false,v))
+                        for j=0 to n-1 do
+                            let v=flat[rowBase+j]
+                            if v>0. then entriesBuf.Add(struct(i,j,true,v))
+                    else
+                        for j=0 to n-1 do
+                            let vij=flat[rowBase+j]
+                            if vij>0. || flat[j*n+i]>0. then
+                                entriesBuf.Add(struct(min i j,max i j,i<j,vij))
+                    if config.SubgroupOrder=ChordOrder.Input then
+                        for index=0 to entriesBuf.Count-1 do
+                            check index
+                            let struct(a,b,outgoing,v)=entriesBuf[index]
+                            let next=if scaledTotal=0. then angle else angle+space*(v/largest)/scaledTotal
+                            let arc={Index=i;StartAngle=angle;EndAngle=next;Value=v}
+                            angle<-next
+                            let slot=a*n+b
+                            if outgoing then
+                                hasSource[slot]<-true
+                                sources[slot]<-arc
+                            else
+                                hasTarget[slot]<-true
+                                targets[slot]<-arc
+                            if not directed && a=b then
+                                hasSource[slot]<-true
+                                sources[slot]<-arc
+                    else
+                        let sortedEntries=sortArray config.SubgroupOrder (fun struct(_,_,outgoing,v) -> if directed && not outgoing then -v else v) (entriesBuf.ToArray())
+                        for index=0 to sortedEntries.Length-1 do
+                            check index
+                            let struct(a,b,outgoing,v)=sortedEntries[index]
+                            let next=if scaledTotal=0. then angle else angle+space*(v/largest)/scaledTotal
+                            let arc={Index=i;StartAngle=angle;EndAngle=next;Value=v}
+                            angle<-next
+                            let slot=a*n+b
+                            if outgoing then
+                                hasSource[slot]<-true
+                                sources[slot]<-arc
+                            else
+                                hasTarget[slot]<-true
+                                targets[slot]<-arc
+                            if not directed && a=b then
+                                hasSource[slot]<-true
+                                sources[slot]<-arc
                     groups[i]<-{Index=i;StartAngle=start;EndAngle=angle;Value=sums[i]}
                     angle<-angle+gap
-                let flows=
-                    [for slot in 0..sources.Length-1 do
-                        check slot
-                        match sources[slot],targets[slot] with
-                        | Some source,Some target ->
-                            let source,target=if not directed && source.Value<target.Value then target,source else source,target
-                            yield {Id=struct(slot/n,slot%n);Source=source;Target=target}
-                        | _ -> ()]
-                    |> sort config.FlowOrder (fun flow ->
-                        let total=flow.Source.Value+flow.Target.Value
-                        if System.Double.IsPositiveInfinity total then 1,flow.Source.Value/2.+flow.Target.Value/2.
-                        else 0,total)
+                let flowBuf=ResizeArray<ChordFlow>()
+                for slot=0 to cellCount-1 do
+                    check slot
+                    if hasSource[slot] && hasTarget[slot] then
+                        let s0=sources[slot]
+                        let t0=targets[slot]
+                        let source,target=if not directed && s0.Value<t0.Value then t0,s0 else s0,t0
+                        flowBuf.Add {Id=struct(slot/n,slot%n);Source=source;Target=target}
+                let flows =
+                    if config.FlowOrder=ChordOrder.Input then
+                        let mutable fl=[]
+                        for k=flowBuf.Count-1 downto 0 do
+                            fl<-flowBuf[k]::fl
+                        fl
+                    else
+                        let sortedFlows=
+                            sortArray config.FlowOrder (fun flow ->
+                                let total=flow.Source.Value+flow.Target.Value
+                                if System.Double.IsPositiveInfinity total then struct(1,flow.Source.Value*0.5+flow.Target.Value*0.5)
+                                else struct(0,total)) (flowBuf.ToArray())
+                        let mutable fl=[]
+                        for k=sortedFlows.Length-1 downto 0 do
+                            fl<-sortedFlows[k]::fl
+                        fl
+                let mutable groupList=[]
+                for k=n-1 downto 0 do
+                    groupList<-groups[k]::groupList
                 token.ThrowIfCancellationRequested()
-                Ok {Groups=Array.toList groups;Flows=flows}
+                Ok {Groups=groupList;Flows=flows}
     /// <summary>Runs <c>layoutWithCancellation</c> without cancellation.</summary>
     let layout config matrix=layoutWithCancellation System.Threading.CancellationToken.None config matrix

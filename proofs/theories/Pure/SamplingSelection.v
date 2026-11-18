@@ -341,3 +341,130 @@ Theorem lttb_precomputed_cross_eq_area (ax ay bx by_ cx cy : Z) :
 Proof.
   cbv zeta. lia.
 Qed.
+
+(** ** 6. Batch D5 refinements: SIMD beeswarm squared-distance dodge & single-pass contour/isoband cell routing *)
+
+Fixpoint all_clear_scalar (x y thresh_sq : Z) (pts : list (Z * Z)) : bool :=
+  match pts with
+  | [] => true
+  | (px, py) :: rest =>
+    let dx := (px - x)%Z in
+    let dy := (py - y)%Z in
+    Z.geb (dx * dx + dy * dy)%Z thresh_sq && all_clear_scalar x y thresh_sq rest
+  end.
+
+Fixpoint all_clear_chunks (x y thresh_sq : Z) (chunks : list (list (Z * Z))) : bool :=
+  match chunks with
+  | [] => true
+  | c :: rest => all_clear_scalar x y thresh_sq c && all_clear_chunks x y thresh_sq rest
+  end.
+
+Lemma all_clear_app (x y thresh_sq : Z) (u v : list (Z * Z)) :
+  all_clear_scalar x y thresh_sq (u ++ v) =
+  (all_clear_scalar x y thresh_sq u && all_clear_scalar x y thresh_sq v).
+Proof.
+  induction u as [|[px py] rest IH]; simpl.
+  - reflexivity.
+  - rewrite IH, andb_assoc. reflexivity.
+Qed.
+
+(**md
+**Chunked SIMD squared-distance clearance (`(px - x)^2 + (py - y)^2 >= thresh_sq`) equals scalar neighbor scanning (`AdvancedCharts.swarm`).**
+
+Partitioning the active X-window of placed beeswarm circles into arbitrary `Vector512` (8-lane), `Vector256` (4-lane), `Vector128` (2-lane), and scalar tail chunks evaluates the exact same clearance predicate as `all_clear_scalar` over `concat chunks`, without calling `Double.Hypot` (`sqrt`).
+
+- [x:] candidate circle X coordinate.
+- [y:] candidate vertical dodge offset.
+- [thresh_sq:] squared minimum clearance `(diameter * (1 - 1e-12))^2`.
+- [chunks:] SIMD vector chunks and scalar remainder of the active neighbor window.
+*)
+Theorem beeswarm_simd_chunked_clear_eq_scalar
+    (x y thresh_sq : Z) (chunks : list (list (Z * Z))) :
+  all_clear_chunks x y thresh_sq chunks =
+  all_clear_scalar x y thresh_sq (concat chunks).
+Proof.
+  induction chunks as [|c rest IH]; simpl.
+  - reflexivity.
+  - rewrite all_clear_app, IH. reflexivity.
+Qed.
+
+Fixpoint filter_band_members (lo : Z) (hi_opt : option Z) (cells : list (option Z * list nat)) : list nat :=
+  match cells with
+  | [] => []
+  | (mv, members) :: rest =>
+    let keep :=
+      match mv, members with
+      | _, [] => false
+      | None, _ => false
+      | Some v, _ =>
+        Z.geb v lo &&
+        match hi_opt with
+        | Some hi => Z.ltb v hi
+        | None => true
+        end
+      end in
+    (if keep then members else []) ++ filter_band_members lo hi_opt rest
+  end.
+
+Definition compact_nonempty_cells (cells : list (option Z * list nat)) : list (Z * list nat) :=
+  flat_map
+    (fun '(mv, members) =>
+      match mv, members with
+      | Some v, _ :: _ => [(v, members)]
+      | _, _ => []
+      end)
+    cells.
+
+Fixpoint filter_compact_band (lo : Z) (hi_opt : option Z) (compact : list (Z * list nat)) : list nat :=
+  match compact with
+  | [] => []
+  | (v, members) :: rest =>
+    let keep :=
+      Z.geb v lo &&
+      match hi_opt with
+      | Some hi => Z.ltb v hi
+      | None => true
+      end in
+    (if keep then members else []) ++ filter_compact_band lo hi_opt rest
+  end.
+
+(**md
+**Compacting non-empty valued grid cells once preserves exact `(row, column)` band membership for every contour/isoband level (`ContourChart`).**
+
+Extracting `compact_nonempty_cells` in a single `(row, column)` pass over the `DensityGrid` and scanning only those populated cells per threshold produces the exact same ordered `Membership` list as rescanning all `rows * columns` grid cells per threshold.
+
+- [lo:] lower threshold level.
+- [hi_opt:] optional upper threshold (`Some next_level` for `isobands`, `None` for `contours`).
+- [cells:] full `(row, column)` grid stream of `(DensityGrid.value, DensityGrid.members)`.
+*)
+Theorem contour_compact_nonempty_cells_membership_eq
+    (lo : Z) (hi_opt : option Z) (cells : list (option Z * list nat)) :
+  filter_compact_band lo hi_opt (compact_nonempty_cells cells) =
+  filter_band_members lo hi_opt cells.
+Proof.
+  induction cells as [|[mv members] rest IH]; simpl.
+  - reflexivity.
+  - destruct mv as [v |]; destruct members as [|m ms]; simpl; rewrite ?IH; reflexivity.
+Qed.
+
+(**md
+**`Selection.update` on `Clear` and `SelectFocused` is independent of materializing `Set.ofList Available` (`Selection.fs`).**
+
+For `Clear` and `SelectFocused`, the resulting `(Selected, Focused, Hovered)` components depend only on `st.Focused`, allowing `Selection.update` to defer building `Set.ofList state.Available` to the message arms that actually query membership (`Replace`, `Toggle`, `Focus`, `Hover`).
+
+- [st:] current selection state.
+*)
+Theorem lazy_selection_clear_and_select_focused_eq (st : sel_state) :
+  let clear_eager :=
+    let _ := dedup_keep_first [] (sel_available st) in
+    {| sel_available := sel_available st; sel_selected := []; sel_focused := sel_focused st; sel_hovered := None |} in
+  let clear_lazy :=
+    {| sel_available := sel_available st; sel_selected := []; sel_focused := sel_focused st; sel_hovered := None |} in
+  let focus_sel := match sel_focused st with Some f => [f] | None => [] end in
+  clear_eager = clear_lazy /\
+  (forall f, sel_focused st = Some f -> mem_id f (sel_available st) = true ->
+    List.filter (fun id => mem_id id (sel_available st)) focus_sel = focus_sel).
+Proof.
+  cbv zeta. split; [reflexivity |].
+  intros f Hf Hmem. rewrite Hf; simpl. rewrite Hmem; reflexivity.
+Qed.

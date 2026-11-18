@@ -33,6 +33,9 @@ Print Assumptions hamilton_quotas_conserve_budget.
 Print Assumptions selection_reconcile_preserves_hidden_and_idempotent.
 Print Assumptions length_prefixed_key_injective.
 Print Assumptions lttb_precomputed_cross_eq_area.
+Print Assumptions beeswarm_simd_chunked_clear_eq_scalar.
+Print Assumptions contour_compact_nonempty_cells_membership_eq.
+Print Assumptions lazy_selection_clear_and_select_focused_eq.
 
 (* Pure.GeometryGeo *)
 Print Assumptions marching_squares_cell_degree_balanced.
@@ -59,3 +62,5 @@ Print Assumptions naive_lasso_raw_delta_starves_falsified.
 Print Assumptions reactive_force_revision_fences_stale_worker.
 Print Assumptions naive_reactive_force_unversioned_clobbers_falsified.
 Print Assumptions svg_bounded_mark_path_excludes_outer_ancestors.
+Print Assumptions lasso_decimate_exact_count_and_head.
+Print Assumptions settled_keyed_transition_fast_path_eq.

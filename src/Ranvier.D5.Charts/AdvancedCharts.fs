@@ -1,6 +1,9 @@
 namespace Ranvier.D5.Charts
 
 open System
+#if !FABLE_COMPILER
+open System.Runtime.Intrinsics
+#endif
 open Ranvier.D5
 
 /// <summary>Points joined in Order (for example time); missing coordinates break the line.</summary>
@@ -136,37 +139,150 @@ module internal AdvancedCharts =
             let areas,semantics,hits=List.unzip3 entries
             Recipe.output spec.Frame bounds (List.concat areas) semantics hits [])
 
+#if !FABLE_COMPILER
+    let private isClearSimd (placedX:float array) (placedY:float array) window count (x:float) (y:float) (threshSq:float) =
+        let mutable i = window
+        let mutable ok = true
+        if Vector512.IsHardwareAccelerated && count - i >= 8 then
+            let vx = Vector512.Create(x)
+            let vy = Vector512.Create(y)
+            let vThresh = Vector512.Create(threshSq)
+            let refX = &System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(placedX)
+            let refY = &System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(placedY)
+            while ok && i <= count - 8 do
+                let dx = Vector512.LoadUnsafe(&refX, unativeint i) - vx
+                let dy = Vector512.LoadUnsafe(&refY, unativeint i) - vy
+                let d2 = Vector512.MultiplyAddEstimate(dx, dx, dy * dy)
+                if Vector512.LessThanAny(d2, vThresh) then ok <- false
+                i <- i + 8
+        if ok && Vector256.IsHardwareAccelerated && count - i >= 4 then
+            let vx = Vector256.Create(x)
+            let vy = Vector256.Create(y)
+            let vThresh = Vector256.Create(threshSq)
+            let refX = &System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(placedX)
+            let refY = &System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(placedY)
+            while ok && i <= count - 4 do
+                let dx = Vector256.LoadUnsafe(&refX, unativeint i) - vx
+                let dy = Vector256.LoadUnsafe(&refY, unativeint i) - vy
+                let d2 = Vector256.MultiplyAddEstimate(dx, dx, dy * dy)
+                if Vector256.LessThanAny(d2, vThresh) then ok <- false
+                i <- i + 4
+        if ok && Vector128.IsHardwareAccelerated && count - i >= 2 then
+            let vx = Vector128.Create(x)
+            let vy = Vector128.Create(y)
+            let vThresh = Vector128.Create(threshSq)
+            let refX = &System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(placedX)
+            let refY = &System.Runtime.InteropServices.MemoryMarshal.GetArrayDataReference(placedY)
+            while ok && i <= count - 2 do
+                let dx = Vector128.LoadUnsafe(&refX, unativeint i) - vx
+                let dy = Vector128.LoadUnsafe(&refY, unativeint i) - vy
+                let d2 = Vector128.MultiplyAddEstimate(dx, dx, dy * dy)
+                if Vector128.LessThanAny(d2, vThresh) then ok <- false
+                i <- i + 2
+        while ok && i < count do
+            let dx = placedX[i] - x
+            let dy = placedY[i] - y
+            if dx * dx + dy * dy < threshSq then ok <- false
+            i <- i + 1
+        ok
+#else
+    let private isClearSimd (placedX:float array) (placedY:float array) window count (x:float) (y:float) (threshSq:float) =
+        let mutable i = window
+        let mutable ok = true
+        while ok && i < count do
+            let dx = placedX[i] - x
+            let dy = placedY[i] - y
+            if dx * dx + dy * dy < threshSq then ok <- false
+            i <- i + 1
+        ok
+#endif
+
+    let private dodgeSorted radius (sortedX:float array) =
+        let n = sortedX.Length
+        let placedX = Array.zeroCreate<float> n
+        let placedY = Array.zeroCreate<float> n
+        let diameter = 2. * radius
+        let diamSq = diameter * diameter
+        let minClear = diameter * (1. - 1e-12)
+        let threshSq = minClear * minClear
+        let mutable window = 0
+        for idx = 0 to n - 1 do
+            let x = sortedX[idx]
+            while window < idx && x - placedX[window] >= diameter do
+                window <- window + 1
+            // Proven in SamplingSelection.v (beeswarm_simd_chunked_clear_eq_scalar)
+            let y =
+                if isClearSimd placedX placedY window idx x 0. threshSq then 0.
+                else
+                    let mutable bestAbs = infinity
+                    let mutable bestY = infinity
+                    for j = window to idx - 1 do
+                        let dx = placedX[j] - x
+                        let py = placedY[j]
+                        let dy = sqrt (max 0. (diamSq - dx * dx))
+                        let c1 = py + dy
+                        let a1 = abs c1
+                        if (a1 < bestAbs || (a1 = bestAbs && c1 < bestY)) && isClearSimd placedX placedY window idx x c1 threshSq then
+                            bestAbs <- a1
+                            bestY <- c1
+                        let c2 = py - dy
+                        let a2 = abs c2
+                        if (a2 < bestAbs || (a2 = bestAbs && c2 < bestY)) && isClearSimd placedX placedY window idx x c2 threshSq then
+                            bestAbs <- a2
+                            bestY <- c2
+                    bestY
+            placedX[idx] <- x
+            placedY[idx] <- y
+        placedY
+
     /// Greedy dodge in X order: each circle takes the smallest |offset| that clears every placed neighbour within one diameter.
     let swarm radius (positions:(string*float) list) =
-        let placed=ResizeArray<struct(float*float)>()
-        let diameter=2.*radius
-        // Circles arrive in x order, so only a sliding window of the last diameter can collide.
-        let mutable window=0
-        positions |> List.sortBy(fun (id,x) -> x,id) |> List.map(fun (id,x) ->
-            while window<placed.Count && (let struct(px,_)=placed[window] in x-px>=diameter) do window<-window+1
-            let neighbours=[for index in window..placed.Count-1 -> placed[index]]
-            let clear y=neighbours |> List.forall(fun (struct(px,py)) -> Double.Hypot(px-x,py-y)>=diameter*(1.-1e-12))
-            let candidates=
-                0.::(neighbours |> List.collect(fun (struct(px,py)) ->
-                    let dy=sqrt(max 0. (diameter*diameter-(px-x)*(px-x)))
-                    [py+dy;py-dy]))
-            let y=candidates |> List.filter clear |> List.sortBy(fun y -> abs y,y) |> List.head
-            placed.Add(struct(x,y))
-            id,x,y)
+        let arr = positions |> List.toArray
+        Array.sortInPlaceWith (fun (idA:string, xA:float) (idB:string, xB:float) ->
+            let cx = compare xA xB
+            if cx <> 0 then cx else String.CompareOrdinal(idA, idB)) arr
+        let sortedX = Array.init arr.Length (fun i -> snd arr[i])
+        let placedY = dodgeSorted radius sortedX
+        let mutable res = []
+        for i = arr.Length - 1 downto 0 do
+            let id, x = arr[i]
+            res <- (id, x, placedY[i]) :: res
+        res
 
     let beeswarm (spec:BeeswarmSpec<'T>) data =
         Recipe.run spec.Frame spec.Key data (fun bounds ->
             if not(Double.IsFinite spec.Radius && spec.Radius>0.) then invalidArg "spec" "Beeswarm radius must be positive and finite."
             if List.length data>20000 then invalidArg "data" "Beeswarm is limited to 20,000 marks."
             let x=Scale.linear (Recipe.domain spec.XDomain (data |> List.map spec.X.Read)) (Bounds.x bounds,Bounds.x bounds+Bounds.width bounds)
-            let byId=data |> List.map(fun datum -> spec.Key datum,datum) |> Map.ofList
-            let centre=Bounds.y bounds+Bounds.height bounds/2.
-            let placed=swarm spec.Radius (data |> List.choose(fun datum -> spec.X.Read datum |> Option.map(fun value -> spec.Key datum,Scale.map x value)))
-            let marks,semantics,hits=
-                placed |> List.map(fun (id,px,offset) ->
-                    let datum=byId[id]
-                    dot (Recipe.key ["bee";id]) (String.Concat(id,": ",spec.X.Label," ",Recipe.number (spec.X.Read datum).Value)) (spec.Color datum) (Point.create px (centre+offset)) spec.Radius [id])
-                |> List.unzip3
+            let centre=Bounds.y bounds+Bounds.height bounds*0.5
+            let items=ResizeArray<struct(float*string*float*'T)>()
+            for datum in data do
+                match spec.X.Read datum with
+                | Some rawVal ->
+                    let id=spec.Key datum
+                    items.Add(struct(Scale.map x rawVal, id, rawVal, datum))
+                | None -> ()
+            let arr=items.ToArray()
+            Array.sortInPlaceWith (fun struct(xA:float,idA:string,_,_) struct(xB:float,idB:string,_,_) ->
+                let cx=compare xA xB
+                if cx<>0 then cx else String.CompareOrdinal(idA,idB)) arr
+            let n=arr.Length
+            let sortedX=Array.init n (fun i -> let struct(px,_,_,_)=arr[i] in px)
+            let offsets=dodgeSorted spec.Radius sortedX
+            let circlePath=Shape.symbol Symbol.Circle (Math.PI*spec.Radius*spec.Radius)
+            let mutable marks=[]
+            let mutable semantics=[]
+            let mutable hits=[]
+            for i=n-1 downto 0 do
+                let struct(px,id,rawVal,datum)=arr[i]
+                let center=Point.create px (centre+offsets[i])
+                let markKey=Recipe.key2 "bee" id
+                let label=String.Concat(id,": ",spec.X.Label," ",Recipe.number rawVal)
+                let ids=[id]
+                let mark=Mark.path markKey circlePath |> Mark.withTransform(Transform.translate center.X center.Y) |> Mark.withFill(spec.Color datum) |> Mark.withLabel(Some label)
+                marks<-mark::marks
+                semantics<-Recipe.semantic markKey ids label::semantics
+                hits<-Recipe.hit markKey ids (HitPoint(center,spec.Radius))::hits
             Recipe.output spec.Frame bounds marks semantics hits (Recipe.axes bounds x (Scale.linear (0.,1.) (Bounds.y bounds+Bounds.height bounds,Bounds.y bounds)) |> List.filter(fun mark -> (Mark.key mark).StartsWith "x/")))
 
     let adjacencyMatrix (spec:AdjacencyMatrixSpec) =

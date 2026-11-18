@@ -16,13 +16,14 @@ module PackConfig =
 [<RequireQualifiedAccess>]
 module Pack =
     // Front-chain placement adapted from d3-hierarchy 3.1.2 (ISC).
-    let private siblings (r:float[]) (x:float[]) (y:float[]) =
-        let n=r.Length
-        let place b a c =
+    let private siblings (n:int) (r:float[]) (x:float[]) (y:float[]) (next:int[]) (previous:int[]) =
+        let inline place b a c =
             let dx,dy=x[b]-x[a],y[b]-y[a]
             let d2=dx*dx+dy*dy
             if d2=0. then x[c]<-x[a]+r[c];y[c]<-y[a] else
-            let a2,b2=(r[a]+r[c])**2.,(r[b]+r[c])**2.
+            let rac=r[a]+r[c]
+            let rbc=r[b]+r[c]
+            let a2,b2=rac*rac,rbc*rbc
             if a2>b2 then
                 let along=(d2+b2-a2)/(2.*d2)
                 let perpendicular=sqrt(max 0. (b2/d2-along*along))
@@ -33,24 +34,24 @@ module Pack =
                 let perpendicular=sqrt(max 0. (a2/d2-along*along))
                 x[c]<-x[a]+along*dx-perpendicular*dy
                 y[c]<-y[a]+along*dy+perpendicular*dx
-        let intersects a b =
+        let inline intersects a b =
             let radius=(r[a]+r[b])*(1.-1e-12)
             let dx,dy=x[a]-x[b],y[a]-y[b]
             radius>0. && radius*radius>dx*dx+dy*dy
         if n=0 then 0.
-        elif n=1 then r[0]
+        elif n=1 then
+            x[0]<-0.;y[0]<-0.
+            r[0]
         else
-            x[0]<- -r[1];x[1]<-r[0]
+            x[0]<- -r[1];y[0]<-0.;x[1]<-r[0];y[1]<-0.
             if n>2 then
                 place 1 0 2
-                let next=Array.zeroCreate n
-                let previous=Array.zeroCreate n
                 next[0]<-1;previous[1]<-0;next[1]<-2;previous[2]<-1;next[2]<-0;previous[0]<-2
-                let score a =
+                let inline score a =
                     let b=next[a]
-                    let radius=r[a]+r[b]
-                    let dx=(x[a]*r[b]+x[b]*r[a])/radius
-                    let dy=(y[a]*r[b]+y[b]*r[a])/radius
+                    let invRadius=1./(r[a]+r[b])
+                    let dx=(x[a]*r[b]+x[b]*r[a])*invRadius
+                    let dy=(y[a]*r[b]+y[b]*r[a])*invRadius
                     dx*dx+dy*dy
                 let mutable a,b,i=0,1,3
                 while i<n do
@@ -75,14 +76,19 @@ module Pack =
                         b<-next[a];i<-i+1
             // A conservative linear enclosure avoids recursive minimum-circle solvers.
             let mutable left,right,top,bottom=Double.PositiveInfinity,Double.NegativeInfinity,Double.PositiveInfinity,Double.NegativeInfinity
-            for i in 0..n-1 do
-                left<-min left (x[i]-r[i]);right<-max right (x[i]+r[i])
-                top<-min top (y[i]-r[i]);bottom<-max bottom (y[i]+r[i])
-            let cx,cy=(left+right)/2.,(top+bottom)/2.
+            for i=0 to n-1 do
+                let xi,yi,ri=x[i],y[i],r[i]
+                if xi-ri<left then left<-xi-ri
+                if xi+ri>right then right<-xi+ri
+                if yi-ri<top then top<-yi-ri
+                if yi+ri>bottom then bottom<-yi+ri
+            let cx,cy=(left+right)*0.5,(top+bottom)*0.5
             let mutable radius=0.
-            for i in 0..n-1 do
-                x[i]<-x[i]-cx;y[i]<-y[i]-cy
-                radius<-max radius (sqrt(x[i]*x[i]+y[i]*y[i])+r[i])
+            for i=0 to n-1 do
+                let nx,ny=x[i]-cx,y[i]-cy
+                x[i]<-nx;y[i]<-ny
+                let ext=sqrt(nx*nx+ny*ny)+r[i]
+                if ext>radius then radius<-ext
             radius
 
     /// <summary>Returns one circle per node in preorder, with leaf area proportional to value and the root centered in the bounds with diameter
@@ -93,29 +99,72 @@ module Pack =
             if config.Padding<0. then invalidArg "padding" "Padding must be nonnegative."
             let index=HierarchyIndex.create root
             let values=HierarchyWeights.values config.SumPolicy index
-            let maximum=Array.max values
-            let radii=Array.zeroCreate values.Length
-            let x,y=Array.zeroCreate values.Length,Array.zeroCreate values.Length
-            let own=values |> Array.mapi(fun i total -> max 0. (total-(index.Children[i] |> Seq.map(fun child -> values[child]) |> Data.sum)))
-            let leafRadius value=if maximum=0. then 1. else sqrt value / sqrt maximum
+            let nodeCount=values.Length
+            let mutable maximum=Double.NegativeInfinity
+            let mutable maxChildren=0
+            for i=0 to nodeCount-1 do
+                if values[i]>maximum then maximum<-values[i]
+                let cl=index.Children[i].Length
+                if cl>maxChildren then maxChildren<-cl
+            let radii=Array.zeroCreate<float> nodeCount
+            let x,y=Array.zeroCreate<float> nodeCount,Array.zeroCreate<float> nodeCount
+            let own =
+                if config.SumPolicy=HierarchySumPolicy.IncludeOwnWeight then
+                    let arr=Array.zeroCreate<float> nodeCount
+                    for i=0 to nodeCount-1 do
+                        let children=index.Children[i]
+                        let mutable childSum=0.
+                        let mutable corr=0.
+                        for c=0 to children.Length-1 do
+                            let v=values[children[c]]-corr
+                            let t=childSum+v
+                            corr<-(t-childSum)-v
+                            childSum<-t
+                        arr[i]<-max 0. (values[i]-childSum)
+                    arr
+                else [||]
+            let invSqrtMax=if maximum=0. then 0. else 1./sqrt maximum
+            let inline leafRadius value=if maximum=0. then 1. else sqrt value*invSqrtMax
+            let scratchCap=maxChildren+1
+            let positive=Array.zeroCreate<int> scratchCap
+            let sizes=Array.zeroCreate<float> scratchCap
+            let cx,cy=Array.zeroCreate<float> scratchCap,Array.zeroCreate<float> scratchCap
+            let nextBuf,prevBuf=Array.zeroCreate<int> scratchCap,Array.zeroCreate<int> scratchCap
             let pack padding =
-                for i in index.Postorder do
+                let halfPad=padding*0.5
+                for pIdx=0 to index.Postorder.Length-1 do
+                    let i=index.Postorder[pIdx]
                     let children=index.Children[i]
                     if children.Length=0 then radii[i]<-leafRadius values[i] else
-                    let positive=children |> Array.filter(fun child -> radii[child]>0.)
+                    let mutable posCount=0
+                    for c=0 to children.Length-1 do
+                        let child=children[c]
+                        let cr=radii[child]
+                        if cr>0. then
+                            positive[posCount]<-child
+                            sizes[posCount]<-cr+halfPad
+                            posCount<-posCount+1
                     let ownRadius=if config.SumPolicy=HierarchySumPolicy.IncludeOwnWeight && own[i]>0. then leafRadius own[i] else 0.
-                    let sizes=positive |> Array.map(fun child -> radii[child]+padding/2.)
-                    let sizes=if ownRadius>0. then Array.append sizes [|ownRadius+padding/2.|] else sizes
-                    let cx,cy=Array.zeroCreate sizes.Length,Array.zeroCreate sizes.Length
-                    radii[i]<-siblings sizes cx cy+padding/2.
-                    for j in 0..positive.Length-1 do x[positive[j]]<-cx[j];y[positive[j]]<-cy[j]
+                    let mutable totalSizes=posCount
+                    if ownRadius>0. then
+                        sizes[totalSizes]<-ownRadius+halfPad
+                        totalSizes<-totalSizes+1
+                    radii[i]<-siblings totalSizes sizes cx cy nextBuf prevBuf+halfPad
+                    for j=0 to posCount-1 do
+                        let ch=positive[j]
+                        x[ch]<-cx[j];y[ch]<-cy[j]
             pack 0.
             let diameter=min (Bounds.width config.Bounds) (Bounds.height config.Bounds)
             if config.Padding>0. && diameter>0. then pack (min 1. (config.Padding/diameter)*2.*radii[0])
-            let scale=if radii[0]=0. then 0. else diameter/2./radii[0]
-            x[0]<-Bounds.x config.Bounds+Bounds.width config.Bounds/2.
-            y[0]<-Bounds.y config.Bounds+Bounds.height config.Bounds/2.
-            for i in 1..values.Length-1 do
-                x[i]<-x[index.Parents[i]]+x[i]*scale
-                y[i]<-y[index.Parents[i]]+y[i]*scale
-            index.Items |> Array.mapi(fun i item -> {Id=item.Id;Parent=item.Parent;Depth=item.Depth;Center=Point.create x[i] y[i];Radius=radii[i]*scale}) |> Array.toList)
+            let scale=if radii[0]=0. then 0. else diameter*0.5/radii[0]
+            x[0]<-Bounds.x config.Bounds+Bounds.width config.Bounds*0.5
+            y[0]<-Bounds.y config.Bounds+Bounds.height config.Bounds*0.5
+            for i=1 to nodeCount-1 do
+                let p=index.Parents[i]
+                x[i]<-x[p]+x[i]*scale
+                y[i]<-y[p]+y[i]*scale
+            let mutable result=[]
+            for i=nodeCount-1 downto 0 do
+                let item=index.Items[i]
+                result<-{Id=item.Id;Parent=item.Parent;Depth=item.Depth;Center=Point.create x[i] y[i];Radius=radii[i]*scale}::result
+            result)

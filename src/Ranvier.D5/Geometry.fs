@@ -140,18 +140,23 @@ module Transform =
                 if Double.IsFinite ia && Double.IsFinite ib && Double.IsFinite ic && Double.IsFinite id && Double.IsFinite ie && Double.IsFinite iff then
                     Some { A=ia; B=ib; C=ic; D=id; E=ie; F=iff }
                 else None
+    let private identitySvg = "matrix(1 0 0 1 0 0)"
     /// <summary>Serializes a culture-independent SVG matrix.</summary>
     let toSvg matrix =
-        let buf = Number.getBuffer ()
-        let sb = StringBuilder(64)
-        sb.Append "matrix(" |> ignore
-        Number.appendWith buf sb matrix.A; sb.Append ' ' |> ignore
-        Number.appendWith buf sb matrix.B; sb.Append ' ' |> ignore
-        Number.appendWith buf sb matrix.C; sb.Append ' ' |> ignore
-        Number.appendWith buf sb matrix.D; sb.Append ' ' |> ignore
-        Number.appendWith buf sb matrix.E; sb.Append ' ' |> ignore
-        Number.appendWith buf sb matrix.F; sb.Append ')' |> ignore
-        sb.ToString()
+        if Object.ReferenceEquals(matrix, identity) ||
+           (matrix.A = 1. && matrix.B = 0. && matrix.C = 0. && matrix.D = 1. && matrix.E = 0. && matrix.F = 0.) then
+            identitySvg
+        else
+            let buf = Number.getBuffer ()
+            let sb = StringBuilder(64)
+            sb.Append "matrix(" |> ignore
+            Number.appendWith buf sb matrix.A; sb.Append ' ' |> ignore
+            Number.appendWith buf sb matrix.B; sb.Append ' ' |> ignore
+            Number.appendWith buf sb matrix.C; sb.Append ' ' |> ignore
+            Number.appendWith buf sb matrix.D; sb.Append ' ' |> ignore
+            Number.appendWith buf sb matrix.E; sb.Append ' ' |> ignore
+            Number.appendWith buf sb matrix.F; sb.Append ')' |> ignore
+            sb.ToString()
 
 /// <summary>Immutable SVG path instructions; arc rotation is in degrees.</summary>
 type PathCommand =

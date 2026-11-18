@@ -82,9 +82,33 @@ module Polygon =
     /// ArgumentException for non-finite coordinates.</summary>
     let contains (point:Point) points =
         Check.finite "x" point.X;Check.finite "y" point.Y
-        let vertices=List.toArray points
-        for vertex in vertices do Check.finite "x" vertex.X;Check.finite "y" vertex.Y
-        containsArrayWithCancellation System.Threading.CancellationToken.None point vertices
+        match points with
+        | [] -> false
+        | first :: rest ->
+            Check.finite "x" first.X;Check.finite "y" first.Y
+            let px = point.X
+            let py = point.Y
+            let mutable winding = 0
+            let mutable boundary = false
+            let inline stepEdge (a:Point) (b:Point) =
+                if not ((a.Y < py && b.Y < py) || (a.Y > py && b.Y > py)) then
+                    let orientation = Predicates.orient2d a b point
+                    if orientation = 0 && px >= min a.X b.X && px <= max a.X b.X && py >= min a.Y b.Y && py <= max a.Y b.Y then
+                        boundary <- true
+                    elif a.Y <= py && b.Y > py && orientation > 0 then
+                        winding <- winding + 1
+                    elif a.Y > py && b.Y <= py && orientation < 0 then
+                        winding <- winding - 1
+            let mutable a = first
+            let mutable cur = rest
+            while not cur.IsEmpty do
+                let b = cur.Head
+                Check.finite "x" b.X;Check.finite "y" b.Y
+                stepEdge a b
+                a <- b
+                cur <- cur.Tail
+            stepEdge a first
+            boundary || winding <> 0
 
     let private pointLexComparer =
         { new System.Collections.Generic.IComparer<Point> with
