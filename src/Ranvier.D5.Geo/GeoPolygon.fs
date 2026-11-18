@@ -24,12 +24,12 @@ module internal GeoPolygon =
         for ring in rings do
             if ring.Length>0 then
                 let mutable previous=ring[ring.Length-1]
+                let mutable struct(sin0,cos0)=GeoMath.sinCosDegrees(previous.Latitude/2.+45.)
                 for current in ring do
                     spend 1L
                     let delta=current.Longitude-previous.Longitude
                     let sign=if delta>=0. then 1. else -1.
                     let antimeridian=abs delta>180.
-                    let struct(sin0,cos0)=GeoMath.sinCosDegrees(previous.Latitude/2.+45.)
                     let struct(sin1,cos1)=GeoMath.sinCosDegrees(current.Latitude/2.+45.)
                     let struct(sinDelta,cosDelta)=GeoMath.sinCosDegrees(abs delta)
                     let k=sin0*sin1
@@ -56,6 +56,8 @@ module internal GeoPolygon =
                             if point.Latitude>latitude || (point.Latitude=latitude && (nx<>0. || ny<>0.)) then
                                 winding<-winding+(if reversed then 1 else -1)
                     previous<-current
+                    sin0<-sin1
+                    cos0<-cos1
         let southInside=angle< -1e-9 || (abs angle<1e-9 && area<0.)
         if point.Latitude= -90. then southInside else southInside <> (winding%2<>0)
 
@@ -73,6 +75,8 @@ module internal GeoPolygon =
             let struct(_,capSine,capCosine)=cap |> ValueOption.defaultValue struct(0.,0.,0.)
             let origin=screen(position 0. 0.)
             let scale=Projection.scale projection
+            // Boundary chords of a screen circle with this radius stay within precision.
+            let boundaryRadius=if circular then scale*Projection.clipPlaneRadius projection else scale
             let period=if circular then 2.*Math.PI else 4.
             let normalize value =
                 let result=value%period
@@ -80,13 +84,22 @@ module internal GeoPolygon =
             let boundaryPosition amount =
                 let t=normalize amount
                 if circular then
-                    let sine,cosine=sin t,cos t
+                    let struct(sine,cosine)=Math.SinCos t
                     GeoMath.position(struct(capCosine,capSine*sine,capSine*cosine))
                 elif t<=1. then position (-180.+360.*t) (latitude halfHeight)
                 elif t<=2. then position 180. (latitude(halfHeight-2.*halfHeight*(t-1.)))
                 elif t<=3. then position (180.-360.*(t-2.)) (latitude -halfHeight)
                 else position -180. (latitude(-halfHeight+2.*halfHeight*(t-3.)))
-            let boundaryPoint amount = boundaryPosition amount |> screen
+            let boundaryPoint amount =
+                if circular then
+                    let t=normalize amount
+                    let struct(sine,cosine)=Math.SinCos t
+                    let x=origin.X+boundaryRadius*sine
+                    let y=origin.Y-boundaryRadius*cosine
+                    if Double.IsFinite x && Double.IsFinite y then {X=x;Y=y}
+                    else raise(Rejected(InvalidObservation "Polygon preclipping left an undefined projected vertex."))
+                else
+                    boundaryPosition amount |> screen
             let northLimit=latitude halfHeight
             // Preclipping leaves open fragments on the cap circle, an exact seam longitude or an exact pole or band latitude.
             let parameter (point:GeoPosition) =
@@ -97,8 +110,6 @@ module internal GeoPolygon =
                 elif point.Longitude>=180. then 1.+Math.Clamp((northLimit-point.Latitude)/(2.*northLimit),0.,1.)
                 elif point.Latitude<= -northLimit then 2.+Math.Clamp((180.-point.Longitude)/360.,0.,1.)
                 else normalize(3.+Math.Clamp((point.Latitude+northLimit)/(2.*northLimit),0.,1.))
-            // Boundary chords of a screen circle with this radius stay within precision.
-            let boundaryRadius=if circular then scale*Projection.clipPlaneRadius projection else scale
             let maxAngle=4.*asin(sqrt(min 0.5 (precision/boundaryRadius/2.)))
             let checkBuffer count =
                 if count>maxBuffer then raise(Rejected(BudgetExceeded "Polygon clipping exceeds its vertex buffer budget."))
@@ -173,23 +184,19 @@ module internal GeoPolygon =
                 Boundary=fun point -> add(screen point);endPosition<-point
                 Finish=finish
             }
-            let rotated=ResizeArray<GeoPosition array>()
-            for ring in rings do
+            let rotated=Array.zeroCreate<GeoPosition array> rings.Length
+            for rIdx=0 to rings.Length-1 do
+                let ring=rings[rIdx]
                 spend 1L
                 let transformed=Array.zeroCreate<GeoPosition> ring.Length
                 for index=0 to ring.Length-1 do
                     spend 1L
                     transformed[index]<-GeoPreclip.rotateKeepingSeam projection ring[index]
-                rotated.Add transformed
+                rotated[rIdx]<-transformed
                 if ring.Length>0 then
                     let start=fragments.Count
                     checkBuffer(ring.Length+1)
-                    let closed=Array.zeroCreate<GeoPosition>(ring.Length+1)
-                    for index=0 to ring.Length-1 do
-                        spend 1L
-                        closed[index]<-ring[index]
-                    closed[ring.Length]<-ring[0]
-                    match GeoPreclip.line projection spend sink closed with
+                    match GeoPreclip.rotatedClosedRing projection spend sink transformed with
                     | Error error -> raise(Rejected error)
                     | Ok () -> ()
                     if fragments.Count-start>1 then
@@ -207,7 +214,6 @@ module internal GeoPolygon =
                             fragments[start]<-struct(merged,lastStart,firstEnd)
                             fragments.RemoveAt(fragments.Count-1)
                             buffered<-buffered-1
-            let rotated=rotated.ToArray()
             // Rings lying wholly on the cut, such as the GeoJSON world box, enclose zero spherical area. Their planar
             // longitude/latitude winding decides instead: clockwise covers the world and the reverse covers nothing.
             let onCut (point:GeoPosition)=abs point.Longitude=180. || abs point.Latitude=90.

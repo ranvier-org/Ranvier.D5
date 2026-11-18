@@ -225,23 +225,79 @@ module Projection =
 
     let internal projectRotatedValue projection (rotated:GeoPosition) =
         let config=projection.Config
-        let visible =
+        let projected =
             match config.Kind with
             | ProjectionKind.Orthographic ->
-                let struct(_,cosLongitude)=GeoMath.sinCosDegrees rotated.Longitude
-                let struct(_,cosLatitude)=GeoMath.sinCosDegrees rotated.Latitude
+                let struct(sinLongitude,cosLongitude)=GeoMath.sinCosDegrees rotated.Longitude
+                let struct(sinLatitude,cosLatitude)=GeoMath.sinCosDegrees rotated.Latitude
                 // Points snapped onto the limb by cap clipping can round a unit roundoff behind it.
-                cosLongitude*cosLatitude >= -1e-12
-            | _ -> true
-        if not visible then ValueNone
-        else
-            match raw config.Kind (struct(projection.ConicN,projection.ConicA,projection.ConicB)) rotated with
-            | ValueNone -> ValueNone
-            | ValueSome struct(x,y) ->
-                let screenX=config.Translate.X + config.Scale*(x-projection.CenterX)
-                let screenY=config.Translate.Y - config.Scale*(y-projection.CenterY)
-                if Double.IsFinite screenX && Double.IsFinite screenY then ValueSome {X=screenX;Y=screenY}
+                if cosLongitude*cosLatitude >= -1e-12 then ValueSome(struct(cosLatitude*sinLongitude,sinLatitude))
                 else ValueNone
+            | _ ->
+                raw config.Kind (struct(projection.ConicN,projection.ConicA,projection.ConicB)) rotated
+        match projected with
+        | ValueNone -> ValueNone
+        | ValueSome struct(x,y) ->
+            let screenX=config.Translate.X + config.Scale*(x-projection.CenterX)
+            let screenY=config.Translate.Y - config.Scale*(y-projection.CenterY)
+            if Double.IsFinite screenX && Double.IsFinite screenY then ValueSome {X=screenX;Y=screenY}
+            else ValueNone
+
+    let internal supportsCartesianResample projection =
+        match projection.Config.Kind with
+        | ProjectionKind.Orthographic
+        | ProjectionKind.AzimuthalEqualArea
+        | ProjectionKind.AzimuthalEquidistant
+        | ProjectionKind.Gnomonic
+        | ProjectionKind.Stereographic
+        | ProjectionKind.TransverseMercator -> true
+        | _ -> false
+
+    let internal projectRotatedCartesianValue projection seamLongitudeRadians x y z =
+        let config=projection.Config
+        let projected =
+            match config.Kind with
+            | ProjectionKind.Orthographic ->
+                if x >= -1e-12 then ValueSome(struct(y,z)) else ValueNone
+            | ProjectionKind.AzimuthalEqualArea ->
+                if x <= -1. then ValueNone
+                else
+                    let k=sqrt(2./(1.+x))
+                    if Double.IsFinite k then ValueSome(struct(k*y,k*z)) else ValueNone
+            | ProjectionKind.AzimuthalEquidistant ->
+                if x <= -1. then ValueNone
+                else
+                    let c=acos(Math.Clamp(x,-1.,1.))
+                    let k=if c=0. then 1. else c/sin c
+                    if Double.IsFinite k then ValueSome(struct(k*y,k*z)) else ValueNone
+            | ProjectionKind.Gnomonic ->
+                if x <= 0. then ValueNone
+                else
+                    let inv=1./x
+                    if Double.IsFinite inv then ValueSome(struct(inv*y,inv*z)) else ValueNone
+            | ProjectionKind.Stereographic ->
+                if x <= -1. then ValueNone
+                else
+                    let k=1./(1.+x)
+                    if Double.IsFinite k then ValueSome(struct(k*y,k*z)) else ValueNone
+            | ProjectionKind.TransverseMercator ->
+                let rxy=Double.Hypot(x,y)
+                if rxy=0. then ValueNone
+                else
+                    let lonRad =
+                        if seamLongitudeRadians<>0. then seamLongitudeRadians
+                        else
+                            let v=atan2 y x
+                            if v>=Math.PI then v-2.*Math.PI else v
+                    ValueSome(struct(Math.Asinh(z/rxy),-lonRad))
+            | _ -> ValueNone
+        match projected with
+        | ValueNone -> ValueNone
+        | ValueSome struct(rx,ry) ->
+            let screenX=config.Translate.X + config.Scale*(rx-projection.CenterX)
+            let screenY=config.Translate.Y - config.Scale*(ry-projection.CenterY)
+            if Double.IsFinite screenX && Double.IsFinite screenY then ValueSome {X=screenX;Y=screenY}
+            else ValueNone
 
     let internal projectValue projection position = projectRotatedValue projection (rotate projection position)
 

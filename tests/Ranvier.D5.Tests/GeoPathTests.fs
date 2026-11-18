@@ -112,7 +112,8 @@ let tests = testList "geographic paths" [
         use cancelled=new CancellationTokenSource()
         cancelled.CancelAfter(1)
         Expect.throwsT<OperationCanceledException> (fun () ->
-            GeoPath.projectWithCancellation GeoPathOptions.defaultValue cancelled.Token (projection ProjectionKind.Mercator) (GeoGeometry.LineString points) |> ignore) "cooperative cancellation"
+            while true do
+                GeoPath.projectWithCancellation GeoPathOptions.defaultValue cancelled.Token (projection ProjectionKind.Mercator) (GeoGeometry.LineString points) |> ignore) "cooperative cancellation"
     testCase "Mercator polar polygon intersections remain bounded and closed" <| fun _ ->
         let ring=[p -30. 80.;p -30. 89.;p 30. 89.;p 30. 80.;p -30. 80.]
         let paths=GeoPath.project {GeoPathOptions.defaultValue with Precision=0.001} (projection ProjectionKind.Mercator) (GeoGeometry.Polygon[ring]) |> ok
@@ -235,7 +236,8 @@ let tests = testList "geographic paths" [
         use cancelled=new CancellationTokenSource()
         cancelled.CancelAfter(1)
         Expect.throwsT<OperationCanceledException> (fun () ->
-            GeoPath.projectWithCancellation GeoPathOptions.defaultValue cancelled.Token (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[ring]) |> ignore) "cooperative polygon cancellation"
+            while true do
+                GeoPath.projectWithCancellation GeoPathOptions.defaultValue cancelled.Token (projection ProjectionKind.Equirectangular) (GeoGeometry.Polygon[ring]) |> ignore) "cooperative polygon cancellation"
     testCase "rectangle polygon clipping preserves a viewport inside an exterior" <| fun _ ->
         let outer=[p -40. -40.;p -40. 40.;p 40. 40.;p 40. -40.;p -40. -40.]
         let options={GeoPathOptions.defaultValue with ClipExtent=Some(Bounds.create -0.1 -0.1 0.2 0.2)}

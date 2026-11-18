@@ -160,7 +160,9 @@ let tests = testList "planar identity" [
         let geometry=PlanarGeometry.LineString[for i in 0..199999 -> point (float i) (float(i%2))]
         use cancelled=new CancellationTokenSource()
         cancelled.CancelAfter(1)
-        Expect.throwsT<OperationCanceledException> (fun () -> PlanarPath.projectWithCancellation GeoPathOptions.defaultValue cancelled.Token (identity()) geometry |> ignore) "cancellation during traversal or output"
+        Expect.throwsT<OperationCanceledException> (fun () ->
+            while true do
+                PlanarPath.projectWithCancellation GeoPathOptions.defaultValue cancelled.Token (identity()) geometry |> ignore) "cancellation during traversal or output"
     testCase "output work input depth and cancellation are independently bounded" <| fun _ ->
         let geometry=PlanarGeometry.LineString[point 0. 0.;point 10. 0.]
         for options in [

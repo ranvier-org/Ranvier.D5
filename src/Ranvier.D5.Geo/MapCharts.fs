@@ -113,36 +113,80 @@ module MapChart =
     /// Exteriors share the largest ring's orientation; each opposite ring is a hole of the exterior containing it.
     let private hitPolygons (paths:Path list) =
         paths |> List.collect(fun path ->
-            let rings=rings path |> List.filter(fun ring -> Polygon.area ring<>0.)
-            match rings with
+            let ringAreas =
+                rings path
+                |> List.choose(fun ring ->
+                    let a=Polygon.area ring
+                    if a<>0. then Some(struct(ring,a)) else None)
+            match ringAreas with
             | [] -> []
-            | _ ->
-                let sign=rings |> List.maxBy(fun ring -> abs(Polygon.area ring)) |> Polygon.area |> Math.Sign
-                let exteriors,holes=rings |> List.partition(fun ring -> Math.Sign(Polygon.area ring)=sign)
-                exteriors |> List.map(fun exterior ->
-                    {Outer=exterior;Holes=holes |> List.filter(fun hole -> Polygon.contains hole.Head exterior)}))
+            | struct(_,firstArea)::rest ->
+                let mutable maxAbs=abs firstArea
+                let mutable maxArea=firstArea
+                for struct(_,a) in rest do
+                    let aa=abs a
+                    if aa>maxAbs then
+                        maxAbs<-aa
+                        maxArea<-a
+                let sign=Math.Sign maxArea
+                let exteriors=ResizeArray<Point list>()
+                let holes=ResizeArray<Point list>()
+                for struct(ring,a) in ringAreas do
+                    if Math.Sign a=sign then exteriors.Add ring
+                    else holes.Add ring
+                let holesList=List.ofSeq holes
+                [for index=0 to exteriors.Count-1 do
+                    let exterior=exteriors[index]
+                    yield {Outer=exterior;Holes=holesList |> List.filter(fun hole -> Polygon.contains hole.Head exterior)}])
 
     /// An interior point for selection and labels: the midpoint of the widest inside span on several scanlines,
     /// so concave slivers at a limb or seam still anchor inside their fill rather than on an edge.
     let private anchor (polygons:HitPolygon list) =
-        let candidates=polygons |> List.collect(fun polygon ->
-            let rings=polygon.Outer::polygon.Holes
-            let ys=polygon.Outer |> List.map(fun point -> point.Y)
-            let top,bottom=List.min ys,List.max ys
-            [for step in 1..7 do
-                let y=top+(bottom-top)*float step/8.
-                let crossings=
-                    rings |> List.collect(fun ring ->
-                        (ring@[ring.Head]) |> List.pairwise |> List.choose(fun (a,b) ->
-                            if (a.Y<=y)<>(b.Y<=y) then Some(a.X+(y-a.Y)*(b.X-a.X)/(b.Y-a.Y)) else None))
-                    |> List.sort
-                for pair in crossings |> List.chunkBySize 2 do
-                    match pair with
-                    | [left;right] when right>left -> yield right-left,Point.create ((left+right)/2.) y
-                    | _ -> ()])
-        match candidates with
-        | [] -> (polygons |> List.maxBy(fun polygon -> abs(Polygon.area polygon.Outer))).Outer.Head
-        | _ -> candidates |> List.maxBy fst |> snd
+        let crossings=ResizeArray<float>()
+        let mutable bestWidth= -1.
+        let mutable bestPoint=Unchecked.defaultof<Point>
+        for polygon in polygons do
+            match polygon.Outer with
+            | [] -> ()
+            | firstOuter::restOuter ->
+                let mutable top=firstOuter.Y
+                let mutable bottom=firstOuter.Y
+                for p in restOuter do
+                    if p.Y<top then top<-p.Y
+                    if p.Y>bottom then bottom<-p.Y
+                let ringArrays =
+                    let count=1+polygon.Holes.Length
+                    let arr=Array.zeroCreate<Point array> count
+                    arr[0]<-List.toArray polygon.Outer
+                    let mutable rIdx=1
+                    for hole in polygon.Holes do
+                        arr[rIdx]<-List.toArray hole
+                        rIdx<-rIdx+1
+                    arr
+                for step in 1..7 do
+                    let y=top+(bottom-top)*float step/8.
+                    crossings.Clear()
+                    for r=0 to ringArrays.Length-1 do
+                        let ring=ringArrays[r]
+                        if ring.Length>0 then
+                            let mutable a=ring[ring.Length-1]
+                            for i=0 to ring.Length-1 do
+                                let b=ring[i]
+                                if (a.Y<=y)<>(b.Y<=y) then
+                                    crossings.Add(a.X+(y-a.Y)*(b.X-a.X)/(b.Y-a.Y))
+                                a<-b
+                    crossings.Sort()
+                    let mutable idx=0
+                    while idx+1<crossings.Count do
+                        let left=crossings[idx]
+                        let right=crossings[idx+1]
+                        let width=right-left
+                        if width>0. && width>bestWidth then
+                            bestWidth<-width
+                            bestPoint<-Point.create ((left+right)*0.5) y
+                        idx<-idx+2
+        if bestWidth>=0. then bestPoint
+        else (polygons |> List.maxBy(fun polygon -> abs(Polygon.area polygon.Outer))).Outer.Head
 
     let private run (map:MapFrame) build =
         match ChartLayout.plot map.Frame with

@@ -45,6 +45,11 @@ Print Assumptions packed_contour_edge_order_isomorphic.
 Print Assumptions int128_orient2d_no_overflow.
 Print Assumptions y_straddle_filter_preserves_polygon_containment.
 Print Assumptions delaunay_cw_to_ccw_halfedge_involution.
+Print Assumptions carried_vertex_scan_eq_recomputed.
+Print Assumptions single_rotation_closed_ring_eq.
+Print Assumptions azimuthal_cap_circle_screen_eq.
+Print Assumptions rfc8259_number_scanner_boundaries_sound.
+Print Assumptions soa_point_gap_and_quarter_angle_identities.
 
 (* Pure.TransitionWorker *)
 Print Assumptions transition_retarget_c0_continuous.

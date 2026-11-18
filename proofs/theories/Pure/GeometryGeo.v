@@ -554,3 +554,258 @@ Proof.
       assert (Hm : e mod 3 = 1) by lia.
       rewrite Hm; simpl; repeat split; lia.
 Qed.
+
+(** ** 7. Batch D4 refinements: `Ranvier.D5.Geo` spherical ring caching, single-pass rotation, azimuthal cap circle, & RFC 8259 number scanner *)
+
+Section SphericalRingRefinements.
+  Context {V P R S : Type}.
+
+  Fixpoint ring_scan_recomputed
+      (phi : V -> P) (step : V -> P -> V -> P -> S -> S)
+      (prev : V) (vs : list V) (acc : S) : S :=
+    match vs with
+    | [] => acc
+    | cur :: rest =>
+      ring_scan_recomputed phi step cur rest
+        (step prev (phi prev) cur (phi cur) acc)
+    end.
+
+  Fixpoint ring_scan_carried
+      (phi : V -> P) (step : V -> P -> V -> P -> S -> S)
+      (prev : V) (prev_p : P) (vs : list V) (acc : S) : S :=
+    match vs with
+    | [] => acc
+    | cur :: rest =>
+      let cur_p := phi cur in
+      ring_scan_carried phi step cur cur_p rest
+        (step prev prev_p cur cur_p acc)
+    end.
+
+  (**md
+  **Carrying per-vertex spherical state across ring edges equals recomputing both endpoints per edge (`GeoPolygon.contains`, `GeoMeasure.area`).**
+
+  Whenever `prev_p = phi prev` (such as cached `sinCosDegrees (lat / 2 + 45)` or `canonicalPole`), carrying `cur_p = phi cur` forward as the next iteration's `prev_p` computes `phi` once per ring vertex instead of twice and yields the exact same accumulated state as `ring_scan_recomputed`.
+
+  - [phi:] per-vertex projection/trigonometric preparation.
+  - [step:] edge transition consuming `(prev, phi prev, cur, phi cur, state)`.
+  - [prev:] prior vertex (`ring[ring.Length - 1]` initially).
+  - [vs:] ring vertices traversed in order.
+  - [acc:] initial accumulator state.
+  *)
+  Theorem carried_vertex_scan_eq_recomputed
+      (phi : V -> P) (step : V -> P -> V -> P -> S -> S)
+      (prev : V) (vs : list V) (acc : S) :
+    ring_scan_carried phi step prev (phi prev) vs acc =
+    ring_scan_recomputed phi step prev vs acc.
+  Proof.
+    revert prev acc.
+    induction vs as [|cur rest IH]; intros prev acc; simpl.
+    - reflexivity.
+    - apply IH.
+  Qed.
+
+  Fixpoint preclip_open_rotated
+      (rot : V -> R) (edge : R -> R -> S -> S)
+      (prev_r : R) (vs : list V) (acc : S) : S :=
+    match vs with
+    | [] => acc
+    | v :: rest =>
+      let cur_r := rot v in
+      preclip_open_rotated rot edge cur_r rest (edge prev_r cur_r acc)
+    end.
+
+  Fixpoint preclip_already_rotated
+      (edge : R -> R -> S -> S)
+      (prev_r : R) (rs : list R) (first_r : R) (acc : S) : S :=
+    match rs with
+    | [] => edge prev_r first_r acc
+    | cur_r :: rest =>
+      preclip_already_rotated edge cur_r rest first_r (edge prev_r cur_r acc)
+    end.
+
+  Lemma preclip_already_rotated_map
+      (rot : V -> R) (edge : R -> R -> S -> S)
+      (prev_r : R) (vs : list V) (v0 : V) (acc : S) :
+    preclip_already_rotated edge prev_r (List.map rot vs) (rot v0) acc =
+    preclip_open_rotated rot edge prev_r (Datatypes.app vs [v0]) acc.
+  Proof.
+    revert prev_r acc.
+    induction vs as [|v rest IH]; intros prev_r acc; simpl.
+    - reflexivity.
+    - apply IH.
+  Qed.
+
+  (**md
+  **Preclipping an already-rotated ring with implicit closure equals building `closed = ring ++ [ring[0]]` and rotating again (`GeoPolygon`, `GeoPreclip`).**
+
+  Rotating `v0 :: rest` once into `rot v0 :: map rot rest` and traversing its edges with implicit wrap-around to `rot v0` produces the exact same sink state transition as allocating `closed = (v0 :: rest) ++ [v0]` and applying `rotateKeepingSeam` a second time on every vertex.
+
+  - [rot:] `GeoPreclip.rotateKeepingSeam projection`.
+  - [edge:] `GeoPreclip` per-edge clipper transition.
+  - [v0:] first ring vertex.
+  - [rest:] remaining ring vertices.
+  - [acc:] initial clipper sink state.
+  *)
+  Theorem single_rotation_closed_ring_eq
+      (rot : V -> R) (edge : R -> R -> S -> S)
+      (v0 : V) (rest : list V) (acc : S) :
+    let r0 := rot v0 in
+    preclip_already_rotated edge r0 (List.map rot rest) r0 acc =
+    preclip_open_rotated rot edge (rot v0) (Datatypes.app rest [v0]) acc.
+  Proof.
+    cbv zeta.
+    apply preclip_already_rotated_map.
+  Qed.
+End SphericalRingRefinements.
+
+(**md
+**Azimuthal cap boundary screen projection reduces to a direct circle around `screen(0, 0)` (`GeoPolygon.projectWith`).**
+
+For every azimuthal projection whose raw origin is `(0, 0)` and whose visible cap colatitude maps to raw radius `r_plane` (`raw_x = r_plane * sin_t`, `raw_y = r_plane * cos_t`), applying the affine screen transform `(tx + scale * (raw_x - cx), ty - scale * (raw_y - cy))` equals `(origin_x + (scale * r_plane) * sin_t, origin_y - (scale * r_plane) * cos_t)` where `(origin_x, origin_y)` is the screen projection of `(0, 0)`.
+
+- [tx:] screen translate X (scaled integer).
+- [ty:] screen translate Y (scaled integer).
+- [scale:] projection scale factor.
+- [cx:] raw projection center X.
+- [cy:] raw projection center Y.
+- [r_plane:] `Projection.clipPlaneRadius`.
+- [sin_t:] `sin t` at boundary parameter `t`.
+- [cos_t:] `cos t` at boundary parameter `t`.
+*)
+Theorem azimuthal_cap_circle_screen_eq
+    (tx ty scale cx cy r_plane sin_t cos_t : Z) :
+  let origin_x := tx + scale * (0 - cx) in
+  let origin_y := ty - scale * (0 - cy) in
+  let boundary_r := scale * r_plane in
+  let raw_x := r_plane * sin_t in
+  let raw_y := r_plane * cos_t in
+  tx + scale * (raw_x - cx) = origin_x + boundary_r * sin_t /\
+  ty - scale * (raw_y - cy) = origin_y - boundary_r * cos_t.
+Proof.
+  cbv zeta. split; nia.
+Qed.
+
+(** RFC 8259 Section 6 JSON number token alphabet:
+    0..9 = digits '0'..'9', 10 = '-', 11 = '+', 12 = '.', 13 = 'e'/'E', >=14 = other. *)
+Definition is_digit_tok (c : nat) : bool := Nat.leb c 9%nat.
+Definition is_nonzero_digit_tok (c : nat) : bool := Nat.leb 1%nat c && Nat.leb c 9%nat.
+
+Fixpoint strip_digits (cs : list nat) : list nat :=
+  match cs with
+  | [] => []
+  | c :: rest => if is_digit_tok c then strip_digits rest else c :: rest
+  end.
+
+Definition strip_one_or_more_digits (cs : list nat) : option (list nat) :=
+  match cs with
+  | c :: rest => if is_digit_tok c then Some (strip_digits rest) else None
+  | [] => None
+  end.
+
+Definition strip_int_part (cs : list nat) : option (list nat) :=
+  match cs with
+  | [] => None
+  | c :: rest =>
+    if Nat.eqb c 0%nat then Some rest
+    else if is_nonzero_digit_tok c then Some (strip_digits rest)
+    else None
+  end.
+
+Definition strip_frac_part (cs : list nat) : option (list nat) :=
+  match cs with
+  | c :: rest =>
+    if Nat.eqb c 12%nat then strip_one_or_more_digits rest
+    else Some (c :: rest)
+  | [] => Some []
+  end.
+
+Definition strip_exp_part (cs : list nat) : option (list nat) :=
+  match cs with
+  | c :: rest =>
+    if Nat.eqb c 13%nat then
+      match rest with
+      | s :: rest' =>
+        if Nat.eqb s 10%nat || Nat.eqb s 11%nat then strip_one_or_more_digits rest'
+        else strip_one_or_more_digits (s :: rest')
+      | [] => None
+      end
+    else Some (c :: rest)
+  | [] => Some []
+  end.
+
+Definition valid_json_number_tokens (cs : list nat) : bool :=
+  let after_sign :=
+    match cs with
+    | c :: rest => if Nat.eqb c 10%nat then rest else cs
+    | [] => []
+    end in
+  match strip_int_part after_sign with
+  | None => false
+  | Some r1 =>
+    match strip_frac_part r1 with
+    | None => false
+    | Some r2 =>
+      match strip_exp_part r2 with
+      | Some [] => true
+      | _ => false
+      end
+    end
+  end.
+
+(**md
+**The single-pass RFC 8259 JSON number scanner accepts valid integer/decimal/exponent lexemes and rejects malformed or multi-token payloads (`GeoJson`).**
+
+Verifies the decision boundaries required by `GeoJson.serialize` when validating `GeoValue.Number` / `GeoId.Number` without `JsonDocument.Parse`: leading-zero numbers like `"01"`, bare signs `"-"` / `"+1"`, trailing dots `"1."`, bare exponents `"1e+"`, and injected delimiters `"0,1"` all evaluate to `false`, while `"0"`, `"-0"`, multi-digit integers, decimals, and signed exponents evaluate to `true`.
+
+- [d:] any nonzero leading digit `1 .. 9`.
+*)
+Theorem rfc8259_number_scanner_boundaries_sound (d : nat) :
+  (1 <= d)%nat -> (d <= 9)%nat ->
+  valid_json_number_tokens [0%nat] = true /\
+  valid_json_number_tokens [10%nat; 0%nat] = true /\
+  valid_json_number_tokens [d; 0%nat; 12%nat; 5%nat; 13%nat; 10%nat; 3%nat] = true /\
+  valid_json_number_tokens [] = false /\
+  valid_json_number_tokens [10%nat] = false /\
+  valid_json_number_tokens [11%nat; 1%nat] = false /\
+  valid_json_number_tokens [0%nat; 1%nat] = false /\
+  valid_json_number_tokens [1%nat; 12%nat] = false /\
+  valid_json_number_tokens [12%nat; 5%nat] = false /\
+  valid_json_number_tokens [1%nat; 13%nat; 11%nat] = false /\
+  valid_json_number_tokens [0%nat; 14%nat; 1%nat] = false.
+Proof.
+  intros Hd1 Hd9.
+  do 9 (destruct d as [|d]; [try lia; vm_compute; repeat split; reflexivity |]).
+  destruct d as [|d]; [vm_compute; repeat split; reflexivity | lia].
+Qed.
+
+(**md
+**SoA point-longitude gap scanning and half/three-quarter angle identities preserve `GeoMeasure.bounds` and `GeoPath` resampling.**
+
+1. On sorted point intervals `[x, x]` (`prev_finish <= next_x`), merging `[next_x, next_x]` into `prev_finish` always advances `finish' = next_x` with gap `next_x - prev_finish` whenever `next_x > prev_finish`, justifying 1D `double` sorting without storing duplicate `east` coordinates on `MultiPoint` inputs.
+2. Given midpoint sine/cosine `(sm, cm)` on the unit circle (`sm^2 + cm^2 = 1`) and quarter-angle `(sq, cq)` satisfying `2*sq*cq = sm` and `cq^2 - sq^2 = cm`, the three-quarter angle formulas `s3q = sm*cq + cm*sq` and `c3q = cm*cq - sm*sq` lie on the unit circle (`s3q^2 + c3q^2 = (sm^2 + cm^2)*(sq^2 + cq^2)`) and satisfy the exact Chebyshev triple-angle identities `s3q = 3*sq*cq^2 - sq^3` and `c3q = cq^3 - 3*cq*sq^2`.
+
+- [prev_finish:] prior merged interval upper bound.
+- [next_x:] next sorted point longitude (`prev_finish <= next_x`).
+- [sq:] `sin(theta / 4)` (scaled integer).
+- [cq:] `cos(theta / 4)` (scaled integer).
+*)
+Theorem soa_point_gap_and_quarter_angle_identities
+    (prev_finish next_x sq cq : Z) :
+  prev_finish <= next_x ->
+  let merged_finish :=
+    if Z.gtb next_x prev_finish then next_x else Z.max prev_finish next_x in
+  let sm := 2 * sq * cq in
+  let cm := cq * cq - sq * sq in
+  let s3q := sm * cq + cm * sq in
+  let c3q := cm * cq - sm * sq in
+  merged_finish = next_x /\
+  s3q = 3 * sq * cq * cq - sq * sq * sq /\
+  c3q = cq * cq * cq - 3 * cq * sq * sq /\
+  s3q * s3q + c3q * c3q = (sm * sm + cm * cm) * (sq * sq + cq * cq).
+Proof.
+  intros Hle; cbv zeta.
+  rewrite Z.gtb_ltb.
+  split.
+  - destruct (Z.ltb prev_finish next_x) eqn:Elt; [reflexivity | apply Z.ltb_ge in Elt; lia].
+  - split; [ring | split; ring].
+Qed.

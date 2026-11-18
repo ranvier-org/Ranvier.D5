@@ -14,7 +14,60 @@ module GeoPath =
             match Projection.kind projection with
             | ProjectionKind.Equirectangular | ProjectionKind.Mercator -> true
             | _ -> false
+        let cartesianFast=Projection.supportsCartesianResample projection
         let scale=Projection.scale projection
+        let screenCartesian seamLonRad x y z =
+            match Projection.projectRotatedCartesianValue projection seamLonRad x y z with
+            | ValueSome value -> value
+            | ValueNone -> raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
+        let rec subdivideCartesian depth seamLonRad ax ay az tx ty tz angle (a:Point) (b:Point) =
+            spend 1L
+            let half=angle*0.5
+            let struct(sm,cm)=Math.SinCos half
+            let mx3=cm*ax+sm*tx
+            let my3=cm*ay+sm*ty
+            let mz3=cm*az+sm*tz
+            let middle=screenCartesian seamLonRad mx3 my3 mz3
+            let dx,dy=b.X-a.X,b.Y-a.Y
+            let mx,my=middle.X-a.X,middle.Y-a.Y
+            let length=Double.Hypot(dx,dy)
+            if not(Double.IsFinite length && Double.IsFinite mx && Double.IsFinite my) then
+                raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
+            let error,parameter =
+                if length=0. then Double.Hypot(mx,my),0.5
+                else
+                    let ux,uy=dx/length,dy/length
+                    abs(ux*my-uy*mx),(ux*mx+uy*my)/length
+            let inline checkQuarter amount s c =
+                spend 1L
+                let sample=screenCartesian seamLonRad (c*ax+s*tx) (c*ay+s*ty) (c*az+s*tz)
+                let qx,qy=sample.X-a.X,sample.Y-a.Y
+                if not(Double.IsFinite qx && Double.IsFinite qy) then
+                    raise(Rejected(InvalidObservation "Projected line span exceeds representable screen coordinates."))
+                if length=0. then struct(Double.Hypot(qx,qy)>options.Precision,false)
+                else
+                    let ux,uy=dx/length,dy/length
+                    struct(abs(ux*qy-uy*qx)>options.Precision,abs((ux*qx+uy*qy)/length-amount)>0.3)
+            let mutable subdivide=error>options.Precision || abs(parameter-0.5)>0.3 || angle>Math.PI/6.
+            if not subdivide then
+                let cq=sqrt((1.+cm)*0.5)
+                let sq=sm/(2.*cq)
+                let struct(firstDeviates,firstUneven)=checkQuarter 0.25 sq cq
+                let struct(secondDeviates,secondUneven)=checkQuarter 0.75 (sm*cq+cm*sq) (cm*cq-sm*sq)
+                subdivide<-firstDeviates || firstUneven || secondDeviates || secondUneven
+            if subdivide then
+                if depth>=options.MaxSubdivisionDepth then
+                    let cq=sqrt((1.+cm)*0.5)
+                    let sq=sm/(2.*cq)
+                    let struct(firstDeviates,_)=checkQuarter 0.25 sq cq
+                    let struct(secondDeviates,_)=checkQuarter 0.75 (sm*cq+cm*sq) (cm*cq-sm*sq)
+                    if error>options.Precision || parameter<0. || parameter>1. || firstDeviates || secondDeviates then
+                        raise(Rejected(BudgetExceeded "Projected line cannot meet precision within its subdivision depth."))
+                    emit b
+                else
+                    subdivideCartesian (depth+1) seamLonRad ax ay az tx ty tz half a middle
+                    subdivideCartesian (depth+1) seamLonRad mx3 my3 mz3 (cm*tx-sm*ax) (cm*ty-sm*ay) (cm*tz-sm*az) half middle b
+            else emit b
         // Halves stay on the parent's great circle, so recursion rotates the parent frame rather than re-solving each arc.
         let rec subdivideArc depth (first:GeoPosition) (last:GeoPosition) (arc:GeoArc) (a:Point) (b:Point) =
             spend 1L
@@ -89,7 +142,14 @@ module GeoPath =
                 emit b
             else
             match GeoArc.create first last with
-            | Ok arc -> subdivideArc depth first last arc a b
+            | Ok arc ->
+                if cartesianFast then
+                    let seamLonRad =
+                        if first.Longitude=last.Longitude && abs first.Longitude=180. then first.Longitude*(Math.PI/180.)
+                        else 0.
+                    subdivideCartesian depth seamLonRad arc.X arc.Y arc.Z arc.TangentX arc.TangentY arc.TangentZ arc.Angle a b
+                else
+                    subdivideArc depth first last arc a b
             | Error errors -> raise(Rejected errors.Head)
 
     /// <summary>Projects geometry with cooperative cancellation and atomic result publication.</summary>
@@ -129,21 +189,41 @@ module GeoPath =
                             match GeoRectangle.polygons options.MaxBufferedPoints spend clip rings with
                             | Ok clipped -> clipped
                             | Error error -> raise(Rejected error)
-                    let commands=ResizeArray<PathCommand>()
-                    for (ring:Point array) in rings do
+                    match rings with
+                    | [] -> ()
+                    | [ring] when ring.Length>0 ->
                         reserve ring.Length
-                        commands.Add(MoveTo ring[0])
-                        for index=1 to ring.Length-1 do
-                            spend 1L
-                            commands.Add(LineTo ring[index])
+                        spend(int64 ring.Length)
+                        let mutable owned=[Close]
                         spend 1L
-                        commands.Add Close
-                    if commands.Count>0 then
-                        let mutable owned=[]
-                        for index=commands.Count-1 downto 0 do
+                        for index=ring.Length-1 downto 1 do
                             spend 1L
-                            owned<-commands[index]::owned
+                            owned<-LineTo ring[index]::owned
+                        spend 1L
+                        owned<-MoveTo ring[0]::owned
                         paths.Add(Path.ofCommands owned)
+                    | _ ->
+                        let ringArr=List.toArray rings
+                        let mutable hasAny=false
+                        for r=0 to ringArr.Length-1 do
+                            let ring=ringArr[r]
+                            if ring.Length>0 then
+                                hasAny<-true
+                                reserve ring.Length
+                                spend(int64 ring.Length)
+                        if hasAny then
+                            let mutable owned=[]
+                            for r=ringArr.Length-1 downto 0 do
+                                let ring=ringArr[r]
+                                if ring.Length>0 then
+                                    spend 1L
+                                    owned<-Close::owned
+                                    for index=ring.Length-1 downto 1 do
+                                        spend 1L
+                                        owned<-LineTo ring[index]::owned
+                                    spend 1L
+                                    owned<-MoveTo ring[0]::owned
+                            paths.Add(Path.ofCommands owned)
                 let sphere () =
                     let origin =
                         match GeoPosition.create 0. 0. |> Result.bind(fun value ->
