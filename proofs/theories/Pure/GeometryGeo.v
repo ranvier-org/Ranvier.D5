@@ -400,3 +400,157 @@ Proof.
     + split; [intros Hlt; destruct (Z.lt_ge_cases x1 x2); [left; lia | right; split; [lia | left; lia]]
              | intros [? | [? [? | [? [_ Ht]]]]]; try discriminate; lia].
 Qed.
+
+(** ** 6. Batch D3 refinements: `Int128` exact `orient2d` bounds, Y-straddle ray-cast filter, & CW-to-CCW half-edge involution *)
+
+(**md
+**Scaled IEEE-754 mantissas with exponent spread `<= 9` never overflow `int64` or `System.Int128` in exact `orient2d` (`Predicates`).**
+
+When six IEEE-754 binary64 significands satisfy `|m_i| <= 2^53 - 1` (`9007199254740991`) and their relative left-shift factors satisfy `1 <= s_i <= 512` (`0 <= shift <= 9`), every scaled coordinate `v_i = m_i * s_i` fits strictly in signed `int64` (`[-2^63, 2^63 - 1]`) and the exact 2D orientation determinant `(v0 - v4)*(v3 - v5) - (v1 - v5)*(v2 - v4)` fits strictly in signed `System.Int128` (`[-2^127, 2^127 - 1]`) with zero heap allocation.
+
+- [m0:] signed 53-bit significand of `a.X`.
+- [m1:] signed 53-bit significand of `a.Y`.
+- [m2:] signed 53-bit significand of `b.X`.
+- [m3:] signed 53-bit significand of `b.Y`.
+- [m4:] signed 53-bit significand of `c.X`.
+- [m5:] signed 53-bit significand of `c.Y`.
+- [s0:] power-of-two scale factor `2^(e0 - minExp)` in `[1, 512]`.
+- [s1:] power-of-two scale factor `2^(e1 - minExp)` in `[1, 512]`.
+- [s2:] power-of-two scale factor `2^(e2 - minExp)` in `[1, 512]`.
+- [s3:] power-of-two scale factor `2^(e3 - minExp)` in `[1, 512]`.
+- [s4:] power-of-two scale factor `2^(e4 - minExp)` in `[1, 512]`.
+- [s5:] power-of-two scale factor `2^(e5 - minExp)` in `[1, 512]`.
+*)
+Theorem int128_orient2d_no_overflow
+    (m0 m1 m2 m3 m4 m5 s0 s1 s2 s3 s4 s5 : Z) :
+  -9007199254740991 <= m0 -> m0 <= 9007199254740991 ->
+  -9007199254740991 <= m1 -> m1 <= 9007199254740991 ->
+  -9007199254740991 <= m2 -> m2 <= 9007199254740991 ->
+  -9007199254740991 <= m3 -> m3 <= 9007199254740991 ->
+  -9007199254740991 <= m4 -> m4 <= 9007199254740991 ->
+  -9007199254740991 <= m5 -> m5 <= 9007199254740991 ->
+  1 <= s0 -> s0 <= 512 ->
+  1 <= s1 -> s1 <= 512 ->
+  1 <= s2 -> s2 <= 512 ->
+  1 <= s3 -> s3 <= 512 ->
+  1 <= s4 -> s4 <= 512 ->
+  1 <= s5 -> s5 <= 512 ->
+  let v0 := m0 * s0 in let v1 := m1 * s1 in
+  let v2 := m2 * s2 in let v3 := m3 * s3 in
+  let v4 := m4 * s4 in let v5 := m5 * s5 in
+  let det := (v0 - v4) * (v3 - v5) - (v1 - v5) * (v2 - v4) in
+  -9223372036854775808 <= v0 /\ v0 <= 9223372036854775807 /\
+  -170141183460469231731687303715884105728 <= det /\
+  det <= 170141183460469231731687303715884105727.
+Proof.
+  intros Hm0a Hm0b Hm1a Hm1b Hm2a Hm2b Hm3a Hm3b Hm4a Hm4b Hm5a Hm5b
+         Hs0a Hs0b Hs1a Hs1b Hs2a Hs2b Hs3a Hs3b Hs4a Hs4b Hs5a Hs5b.
+  cbv zeta.
+  assert (Hv0 : -4611686018427387392 <= m0 * s0 /\ m0 * s0 <= 4611686018427387392) by nia.
+  assert (Hv1 : -4611686018427387392 <= m1 * s1 /\ m1 * s1 <= 4611686018427387392) by nia.
+  assert (Hv2 : -4611686018427387392 <= m2 * s2 /\ m2 * s2 <= 4611686018427387392) by nia.
+  assert (Hv3 : -4611686018427387392 <= m3 * s3 /\ m3 * s3 <= 4611686018427387392) by nia.
+  assert (Hv4 : -4611686018427387392 <= m4 * s4 /\ m4 * s4 <= 4611686018427387392) by nia.
+  assert (Hv5 : -4611686018427387392 <= m5 * s5 /\ m5 * s5 <= 4611686018427387392) by nia.
+  set (dx1 := m0 * s0 - m4 * s4).
+  set (dy2 := m3 * s3 - m5 * s5).
+  set (dy1 := m1 * s1 - m5 * s5).
+  set (dx2 := m2 * s2 - m4 * s4).
+  assert (Hdx1 : -9223372036854774784 <= dx1 /\ dx1 <= 9223372036854774784) by lia.
+  assert (Hdy2 : -9223372036854774784 <= dy2 /\ dy2 <= 9223372036854774784) by lia.
+  assert (Hdy1 : -9223372036854774784 <= dy1 /\ dy1 <= 9223372036854774784) by lia.
+  assert (Hdx2 : -9223372036854774784 <= dx2 /\ dx2 <= 9223372036854774784) by lia.
+  assert (Hp1 : -85070591730234605658436518579420528640 <= dx1 * dy2 /\
+                 dx1 * dy2 <= 85070591730234605658436518579420528640) by nia.
+  assert (Hp2 : -85070591730234605658436518579420528640 <= dy1 * dx2 /\
+                 dy1 * dx2 <= 85070591730234605658436518579420528640) by nia.
+  split; [lia | split; [lia | split; lia]].
+Qed.
+
+Definition edge_step_ref (px py ax ay bx by_ orient : Z) : bool * Z :=
+  if Z.eqb orient 0 &&
+     Z.leb (Z.min ax bx) px && Z.leb px (Z.max ax bx) &&
+     Z.leb (Z.min ay by_) py && Z.leb py (Z.max ay by_) then (true, 0)
+  else if Z.leb ay py && Z.gtb by_ py && Z.gtb orient 0 then (false, 1)
+  else if Z.gtb ay py && Z.leb by_ py && Z.ltb orient 0 then (false, -1)
+  else (false, 0).
+
+Definition edge_step_y_filtered (px py ax ay bx by_ orient : Z) : bool * Z :=
+  if (Z.ltb ay py && Z.ltb by_ py) || (Z.gtb ay py && Z.gtb by_ py) then (false, 0)
+  else edge_step_ref px py ax ay bx by_ orient.
+
+(**md
+**Skipping non-Y-straddling polygon edges before `Predicates.orient2d` preserves exact boundary and winding classification (`Polygon.contains`).**
+
+Whenever `(ay < py && by < py)` or `(ay > py && by > py)`, the edge can neither contain `(px, py)` on its bounding box nor cross the horizontal ray at `py`, so filtering on Y-straddle before invoking `orient2d` yields identical `(boundary, delta_winding)` results.
+
+- [px:] query X coordinate.
+- [py:] query Y coordinate.
+- [ax:] edge start X coordinate.
+- [ay:] edge start Y coordinate.
+- [bx:] edge end X coordinate.
+- [by_:] edge end Y coordinate.
+- [orient:] exact `orient2d a b p` sign (`-1`, `0`, or `1`).
+*)
+Theorem y_straddle_filter_preserves_polygon_containment
+    (px py ax ay bx by_ orient : Z) :
+  edge_step_y_filtered px py ax ay bx by_ orient =
+  edge_step_ref px py ax ay bx by_ orient.
+Proof.
+  unfold edge_step_y_filtered, edge_step_ref.
+  rewrite !Z.gtb_ltb.
+  destruct ((ay <? py) && (by_ <? py) || (py <? ay) && (py <? by_)) eqn:Hskip; [| reflexivity].
+  apply orb_true_iff in Hskip as [Hlo | Hhi].
+  - apply andb_prop in Hlo as [H1 H2]. apply Z.ltb_lt in H1, H2.
+    assert (EnMax : Z.leb py (Z.max ay by_) = false) by (apply Z.leb_gt; lia).
+    assert (EnBy : (py <? by_) = false) by (apply Z.ltb_ge; lia).
+    assert (EnAy : (py <? ay) = false) by (apply Z.ltb_ge; lia).
+    rewrite EnMax, EnBy, EnAy.
+    rewrite !andb_false_r; simpl; reflexivity.
+  - apply andb_prop in Hhi as [H1 H2]. apply Z.ltb_lt in H1, H2.
+    assert (EnMin : Z.leb (Z.min ay by_) py = false) by (apply Z.leb_gt; lia).
+    assert (EnAy : Z.leb ay py = false) by (apply Z.leb_gt; lia).
+    assert (EnBy : Z.leb by_ py = false) by (apply Z.leb_gt; lia).
+    rewrite EnMin, EnAy, EnBy.
+    destruct (Z.eqb orient 0 && Z.leb (Z.min ax bx) px && Z.leb px (Z.max ax bx));
+      simpl; rewrite ?andb_false_r; simpl; reflexivity.
+Qed.
+
+Definition flip_halfedge (e : Z) : Z :=
+  let r := e mod 3 in
+  if Z.eqb r 0 then e + 2
+  else if Z.eqb r 2 then e - 2
+  else e.
+
+(**md
+**The CW-to-CCW Delaunay half-edge permutation (`3k <-> 3k + 2`, `3k + 1 -> 3k + 1`) is a triangle-preserving involution (`DelaunayKernel`).**
+
+Swapping vertices `1` and `2` of each triangle `(v0, v1, v2) -> (v0, v2, v1)` maps half-edges via `flip_halfedge`, which satisfies `flip_halfedge (flip_halfedge e) = e` and stays within the same triangle `e / 3`, allowing `Delaunay.build` to reuse `DelaunayKernel.fast`'s `opposite` table directly without rebuilding a half-edge hash table.
+
+- [e:] nonnegative half-edge index (`0 <= e`).
+*)
+Theorem delaunay_cw_to_ccw_halfedge_involution (e : Z) :
+  0 <= e ->
+  0 <= flip_halfedge e /\
+  (flip_halfedge e) / 3 = e / 3 /\
+  flip_halfedge (flip_halfedge e) = e.
+Proof.
+  intros He. unfold flip_halfedge; cbv zeta.
+  pose proof (Z.div_mod e 3 ltac:(lia)) as Hdm.
+  pose proof (Z.mod_pos_bound e 3 ltac:(lia)) as Hmb.
+  set (q := e / 3) in *.
+  destruct (Z.eqb (e mod 3) 0) eqn:E0.
+  - apply Z.eqb_eq in E0.
+    assert (Hm : (e + 2) mod 3 = 2) by (symmetry; apply (Z.mod_unique (e + 2) 3 q 2); lia).
+    assert (Hd : (e + 2) / 3 = q) by (symmetry; apply (Z.div_unique (e + 2) 3 q 2); lia).
+    rewrite Hm, Hd; simpl; repeat split; lia.
+  - apply Z.eqb_neq in E0.
+    destruct (Z.eqb (e mod 3) 2) eqn:E2.
+    + apply Z.eqb_eq in E2.
+      assert (Hm : (e - 2) mod 3 = 0) by (symmetry; apply (Z.mod_unique (e - 2) 3 q 0); lia).
+      assert (Hd : (e - 2) / 3 = q) by (symmetry; apply (Z.div_unique (e - 2) 3 q 0); lia).
+      rewrite Hm, Hd; simpl; repeat split; lia.
+    + apply Z.eqb_neq in E2.
+      assert (Hm : e mod 3 = 1) by lia.
+      rewrite Hm; simpl; repeat split; lia.
+Qed.

@@ -30,10 +30,19 @@ type ForceNodeState = { Id:string; Position:Point; Velocity:Point; Pinned:Point 
 /// <summary>An immutable view of a simulation: nodes in ordinal ID order, current alpha, steps taken in the current budget,
 /// and completion flags.</summary>
 type ForceSnapshot = { Nodes:ForceNodeState list; Alpha:float; Iteration:int; Converged:bool; Finished:bool }
+[<Struct>]
+type private ForceEdge =
+    { A: int
+      B: int
+      Target: float
+      K: float
+      ShareA: float
+      ShareB: float }
+
 /// <summary>Opaque, immutable force-simulation state; every operation returns a new value.</summary>
 type ForceState = private {
     Config:ForceConfig; Seed:Seed; Graph:GraphData; Values:ForceNodeState[]
-    Edges:struct(int*int*float*float)[]; Alpha:float; Iteration:int
+    Edges:ForceEdge[]; Alpha:float; Iteration:int
 }
 
 /// <summary>A deterministic, immutable force-directed simulation over <c>GraphData</c>.</summary>
@@ -86,10 +95,21 @@ module Force =
                 let values=GraphData.nodes graph |> List.map(fun node ->
                     let position=node.Pinned |> Option.orElse node.Position |> Option.defaultWith(fun () -> initialPosition config seed node.Id)
                     {Id=node.Id;Position=position;Velocity=zero;Pinned=node.Pinned;Radius=node.Radius;Mass=node.Mass}) |> List.toArray
-                let indices=System.Collections.Generic.Dictionary<string,int>(StringComparer.Ordinal)
+                let indices=System.Collections.Generic.Dictionary<string,int>(values.Length, StringComparer.Ordinal)
                 values |> Array.iteri(fun i node -> indices.Add(node.Id,i))
-                let edges=GraphData.links graph |> List.map(fun edge -> struct(indices[edge.Source],indices[edge.Target],edge.Distance,edge.Strength)) |> List.toArray
-                Ok {Config=config;Seed=seed;Graph=graph;Values=values;Edges=edges;Alpha=(if values.Length=0 then 0. else config.InitialAlpha);Iteration=0}
+                let edgeBuf = ResizeArray<ForceEdge>()
+                for edge in GraphData.links graph do
+                    let a = indices[edge.Source]
+                    let b = indices[edge.Target]
+                    if a <> b && edge.Strength > 0. then
+                        let mA = values[a].Mass
+                        let mB = values[b].Mass
+                        let scale = max mA mB
+                        let ma, mb = mA / scale, mB / scale
+                        let shareA = mb / (ma + mb)
+                        let shareB = ma / (ma + mb)
+                        edgeBuf.Add { A = a; B = b; Target = edge.Distance; K = edge.Strength; ShareA = shareA; ShareB = shareB }
+                Ok {Config=config;Seed=seed;Graph=graph;Values=values;Edges=edgeBuf.ToArray();Alpha=(if values.Length=0 then 0. else config.InitialAlpha);Iteration=0}
             with :? System.ArgumentException as error -> Error [InvalidObservation error.Message]
 
     /// <summary>Returns true when the graph is empty, alpha has cooled below <c>AlphaMin</c>, or the step budget is exhausted.</summary>
@@ -109,80 +129,172 @@ module Force =
         if count<0 then invalidArg "count" "Step count must be nonnegative."
         token.ThrowIfCancellationRequested()
         if count=0 || isFinished state then state else
-        let nodes=Array.copy state.Values
-        let vx,vy=Array.zeroCreate nodes.Length,Array.zeroCreate nodes.Length
-        let config=state.Config
-        let xForce=config.X |> Option.filter(fun (_,k) -> k>0.)
-        let yForce=config.Y |> Option.filter(fun (_,k) -> k>0.)
-        let radialForce=config.Radial |> Option.filter(fun (_,_,k) -> k>0.)
-        let body=config.ManyBody |> Option.filter(fun settings -> settings.Strength<>0.)
-        let collision=config.Collision |> Option.filter(fun settings -> settings.Strength>0.)
-        let spatial=body.IsSome || collision.IsSome
-        let positions=if spatial then Array.zeroCreate nodes.Length else [||]
-        let masses=if spatial then nodes |> Array.map(fun node -> node.Mass) else [||]
-        let radii=if collision.IsSome then nodes |> Array.map(fun node -> node.Radius) else [||]
-        let pinned=if collision.IsSome then nodes |> Array.map(fun node -> node.Pinned.IsSome) else [||]
-        let mutable alpha,iteration,remaining=state.Alpha,state.Iteration,count
-        let check i=if i%64=0 then token.ThrowIfCancellationRequested()
-        while remaining>0 && alpha>=config.AlphaMin && iteration<config.MaxSteps do
+        let srcNodes = state.Values
+        let n = srcNodes.Length
+        let px = Array.zeroCreate<float> n
+        let py = Array.zeroCreate<float> n
+        let velX = Array.zeroCreate<float> n
+        let velY = Array.zeroCreate<float> n
+        let vx = Array.zeroCreate<float> n
+        let vy = Array.zeroCreate<float> n
+        let isPinned = Array.zeroCreate<bool> n
+        let mutable maxCoordAbs = 0.
+        for i = 0 to n - 1 do
+            let nd = srcNodes[i]
+            match nd.Pinned with
+            | Some pin ->
+                isPinned[i] <- true
+                px[i] <- pin.X
+                py[i] <- pin.Y
+                velX[i] <- 0.
+                velY[i] <- 0.
+            | None ->
+                px[i] <- nd.Position.X
+                py[i] <- nd.Position.Y
+                velX[i] <- nd.Velocity.X
+                velY[i] <- nd.Velocity.Y
+            let m = max (abs px[i]) (abs py[i])
+            if m > maxCoordAbs then maxCoordAbs <- m
+        let config = state.Config
+        let xForce = config.X |> Option.filter(fun (_,k) -> k>0.)
+        let yForce = config.Y |> Option.filter(fun (_,k) -> k>0.)
+        let radialForce = config.Radial |> Option.filter(fun (_,_,k) -> k>0.)
+        let body = config.ManyBody |> Option.filter(fun settings -> settings.Strength<>0.)
+        let collision = config.Collision |> Option.filter(fun settings -> settings.Strength>0.)
+        let spatial = body.IsSome || collision.IsSome
+        let needTree = (match body with Some b when b.Theta > 0. -> true | _ -> false) || collision.IsSome
+        let positions = if needTree then Array.zeroCreate<Point> n else [||]
+        let nodeIds = if needTree then Array.init n id else [||]
+        let masses = if spatial then Array.init n (fun i -> srcNodes[i].Mass) else [||]
+        let radii = if collision.IsSome then Array.init n (fun i -> srcNodes[i].Radius) else [||]
+        let edges = state.Edges
+        let alphaKeep = 1. - config.AlphaDecay
+        let velKeep = 1. - config.VelocityDecay
+        let hasX = xForce.IsSome
+        let xTarget, xK = match xForce with Some(t, k) -> t, k | None -> 0., 0.
+        let hasY = yForce.IsSome
+        let yTarget, yK = match yForce with Some(t, k) -> t, k | None -> 0., 0.
+        let hasRadial = radialForce.IsSome
+        let rCenter, rRadius, rK = match radialForce with Some(c, r, k) -> c, r, k | None -> zero, 0., 0.
+        let mutable alpha, iteration, remaining = state.Alpha, state.Iteration, count
+        let inline check i = if (i &&& 63) = 0 then token.ThrowIfCancellationRequested()
+        while remaining > 0 && alpha >= config.AlphaMin && iteration < config.MaxSteps do
             token.ThrowIfCancellationRequested()
-            alpha<-alpha*(1.-config.AlphaDecay)
-            let mutable meanX,meanY=0.,0.
-            for i in 0..nodes.Length-1 do
+            alpha <- alpha * alphaKeep
+            let centerX, centerY =
+                if config.CenterStrength = 0. then 0., 0.
+                elif maxCoordAbs < 1e200 then
+#if !FABLE_COMPILER
+                    let meanX = SimdNumeric.sumSpan (ReadOnlySpan<float>(px, 0, n)) / float n
+                    let meanY = SimdNumeric.sumSpan (ReadOnlySpan<float>(py, 0, n)) / float n
+#else
+                    let mutable sumX = 0.
+                    let mutable sumY = 0.
+                    for i = 0 to n - 1 do
+                        check i
+                        sumX <- sumX + px[i]
+                        sumY <- sumY + py[i]
+                    let meanX = sumX / float n
+                    let meanY = sumY / float n
+#endif
+                    (config.Center.X - meanX) * config.CenterStrength * alpha,
+                    (config.Center.Y - meanY) * config.CenterStrength * alpha
+                else
+                    let mutable meanX, meanY = 0., 0.
+                    for i = 0 to n - 1 do
+                        check i
+                        let weight = 1. / float(i + 1)
+                        meanX <- meanX * (1. - weight) + px[i] * weight
+                        meanY <- meanY * (1. - weight) + py[i] * weight
+                    (config.Center.X - meanX) * config.CenterStrength * alpha,
+                    (config.Center.Y - meanY) * config.CenterStrength * alpha
+            let xKAlpha = xK * alpha
+            let yKAlpha = yK * alpha
+            let rKAlpha = rK * alpha
+            for i = 0 to n - 1 do
                 check i
-                let weight=1./float(i+1)
-                meanX<-meanX*(1.-weight)+nodes[i].Position.X*weight
-                meanY<-meanY*(1.-weight)+nodes[i].Position.Y*weight
-            let centerX,centerY=if config.CenterStrength=0. then 0.,0. else (config.Center.X-meanX)*config.CenterStrength*alpha,(config.Center.Y-meanY)*config.CenterStrength*alpha
-            for i in 0..nodes.Length-1 do
-                check i
-                let node=nodes[i]
-                vx[i]<-node.Velocity.X+centerX;vy[i]<-node.Velocity.Y+centerY
-                xForce |> Option.iter(fun (target,k) -> vx[i]<-vx[i]+(target-node.Position.X)*k*alpha)
-                yForce |> Option.iter(fun (target,k) -> vy[i]<-vy[i]+(target-node.Position.Y)*k*alpha)
-                radialForce |> Option.iter(fun (center,radius,k) ->
-                    let dx,dy=node.Position.X-center.X,node.Position.Y-center.Y
-                    let distance=Double.Hypot(dx,dy)
+                let mutable vxi = velX[i] + centerX
+                let mutable vyi = velY[i] + centerY
+                let pxi = px[i]
+                let pyi = py[i]
+                if hasX then vxi <- vxi + (xTarget - pxi) * xKAlpha
+                if hasY then vyi <- vyi + (yTarget - pyi) * yKAlpha
+                if hasRadial then
+                    let dx, dy = pxi - rCenter.X, pyi - rCenter.Y
+                    let distance = Double.Hypot(dx, dy)
                     Check.finite "radial distance" distance
-                    let ux,uy=if distance=0. then direction state iteration node.Id else dx/distance,dy/distance
-                    let force=(radius-distance)*k*alpha
-                    vx[i]<-vx[i]+ux*force;vy[i]<-vy[i]+uy*force)
-            for edgeIndex in 0..state.Edges.Length-1 do
+                    let ux, uy = if distance = 0. then direction state iteration srcNodes[i].Id else dx / distance, dy / distance
+                    let force = (rRadius - distance) * rKAlpha
+                    vxi <- vxi + ux * force
+                    vyi <- vyi + uy * force
+                vx[i] <- vxi
+                vy[i] <- vyi
+            let fastLinks = maxCoordAbs < 1e140
+            for edgeIndex = 0 to edges.Length - 1 do
                 check edgeIndex
-                let struct(a,b,target,k)=state.Edges[edgeIndex]
-                if a<>b && k>0. then
-                    let dx,dy=nodes[b].Position.X-nodes[a].Position.X,nodes[b].Position.Y-nodes[a].Position.Y
-                    let distance=Double.Hypot(dx,dy)
-                    Check.finite "link distance" distance
-                    let ux,uy=if distance=0. then direction state iteration (nodes[a].Id+"/"+nodes[b].Id) else dx/distance,dy/distance
-                    let force=(distance-target)*k*alpha
-                    let scale=max nodes[a].Mass nodes[b].Mass
-                    let ma,mb=nodes[a].Mass/scale,nodes[b].Mass/scale
-                    let shareA,shareB=mb/(ma+mb),ma/(ma+mb)
-                    vx[a]<-vx[a]+ux*force*shareA;vy[a]<-vy[a]+uy*force*shareA
-                    vx[b]<-vx[b]-ux*force*shareB;vy[b]<-vy[b]-uy*force*shareB
+                let e = edges[edgeIndex]
+                let a = e.A
+                let b = e.B
+                let dx = px[b] - px[a]
+                let dy = py[b] - py[a]
+                let d2 = dx * dx + dy * dy
+                let distance =
+                    if fastLinks && d2 > 1e-280 then sqrt d2
+                    else
+                        let h = Double.Hypot(dx, dy)
+                        Check.finite "link distance" h
+                        h
+                let ux, uy =
+                    if distance = 0. then direction state iteration (srcNodes[a].Id + "/" + srcNodes[b].Id)
+                    else dx / distance, dy / distance
+                let force = (distance - e.Target) * e.K * alpha
+                let fa = force * e.ShareA
+                let fb = force * e.ShareB
+                vx[a] <- vx[a] + ux * fa
+                vy[a] <- vy[a] + uy * fa
+                vx[b] <- vx[b] - ux * fb
+                vy[b] <- vy[b] - uy * fb
             if spatial then
-                for i in 0..nodes.Length-1 do
-                    check i
-                    positions[i]<-nodes[i].Position
                 let jitter i j =
-                    let a,b=min i j,max i j
-                    let x,y=direction state iteration (nodes[a].Id+"/"+nodes[b].Id)
-                    if i<=j then x,y else -x,-y
-                body |> Option.iter(fun settings -> ForceKernels.manyBody token settings alpha positions masses jitter vx vy)
-                collision |> Option.iter(fun settings -> ForceKernels.collision token settings positions masses radii pinned jitter vx vy)
-            for i in 0..nodes.Length-1 do
+                    let a, b = min i j, max i j
+                    let x, y = direction state iteration (srcNodes[a].Id + "/" + srcNodes[b].Id)
+                    if i <= j then x, y else -x, -y
+                body |> Option.iter(fun settings ->
+                    ForceKernels.manyBody token settings alpha px py positions nodeIds masses maxCoordAbs jitter vx vy)
+                collision |> Option.iter(fun settings ->
+                    ForceKernels.collision token settings px py positions nodeIds masses radii isPinned maxCoordAbs jitter vx vy)
+            let mutable nextMaxAbs = 0.
+            for i = 0 to n - 1 do
                 check i
-                let node=nodes[i]
-                match node.Pinned with
-                | Some position -> nodes[i]<-{node with Position=position;Velocity=zero}
-                | None ->
-                    let velocity=Point.create (vx[i]*(1.-config.VelocityDecay)) (vy[i]*(1.-config.VelocityDecay))
-                    let position=Point.create (node.Position.X+velocity.X) (node.Position.Y+velocity.Y)
-                    nodes[i]<-{node with Position=position;Velocity=velocity}
-            iteration<-iteration+1;remaining<-remaining-1
+                if isPinned[i] then
+                    let m = max (abs px[i]) (abs py[i])
+                    if m > nextMaxAbs then nextMaxAbs <- m
+                else
+                    let nvx = vx[i] * velKeep
+                    let nvy = vy[i] * velKeep
+                    Check.finite "x" nvx
+                    Check.finite "y" nvy
+                    let npx = px[i] + nvx
+                    let npy = py[i] + nvy
+                    Check.finite "x" npx
+                    Check.finite "y" npy
+                    velX[i] <- nvx
+                    velY[i] <- nvy
+                    px[i] <- npx
+                    py[i] <- npy
+                    let m = max (abs npx) (abs npy)
+                    if m > nextMaxAbs then nextMaxAbs <- m
+            maxCoordAbs <- nextMaxAbs
+            iteration <- iteration + 1
+            remaining <- remaining - 1
         token.ThrowIfCancellationRequested()
-        {state with Values=nodes;Alpha=alpha;Iteration=iteration}
+        let outNodes = Array.zeroCreate<ForceNodeState> n
+        for i = 0 to n - 1 do
+            let nd = srcNodes[i]
+            match nd.Pinned with
+            | Some position -> outNodes[i] <- { nd with Position = position; Velocity = zero }
+            | None -> outNodes[i] <- { nd with Position = { Point.X = px[i]; Y = py[i] }; Velocity = { Point.X = velX[i]; Y = velY[i] } }
+        { state with Values = outNodes; Alpha = alpha; Iteration = iteration }
 
     /// <summary>Advances up to <c>count</c> ticks without cancellation, stopping early once finished. Throws <c>ArgumentException</c> for a negative count.</summary>
     let step count state = stepWithCancellation System.Threading.CancellationToken.None count state

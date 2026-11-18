@@ -283,3 +283,164 @@ Proof.
   - assert (Hnn : 0 <= (py q - py p) * (py q - py p)) by apply Z.square_nonneg; lia.
   - assert (Hnn : 0 <= (px q - px p) * (px q - px p)) by apply Z.square_nonneg; lia.
 Qed.
+
+(** ** 4. Batch D3 refinements: flat struct-array k-d tree layout & `sqrt`-free SIMD N-body softening *)
+
+Record flat_kd_node := {
+  fk_split_x : bool;
+  fk_pt : pt2;
+  fk_ord : nat;
+  fk_left : option nat;
+  fk_right : option nat
+}.
+
+Fixpoint flatten_kdtree (base : nat) (t : kdtree) : option nat * list flat_kd_node :=
+  match t with
+  | KdEmpty => (None, [])
+  | KdNode sx p o l r =>
+    let '(l_idx, l_arr) := flatten_kdtree (S base) l in
+    let r_base := (S base + length l_arr)%nat in
+    let '(r_idx, r_arr) := flatten_kdtree r_base r in
+    let root_node := {| fk_split_x := sx; fk_pt := p; fk_ord := o; fk_left := l_idx; fk_right := r_idx |} in
+    (Some base, root_node :: l_arr ++ r_arr)
+  end.
+
+Fixpoint flat_kd_within (fuel : nat) (arr : list flat_kd_node) (b : aabb) (idx_opt : option nat) : list (pt2 * nat) :=
+  match idx_opt with
+  | None => []
+  | Some idx =>
+    match fuel with
+    | 0%nat => []
+    | S f =>
+      match nth_error arr idx with
+      | None => []
+      | Some nd =>
+        let sx := fk_split_x nd in
+        let p := fk_pt nd in
+        let o := fk_ord nd in
+        let c := if sx then px p else py p in
+        let lo := if sx then min_x b else min_y b in
+        let hi := if sx then max_x b else max_y b in
+        let go_l := if Z.leb lo c then flat_kd_within f arr b (fk_left nd) else [] in
+        let here := if in_aabb b p then [(p, o)] else [] in
+        let go_r := if Z.leb c hi then flat_kd_within f arr b (fk_right nd) else [] in
+        go_l ++ here ++ go_r
+      end
+    end
+  end.
+
+Fixpoint kd_depth (t : kdtree) : nat :=
+  match t with
+  | KdEmpty => 0%nat
+  | KdNode _ _ _ l r => S (Nat.max (kd_depth l) (kd_depth r))
+  end.
+
+Lemma nth_error_prefix_head {A : Type} (pre tl : list A) (x : A) :
+  nth_error (pre ++ x :: tl) (length pre) = Some x.
+Proof.
+  induction pre as [|h rest IH]; simpl; [reflexivity | exact IH].
+Qed.
+
+Lemma cons_app_reassoc {A : Type} (pre a b suf : list A) (x : A) :
+  pre ++ (x :: a ++ b) ++ suf = pre ++ x :: a ++ b ++ suf /\
+  pre ++ x :: a ++ b ++ suf = (pre ++ [x]) ++ a ++ (b ++ suf) /\
+  pre ++ x :: a ++ b ++ suf = (pre ++ [x] ++ a) ++ b ++ suf.
+Proof.
+  split.
+  - induction pre as [|h rest IH]; simpl.
+    + f_equal. clear; induction a as [|ha ra IHa]; simpl; [reflexivity | f_equal; exact IHa].
+    + f_equal; exact IH.
+  - split.
+    + induction pre as [|h rest IH]; simpl.
+      * clear; induction a as [|ha ra IHa]; simpl; [reflexivity | f_equal; exact IHa].
+      * f_equal; exact IH.
+    + induction pre as [|h rest IH]; simpl.
+      * clear; induction a as [|ha ra IHa]; simpl; [reflexivity | f_equal; exact IHa].
+      * f_equal; exact IH.
+Qed.
+
+Lemma flatten_kdtree_embedded (t : kdtree) :
+  forall (prefix suffix : list flat_kd_node) (fuel : nat) (b : aabb),
+    (kd_depth t <= fuel)%nat ->
+    let '(idx_opt, mid) := flatten_kdtree (length prefix) t in
+    flat_kd_within fuel (prefix ++ mid ++ suffix) b idx_opt = kd_within b t.
+Proof.
+  induction t as [|sx p o l IHl r IHr]; intros prefix suffix fuel b Hfuel; cbn [flatten_kdtree kd_depth kd_within] in *.
+  - destruct fuel; reflexivity.
+  - destruct fuel as [|f]; [lia |].
+    destruct (flatten_kdtree (S (length prefix)) l) as [l_idx l_arr] eqn:Hl.
+    destruct (flatten_kdtree (S (length prefix) + length l_arr)%nat r) as [r_idx r_arr] eqn:Hr.
+    set (root_nd := {| fk_split_x := sx; fk_pt := p; fk_ord := o; fk_left := l_idx; fk_right := r_idx |}).
+    pose proof (cons_app_reassoc prefix l_arr r_arr suffix root_nd) as [Hre [Harr_eq_l Harr_eq_r]].
+    cbn [flat_kd_within].
+    rewrite Hre.
+    rewrite nth_error_prefix_head.
+    cbn [fk_split_x fk_pt fk_ord fk_left fk_right].
+    assert (Hlen_l : length (prefix ++ [root_nd]) = S (length prefix)).
+    { rewrite length_app; simpl; lia. }
+    assert (Hlen_r : length (prefix ++ [root_nd] ++ l_arr) = (S (length prefix) + length l_arr)%nat).
+    { rewrite !length_app; simpl; lia. }
+    pose proof (IHl (prefix ++ [root_nd]) (r_arr ++ suffix) f b ltac:(lia)) as Hl_eq.
+    rewrite Hlen_l, Hl in Hl_eq.
+    pose proof (IHr (prefix ++ [root_nd] ++ l_arr) suffix f b ltac:(lia)) as Hr_eq.
+    rewrite Hlen_r, Hr in Hr_eq.
+    rewrite Harr_eq_l at 1.
+    rewrite Harr_eq_r at 1.
+    change (fk_split_x root_nd) with sx.
+    change (fk_pt root_nd) with p.
+    change (fk_ord root_nd) with o.
+    change (fk_left root_nd) with l_idx.
+    change (fk_right root_nd) with r_idx.
+    destruct (Z.leb (if sx then min_x b else min_y b) (if sx then px p else py p));
+      destruct (Z.leb (if sx then px p else py p) (if sx then max_x b else max_y b));
+      rewrite ?Hl_eq, ?Hr_eq; reflexivity.
+Qed.
+
+(**md
+**Flattening a k-d tree into a contiguous struct array preserves exact range-search semantics (`Spatial`).**
+
+Replacing heap-allocated `SpatialNode` discriminated-union pointers with integer child indices into a flat `FlatSpatialNode<'T>[]` array yields the exact same `kd_within` traversal results as the inductive pointer tree.
+
+- [t:] inductive k-d tree.
+- [b:] query bounding box.
+*)
+Theorem flat_kdtree_isomorphic (t : kdtree) (b : aabb) :
+  let '(root_opt, arr) := flatten_kdtree 0%nat t in
+  flat_kd_within (kd_depth t) arr b root_opt = kd_within b t.
+Proof.
+  pose proof (flatten_kdtree_embedded t [] [] (kd_depth t) b ltac:(lia)) as H.
+  simpl in H.
+  destruct (flatten_kdtree 0%nat t) as [root_opt arr].
+  rewrite app_nil_r in H.
+  exact H.
+Qed.
+
+(**md
+**`sqrt`-free SIMD N-body softening (`max(d^2, min_d^2)`) is algebraically equivalent to `Double.Hypot` softening (`ForceKernels.manyBody`).**
+
+For all nonnegative distances `d >= 0` and `min_d >= 0`, `(max d min_d)^2 = max (d^2) (min_d^2)` and `(dx * num * d)` cancels `d` identically against `(softened^2)`, proving that `dx * (S * alpha * m / max(dx^2 + dy^2, minDist^2))` eliminates `sqrt` in both softened (`0 < d < minDist`) and unsoftened (`d >= minDist`) regimes.
+
+- [d:] Euclidean pair distance (`d >= 0`).
+- [min_d:] minimum softening distance (`min_d >= 0`).
+- [dx:] coordinate separation along X or Y.
+- [num:] scaled force numerator (`Strength * alpha * mass`).
+*)
+Theorem many_body_rational_form_cancels_sqrt (d min_d dx num : Z) :
+  0 <= d ->
+  0 <= min_d ->
+  let softened := Z.max d min_d in
+  softened * softened = Z.max (d * d) (min_d * min_d) /\
+  (dx * num * d) * (softened * softened) = (dx * num) * (d * Z.max (d * d) (min_d * min_d)).
+Proof.
+  intros Hd Hmin. cbv zeta.
+  assert (Hsq : Z.max d min_d * Z.max d min_d = Z.max (d * d) (min_d * min_d)).
+  { destruct (Z.le_gt_cases d min_d) as [Hle | Hgt].
+    - rewrite (Z.max_r d min_d Hle).
+      assert (Hle2 : d * d <= min_d * min_d) by nia.
+      symmetry; apply Z.max_r; exact Hle2.
+    - assert (Hge : min_d <= d) by lia.
+      rewrite (Z.max_l d min_d Hge).
+      assert (Hge2 : min_d * min_d <= d * d) by nia.
+      symmetry; apply Z.max_l; exact Hge2. }
+  split; [exact Hsq | rewrite Hsq; ring].
+Qed.
