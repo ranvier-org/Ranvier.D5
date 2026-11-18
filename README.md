@@ -8,6 +8,8 @@ Functional-first visualization foundations for native F# applications. Compose i
 - **Ranvier.D5.View**: keyed SVG scene components and native mark events.
 - **Ranvier.D5.Charts**: typed pure chart recipes and composition.
 - **Ranvier.D5.Geo**: optional [geographic geometry, interchange and spherical kernels](docs/geographic-kernels.md); full projection and map-chart pipelines are still in development.
+- **Ranvier.D5.Graph**: [2D compound diagram, port, obstacle-avoiding orthogonal routing and association-machine layout engines](docs/graph-layouts.md) (Sugiyama/ELK-class layered, IPSep-CoLa constrained stress, fCoSE, PivotMDS, SGD Stress, Modularity ForceAtlas2/LinLog, radial mindmaps and skyline packing) — see [graph layout research and package ADR](docs/graph-layout-research.md).
+- **Ranvier.D5.Graph3D**: [3D Euclidean and hyperbolic layout engines](docs/graph-layouts.md) including Tamara Munzner's H3, CAIDA Walrus, Octree Barnes-Hut Force3D, 3D SGD Stress, Cone/Balloon trees, 3D stratified layers and SVG projection.
 - All packages have a **.Traced** variant. Use one variant throughout the dependency graph.
 
 Target: .NET 10. Version: **0.1.1**. This is a pre-1.0 release: APIs may still change between 0.x versions. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
@@ -68,8 +70,11 @@ Run `dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --linked` fo
 dotnet run --project tests/Ranvier.D5.Tests -c Release
 dotnet run --project tests/Ranvier.D5.Native.Tests -c Release
 dotnet run --project benchmarks/Ranvier.D5.Benchmarks -c Release
+dotnet run --project benchmarks/Ranvier.D5.Graph.Benchmarks -c Release
 dotnet pack src/Ranvier.D5 -c Release -o artifacts/packages
 dotnet pack src/Ranvier.D5.View -c Release -o artifacts/packages
+dotnet pack src/Ranvier.D5.Graph -c Release -o artifacts/packages
+dotnet pack src/Ranvier.D5.Graph3D -c Release -o artifacts/packages
 ```
 
 See [performance gates and evidence](docs/performance-gates.md) for the paired comparison method and rendering phase diagnostics.

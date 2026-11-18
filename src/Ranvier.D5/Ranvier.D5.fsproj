@@ -21,6 +21,7 @@
     <Compile Include="TimeTicks.fs" />
     <Compile Include="Format.fs" /><Compile Include="Dsv.fs" />
     <Compile Include="Geometry.fs" />
+    <Compile Include="Geometry3D.fs" />
     <Compile Include="Chord.fs" />
     <Compile Include="Ribbon.fs" />
     <Compile Include="Sankey.fs" />

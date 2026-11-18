@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Ranvier.D5.Graph/Ranvier.D5.Graph.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.Graph3D/Ranvier.D5.Graph3D.fsproj" />
+  </ItemGroup>
+</Project>

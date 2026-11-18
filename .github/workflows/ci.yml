@@ -60,6 +60,8 @@ jobs:
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-geographic-kernels artifacts/geographic-kernels.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-projections artifacts/projections.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-advanced artifacts/advanced.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-graph-layouts artifacts/graph-layouts.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-graph-3d artifacts/graph-3d.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-projection-families artifacts/projection-families.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-map artifacts/map.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture artifacts/gallery.bmp
@@ -102,12 +104,16 @@ jobs:
           "${prefix[@]}" python tools/compare-benchmarks.py --traced ${{ matrix.traced }}
       - name: Geographic kernel performance
         run: dotnet run --project benchmarks/Ranvier.D5.Geo.Benchmarks -c Release -p:RanvierTrace=${{ matrix.traced }} -- artifacts/geography-benchmarks.json
+      - name: Graph and 3D layout performance
+        run: dotnet run --project benchmarks/Ranvier.D5.Graph.Benchmarks -c Release -p:RanvierTrace=${{ matrix.traced }} -- artifacts/graph-benchmarks.json
       - name: Pack
         run: |
           dotnet pack src/Ranvier.D5 -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
           dotnet pack src/Ranvier.D5.View -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
           dotnet pack src/Ranvier.D5.Charts -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
           dotnet pack src/Ranvier.D5.Geo -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+          dotnet pack src/Ranvier.D5.Graph -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+          dotnet pack src/Ranvier.D5.Graph3D -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
       - name: Consume packed View and core
         shell: bash
         run: |
@@ -115,7 +121,7 @@ jobs:
           if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
           mkdir -p artifacts/consumer
           cat > artifacts/consumer/Consumer.fsproj <<EOF
-          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.1.1]" /></ItemGroup></Project>
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Graph$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Graph3D$suffix" Version="[0.1.1]" /></ItemGroup></Project>
           EOF
           cat > artifacts/consumer/Program.fs <<'EOF'
           open Ranvier
@@ -187,19 +193,38 @@ jobs:
           match Ranvier.D5.Geo.MapChart.choropleth choropleth [region] [("co", 1.)] with
           | Ok map when map.HitTargets.Length = 1 -> ()
           | other -> failwithf "Packed map chart failed: %A" other
+          let diagram =
+              Ranvier.D5.Graph.DiagramGraph.create
+                  [ Ranvier.D5.Graph.DiagramNode.create "n1" |> Ranvier.D5.Graph.DiagramNode.inGroup "g1"
+                    Ranvier.D5.Graph.DiagramNode.create "n2" |> Ranvier.D5.Graph.DiagramNode.inGroup "g1" ]
+                  [ Ranvier.D5.Graph.DiagramGroup.create "g1" ]
+                  [ Ranvier.D5.Graph.Association.create "e1" "n1" "n2" ]
+              |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          let sugiyama = Ranvier.D5.Graph.Sugiyama.layout (Ranvier.D5.Graph.SugiyamaConfig.create (Bounds.create 0. 0. 400. 300.)) diagram |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if sugiyama.Nodes.Length <> 2 || sugiyama.Groups.Length <> 1 then failwith "Packed Sugiyama layout failed"
+          Ranvier.D5.Graph.DiagramScene.render (Ranvier.D5.Graph.DiagramTheme.create 400. 300. "Packed diagram") sugiyama |> ignore
+          let h3 = Ranvier.D5.Graph3D.H3.layout { Ranvier.D5.Graph3D.H3Config.defaultValue with RootId = Some "n1" } diagram |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if h3.Nodes.Length <> 2 then failwith "Packed H3 layout failed"
+          let walrus = Ranvier.D5.Graph3D.Walrus.layout { Ranvier.D5.Graph3D.WalrusConfig.defaultValue with RootId = Some "n1" } diagram |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if walrus.Nodes.Length <> 2 then failwith "Packed Walrus layout failed"
           graph.Dispose()
           EOF
           cat > artifacts/consumer/NuGet.Config <<'EOF'
-          <configuration><packageSources><clear /><add key="local" value="../packages" /><add key="nuget" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>
+          <configuration><packageSources><clear /><add key="local" value="../packages" /><add key="nuget" value="https://api.nuget.org/v3/index.json" /></packageSources><packageSourceMapping><packageSource key="local"><package pattern="Ranvier.D5" /><package pattern="Ranvier.D5.*" /></packageSource><packageSource key="nuget"><package pattern="*" /></packageSource></packageSourceMapping></configuration>
           EOF
-          dotnet restore artifacts/consumer/Consumer.fsproj --configfile artifacts/consumer/NuGet.Config
-          dotnet run --project artifacts/consumer/Consumer.fsproj -c Release --no-restore
+          NUGET_PACKAGES="$PWD/artifacts/consumer-cache" dotnet restore artifacts/consumer/Consumer.fsproj --configfile artifacts/consumer/NuGet.Config
+          NUGET_PACKAGES="$PWD/artifacts/consumer-cache" dotnet run --project artifacts/consumer/Consumer.fsproj -c Release --no-restore
       - name: Fickl JavaScript compile
         if: matrix.os == 'ubuntu-24.04' && matrix.traced == false
         run: |
           dotnet tool restore
           dotnet fickl src/Ranvier.D5.View -o artifacts/fable/view
           dotnet fickl src/Ranvier.D5.Geo -o artifacts/fable/geo
+          dotnet fickl src/Ranvier.D5.Graph -o artifacts/fable/graph
+          dotnet fickl src/Ranvier.D5.Graph3D -o artifacts/fable/graph3d
+          dotnet fickl tests/Ranvier.D5.Fickl.Tests -o artifacts/fable/tests
+          printf '{"type":"module"}\n' > artifacts/fable/tests/package.json
+          node artifacts/fable/tests/Program.js
       - uses: actions/upload-artifact@v7
         if: always()
         with:

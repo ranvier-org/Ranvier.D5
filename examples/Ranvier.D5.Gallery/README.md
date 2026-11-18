@@ -2,6 +2,18 @@
 
 Every image below comes from a working native WebCore view. For complete animated dashboards built from these pieces, see the [live dashboards app](../Ranvier.D5.Dashboards/README.md).
 
+## Compound diagram & 3D hyperbolic graph layouts
+
+![Native Sugiyama orthogonal association machine, IPSep-CoLa and fCoSE](../../docs/images/graph-layouts.png)
+
+![Native Munzner H3 Poincaré ball, CAIDA Walrus Klein ball and 3D stratified planes](../../docs/images/graph-3d.png)
+
+Run `--graph-layouts` or `--graph-3d`; capture with `--capture-graph-layouts artifacts/graph-layouts.bmp`
+and `--capture-graph-3d artifacts/graph-3d.bmp`. One signal drives layer spacing / edge length in 2D and
+interactive $O^+(3,1)$ Lorentz focus boosts + camera orbit in 3D; both captures verify painted native
+pixels across every panel at two signal phases.
+[Source](GraphLayoutsGallery.fs) · [Engine guide](../../docs/graph-layouts.md) · [Research & ADR](../../docs/graph-layout-research.md).
+
 ## Bounded geographic projections
 
 ![Native equirectangular, Mercator, orthographic and planar identity paths](../../docs/images/projections.png)

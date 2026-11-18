@@ -417,9 +417,71 @@ let markEvents () =
         Expect.contains leafEvents ("leaf","wheel") "create drops the group scope of a wheel"
         unmount leafOnly
 
+let graphLayoutsNative () =
+        use host = WebCoreHost.Create(420, 320)
+        use graph = new Graph()
+        let container = host.Document.createElement "div"
+        host.Document.body.appendChild container |> ignore
+        let diagram =
+            Ranvier.D5.Graph.DiagramGraph.create
+                [ Ranvier.D5.Graph.DiagramNode.sized "n1" 80. 32. |> Ranvier.D5.Graph.DiagramNode.inGroup "g1"
+                  Ranvier.D5.Graph.DiagramNode.sized "n2" 80. 32. |> Ranvier.D5.Graph.DiagramNode.inGroup "g1" ]
+                [ { Ranvier.D5.Graph.DiagramGroup.create "g1" with Padding = Ranvier.D5.Graph.GroupPadding.titled 24. 10. } ]
+                [ { Ranvier.D5.Graph.Association.create "e1" "n1" "n2" with Kind = Ranvier.D5.Graph.AssociationKind.Composition } ]
+            |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+        let sugLayout =
+            Ranvier.D5.Graph.Sugiyama.layout
+                { Ranvier.D5.Graph.SugiyamaConfig.create (Bounds.create 10. 10. 360. 260.) with Routing = Ranvier.D5.Graph.SugiyamaRouting.Orthogonal }
+                diagram
+            |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+        let sugScene =
+            Ranvier.D5.Graph.DiagramScene.render
+                { Ranvier.D5.Graph.DiagramTheme.create 400. 300. "Native Diagram" with
+                    NodeFill = fun _ -> Paint.rgb 37 99 235
+                    NodeLabel = fun _ -> "" }
+                sugLayout
+        let h3State =
+            Ranvier.D5.Graph3D.H3.buildState
+                { Ranvier.D5.Graph3D.H3Config.defaultValue with BallRadius = 90.; RootId = Some "n1" }
+                diagram
+            |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+        let cam = Ranvier.D5.Graph3D.Camera3D.orbit (Point3.create 0. 0. 0.) 0.4 0.3 260.
+        let theme3D = { Ranvier.D5.Graph3D.Scene3DTheme.create 400. 300. "Native H3" with ReferenceSphereRadius = Some 90. }
+        let clicks = ResizeArray<string list * string>()
+        let activeScene = graph.Run(fun () -> Api.createSignal sugScene)
+        let mounted =
+            Mounting.mount graph None (fun errors -> raise (AggregateException errors)) container None
+                (fun context -> Program.run (Component.render (Renderer.createScoped (fun path name _ -> clicks.Add(path, name))) (fun () -> activeScene.Value)) context.Backend)
+        host.Cycle()
+        host.Frame()
+        let struct(w, h) = host.PaintSize
+        let pixels2D = Array.zeroCreate<byte> (w * h * 4)
+        host.Paint pixels2D
+        let n1 = sugLayout.Nodes |> List.find (fun n -> n.Id = "n1")
+        let px, py = int (Math.Round n1.Center.X) + 8, int (Math.Round n1.Center.Y) + 8
+        let idx = (py * w + px) * 4
+        Expect.equal (int pixels2D[idx], int pixels2D[idx + 1], int pixels2D[idx + 2]) (37, 99, 235) "Sugiyama node fills native pixels"
+        host.Click(px, py) |> ignore
+        Expect.contains clicks (["nodes"; "node:n1:shape"], "click") "DiagramScene scoped click dispatches node key"
+        graph.Run(fun () -> activeScene.Value <- Ranvier.D5.Graph3D.Scene3D.render theme3D cam (Ranvier.D5.Graph3D.H3.project h3State))
+        host.Cycle()
+        host.Frame()
+        let pixels3DBefore = Array.zeroCreate<byte> (w * h * 4)
+        host.Paint pixels3DBefore
+        let boosted = Ranvier.D5.Graph3D.H3.focusNode "n2" h3State |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+        graph.Run(fun () -> activeScene.Value <- Ranvier.D5.Graph3D.Scene3D.render theme3D cam (Ranvier.D5.Graph3D.H3.project boosted))
+        host.Cycle()
+        host.Frame()
+        let pixels3DAfter = Array.zeroCreate<byte> (w * h * 4)
+        host.Paint pixels3DAfter
+        Expect.isFalse (pixels3DBefore = pixels3DAfter) "H3 Lorentz focus boost updates native WebCore pixels"
+        mounted.Dispose()
+        host.Cycle()
+
 [<EntryPoint>]
 let main _ =
     acceptance ()
     markEvents ()
-    printfn "Native scene acceptance passed: namespace, identity, reorder, paint, events, escaping and disposal."
+    graphLayoutsNative ()
+    printfn "Native scene acceptance passed: namespace, identity, reorder, paint, events, escaping, graph layouts and disposal."
     0
