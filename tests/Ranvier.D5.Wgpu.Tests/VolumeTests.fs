@@ -25,10 +25,22 @@ let private unwrapOk msg =
     | Error err -> failtestf "%s failed: %A" msg err
 
 let private verifyClosedManifoldByPosition (mesh: MeshData) (label: string) =
-    let quantize (v: Vector3) =
-        struct (int (MathF.Round (v.X * 10000.0f)), int (MathF.Round (v.Y * 10000.0f)), int (MathF.Round (v.Z * 10000.0f)))
+    let mutable maxExtent = 0.0f
 
-    let counts = Dictionary<struct (int * int * int) * struct (int * int * int), int>()
+    for i = 0 to mesh.Vertices.Length - 1 do
+        let p = mesh.Vertices[i].Position
+        maxExtent <- max maxExtent (max (abs p.X) (max (abs p.Y) (abs p.Z)))
+
+    let scaleFactor = 10000.0 / max 1e-6 (float maxExtent)
+
+    let quantize (v: Vector3) =
+        struct (
+            int64 (Math.Round (float v.X * scaleFactor)),
+            int64 (Math.Round (float v.Y * scaleFactor)),
+            int64 (Math.Round (float v.Z * scaleFactor))
+        )
+
+    let counts = Dictionary<struct (int64 * int64 * int64) * struct (int64 * int64 * int64), int>()
     let triCount = mesh.Indices.Length / 3
 
     for t = 0 to triCount - 1 do
@@ -72,9 +84,24 @@ let private verifyOutwardWinding (mesh: MeshData) (label: string) =
         let v0 = mesh.Vertices[i0]
         let v1 = mesh.Vertices[i1]
         let v2 = mesh.Vertices[i2]
-        let cross = Vector3.Cross (v1.Position - v0.Position, v2.Position - v0.Position)
-        Expect.isGreaterThan (cross.LengthSquared ()) 1e-14f $"{label} tri[{t}] is non-degenerate"
-        let triN = Vector3.Normalize cross
+        let ux = float v1.Position.X - float v0.Position.X
+        let uy = float v1.Position.Y - float v0.Position.Y
+        let uz = float v1.Position.Z - float v0.Position.Z
+        let vx = float v2.Position.X - float v0.Position.X
+        let vy = float v2.Position.Y - float v0.Position.Y
+        let vz = float v2.Position.Z - float v0.Position.Z
+        let mu = max (abs ux) (max (abs uy) (abs uz))
+        let mv = max (abs vx) (max (abs vy) (abs vz))
+        Expect.isGreaterThan mu 0.0 $"{label} tri[{t}] edge u is non-zero"
+        Expect.isGreaterThan mv 0.0 $"{label} tri[{t}] edge v is non-zero"
+        let sux, suy, suz = ux / mu, uy / mu, uz / mu
+        let svx, svy, svz = vx / mv, vy / mv, vz / mv
+        let cx = suy * svz - suz * svy
+        let cy = suz * svx - sux * svz
+        let cz = sux * svy - suy * svx
+        let cLen = sqrt (cx * cx + cy * cy + cz * cz)
+        Expect.isGreaterThan cLen 1e-8 $"{label} tri[{t}] is non-degenerate"
+        let triN = Vector3 (float32 (cx / cLen), float32 (cy / cLen), float32 (cz / cLen))
         let avgN = Vector3.Normalize (v0.Normal + v1.Normal + v2.Normal)
         Expect.isGreaterThan (Vector3.Dot (triN, avgN)) 0.5f $"{label} tri[{t}] CCW winding aligns with outward normals"
 
@@ -535,4 +562,87 @@ let volumeTests =
                 Expect.equal (secSlices.Indices.Length / 3) (7 * 7 * 2) "single Z slice on 8^3 grid emits 98 triangles"
                 Expect.isGreaterThan secSlices.Vertices[0].Color.Z (secSlices.Vertices[0].Color.X + 0.2f) "secondary scalar x=-1 colors cool blue on slice"
                 Expect.isGreaterThan secSlices.Vertices[7].Color.X (secSlices.Vertices[7].Color.Z + 0.2f) "secondary scalar x=+1 colors warm red on slice"
+
+            testCase "IsoSurface3D preserves closed 2-manifold topology and triangle count at small BoxAspect.Manual(0.002, 0.002, 0.002) scale"
+            <| fun () ->
+                let bounds = Bounds3.create -1.5 -1.5 -1.5 3.0 3.0 3.0
+
+                let grid =
+                    VolumeGrid.fromFunction
+                        24
+                        24
+                        24
+                        bounds
+                        (fun x y z -> 1.0f - float32 (x * x + y * y + z * z))
+                        ValueNone
+                    |> unwrapOk "smallScaleSphereGrid"
+
+                let cubeScale =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (-1.5, 1.5))
+                        (AxisScale3D.linear (-1.5, 1.5))
+                        (AxisScale3D.linear (-1.5, 1.5))
+
+                let tinyScale =
+                    Scale3D.create
+                        (BoxAspect.Manual (0.002, 0.002, 0.002))
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (-1.5, 1.5))
+                        (AxisScale3D.linear (-1.5, 1.5))
+                        (AxisScale3D.linear (-1.5, 1.5))
+
+                let ramp = ColorRamp.viridis (-1.0, 1.0)
+                let cfg = IsoSurfaceConfig.create 0.0f
+                let cubeMesh = IsoSurface3D.compute cubeScale ramp cfg grid |> unwrapOk "cubeMesh"
+                let tinyMesh = IsoSurface3D.compute tinyScale ramp cfg grid |> unwrapOk "tinyMesh"
+
+                Expect.equal tinyMesh.Indices.Length cubeMesh.Indices.Length "BoxAspect.Manual(0.002) emits exact same triangle count as BoxAspect.Cube"
+                Expect.equal tinyMesh.Vertices.Length cubeMesh.Vertices.Length "BoxAspect.Manual(0.002) emits exact same vertex count as BoxAspect.Cube"
+                verifyOutwardWinding tinyMesh "tiny 0.002 sphere"
+                verifyClosedManifoldByPosition tinyMesh "tiny 0.002 sphere"
+
+            testCase "VolumeSlices3D.extract omits NaN samples without emitting Vector3.Zero dummy vertices on offset volume"
+            <| fun () ->
+                let offsetBounds = Bounds3.create 100.0 100.0 100.0 10.0 10.0 10.0
+
+                let offsetGrid =
+                    VolumeGrid.fromFunction
+                        6
+                        6
+                        6
+                        offsetBounds
+                        (fun x y z ->
+                            // Place NaN voxels at (104, 104, 104) and along x=100 edge
+                            if (abs (x - 104.0) < 0.5 && abs (y - 104.0) < 0.5 && abs (z - 104.0) < 0.5) || x < 100.1 then
+                                Single.NaN
+                            else
+                                float32 (x + y + z))
+                        ValueNone
+                    |> unwrapOk "offsetNaNGrid"
+
+                // Map [0, 110]^3 into world [-1, +1]^3 so [100, 110]^3 lies strictly away from Vector3.Zero
+                let offsetScale = Scale3D.cartesian (0.0, 110.0) (0.0, 110.0) (0.0, 110.0)
+                let ramp = ColorRamp.viridis (300.0, 330.0)
+                let sliceMesh =
+                    VolumeSlices3D.extract offsetScale ramp { XIndex = Some 2; YIndex = Some 2; ZIndex = Some 2 } offsetGrid
+                    |> unwrapOk "offsetSliceMesh"
+
+                verifyOutwardWinding sliceMesh "offset NaN slices"
+                Expect.isLessThan sliceMesh.Vertices.Length (3 * 6 * 6) "omitted NaN voxels are compacted out of Vertices instead of emitting dummy entries"
+
+                let worldMin = Scale3D.map offsetScale (Bounds3.minPoint offsetBounds)
+                let worldMax = Scale3D.map offsetScale (Bounds3.maxPoint offsetBounds)
+                let loX, hiX = min worldMin.X worldMax.X, max worldMin.X worldMax.X
+                let loY, hiY = min worldMin.Y worldMax.Y, max worldMin.Y worldMax.Y
+                let loZ, hiZ = min worldMin.Z worldMax.Z, max worldMin.Z worldMax.Z
+
+                for i = 0 to sliceMesh.Vertices.Length - 1 do
+                    let v = sliceMesh.Vertices[i]
+                    Expect.notEqual v.Position Vector3.Zero $"vertex[{i}] is never Vector3.Zero dummy"
+                    Expect.isGreaterThan v.Color.W 0.0f $"vertex[{i}] has non-zero alpha"
+                    Expect.isTrue (v.Position.X >= loX - 1e-4f && v.Position.X <= hiX + 1e-4f) $"vertex[{i}].X inside mapped world box ({v.Position.X})"
+                    Expect.isTrue (v.Position.Y >= loY - 1e-4f && v.Position.Y <= hiY + 1e-4f) $"vertex[{i}].Y inside mapped world box ({v.Position.Y})"
+                    Expect.isTrue (v.Position.Z >= loZ - 1e-4f && v.Position.Z <= hiZ + 1e-4f) $"vertex[{i}].Z inside mapped world box ({v.Position.Z})"
         ]

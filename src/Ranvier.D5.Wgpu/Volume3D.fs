@@ -230,11 +230,19 @@ module private VolumeKernel =
         | UpAxis.YUp -> Vector3 (float32 wx, float32 wy, float32 wz)
 
     let inline safeNormalize (x: float) (y: float) (z: float) (fallback: Vector3) : Vector3 =
-        let lenSq = x * x + y * y + z * z
+        if Check3D.isFinite x && Check3D.isFinite y && Check3D.isFinite z then
+            let m = max (abs x) (max (abs y) (abs z))
 
-        if lenSq > 1e-24 && Check3D.isFinite lenSq then
-            let inv = 1.0 / sqrt lenSq
-            Vector3 (float32 (x * inv), float32 (y * inv), float32 (z * inv))
+            if m > 0.0 then
+                let sx, sy, sz = x / m, y / m, z / m
+                let norm = sqrt (sx * sx + sy * sy + sz * sz)
+
+                if norm > 0.0 && Check3D.isFinite norm then
+                    Vector3 (float32 (sx / norm), float32 (sy / norm), float32 (sz / norm))
+                else
+                    fallback
+            else
+                fallback
         else
             fallback
 
@@ -855,22 +863,38 @@ module IsoSurface3D =
                     let p0 = verts[i0].Position
                     let p1 = verts[i1].Position
                     let p2 = verts[i2].Position
-                    let cross = Vector3.Cross (p1 - p0, p2 - p0)
 
-                    if cross.LengthSquared () > 1e-20f then
-                        if triCount >= maxTris then
-                            budgetError <- ValueSome (LayoutError.BudgetExceeded $"Iso-surface triangle count exceeds MaxTriangles ({maxTris}).")
-                        else
-                            inds.Add (uint32 i0)
+                    if p0 <> p1 && p1 <> p2 && p2 <> p0 then
+                        let ux = float p1.X - float p0.X
+                        let uy = float p1.Y - float p0.Y
+                        let uz = float p1.Z - float p0.Z
+                        let vx = float p2.X - float p0.X
+                        let vy = float p2.Y - float p0.Y
+                        let vz = float p2.Z - float p0.Z
+                        let mu = max (abs ux) (max (abs uy) (abs uz))
+                        let mv = max (abs vx) (max (abs vy) (abs vz))
 
-                            if flipWinding then
-                                inds.Add (uint32 i2)
-                                inds.Add (uint32 i1)
-                            else
-                                inds.Add (uint32 i1)
-                                inds.Add (uint32 i2)
+                        if mu > 0.0 && mv > 0.0 then
+                            let sux, suy, suz = ux / mu, uy / mu, uz / mu
+                            let svx, svy, svz = vx / mv, vy / mv, vz / mv
+                            let cx = suy * svz - suz * svy
+                            let cy = suz * svx - sux * svz
+                            let cz = sux * svy - suy * svx
 
-                            triCount <- triCount + 1
+                            if (cx * cx + cy * cy + cz * cz) > 1e-24 then
+                                if triCount >= maxTris then
+                                    budgetError <- ValueSome (LayoutError.BudgetExceeded $"Iso-surface triangle count exceeds MaxTriangles ({maxTris}).")
+                                else
+                                    inds.Add (uint32 i0)
+
+                                    if flipWinding then
+                                        inds.Add (uint32 i2)
+                                        inds.Add (uint32 i1)
+                                    else
+                                        inds.Add (uint32 i1)
+                                        inds.Add (uint32 i2)
+
+                                    triCount <- triCount + 1
 
             // Z-slab edge caches for shared-edge deduplication
             let xSliceCount = (nx - 1) * ny
@@ -1286,8 +1310,7 @@ module VolumeSlices3D =
                     else
                         Vector3.UnitY
 
-                let baseVert = verts.Count
-                let valid = Array.zeroCreate<bool> (nu * nv)
+                let vertIndexMap = Array.create (nu * nv) -1
 
                 for v = 0 to nv - 1 do
                     let vOffset = v * nu
@@ -1302,12 +1325,10 @@ module VolumeSlices3D =
 
                             match ColorRamp.tryMap color scalar with
                             | ValueSome col ->
-                                valid[localIdx] <- true
+                                let vIdx = verts.Count
+                                vertIndexMap[localIdx] <- vIdx
                                 verts.Add (Vertex3D (worldAt u v, planeNormal, col.ToVector4 ()))
-                            | ValueNone ->
-                                verts.Add (Vertex3D (Vector3.Zero, planeNormal, Vector4.Zero))
-                        else
-                            verts.Add (Vertex3D (Vector3.Zero, planeNormal, Vector4.Zero))
+                            | ValueNone -> ()
 
                 for v = 0 to nv - 2 do
                     let r0 = v * nu
@@ -1319,11 +1340,16 @@ module VolumeSlices3D =
                         let l01 = r1 + u
                         let l11 = l01 + 1
 
-                        if valid[l00] && valid[l10] && valid[l01] && valid[l11] then
-                            let v00 = uint32 (baseVert + l00)
-                            let v10 = uint32 (baseVert + l10)
-                            let v11 = uint32 (baseVert + l11)
-                            let v01 = uint32 (baseVert + l01)
+                        let i00 = vertIndexMap[l00]
+                        let i10 = vertIndexMap[l10]
+                        let i01 = vertIndexMap[l01]
+                        let i11 = vertIndexMap[l11]
+
+                        if i00 >= 0 && i10 >= 0 && i01 >= 0 && i11 >= 0 then
+                            let v00 = uint32 i00
+                            let v10 = uint32 i10
+                            let v11 = uint32 i11
+                            let v01 = uint32 i01
                             inds.Add v00
                             inds.Add v10
                             inds.Add v11
