@@ -4,6 +4,10 @@
 
 See [graph-layout-research.md](graph-layout-research.md) for the academic literature survey, Mermaid/ELK/CoLa/fCoSE/H3/Walrus prior art, and package boundary rationale.
 
+![Native 2D compound Sugiyama, IPSep-CoLa and fCoSE gallery](images/graph-layouts.png)
+
+![Native 3D Munzner H3, CAIDA Walrus and Hong-Nikolov stratified gallery](images/graph-3d.png)
+
 ---
 
 ## 1. Unified Compound, Port & Association Machine IR (`Ranvier.D5.Graph`)

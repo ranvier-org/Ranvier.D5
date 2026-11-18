@@ -372,6 +372,31 @@ let capture kind path =
             if graph.Run(fun () -> input.Selection.Selected.IsEmpty || input.Selection.Hovered.IsNone) then failwith "Advanced snapshot state is missing a selection or hover."
             ignore output
             owner :> IDisposable
+        elif kind="graph-layouts" || kind="graph-3d" then
+            let build,probes=
+                if kind="graph-layouts" then GraphLayoutsGallery.scene2D,GraphLayoutsGallery.probes2D
+                else GraphLayoutsGallery.scene3D,GraphLayoutsGallery.probes3D
+            let phase=graph.Run(fun () -> Api.createSignal 0.)
+            let scene=graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) build)
+            let mounted=mount host graph (fun () -> scene.Value)
+            let verify value =
+                host.Cycle()
+                host.Frame()
+                let struct(w,h)=host.PaintSize
+                let pixels=Array.zeroCreate<byte>(w*h*4)
+                host.Paint pixels
+                for label,(point:Point) in probes value do
+                    let x,y=int(Math.Round point.X)+8,int(Math.Round point.Y)+8
+                    let i=(y*w+x)*4
+                    let r,g,b=int pixels[i],int pixels[i+1],int pixels[i+2]
+                    if r>=248 && g>=250 && b>=252 then
+                        failwithf "Graph gallery %s probe %s did not paint over card background at (%d,%d): (%d,%d,%d)." kind label x y r g b
+            verify 0.
+            let before=graph.Run(fun () -> scene.Value)
+            graph.Run(fun () -> phase.Value<-0.75)
+            if Object.ReferenceEquals(before,graph.Run(fun () -> scene.Value)) then failwith "Graph gallery signal did not update the scene."
+            verify 0.75
+            {new IDisposable with member _.Dispose()=mounted.Dispose()}
         elif kind="linked" then
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
@@ -446,6 +471,17 @@ let main args =
         let timer=Stopwatch.StartNew()
         while window.Step() do window.Graph.Run(fun () -> phase.Value<-timer.Elapsed.TotalSeconds*0.2)
         owner.Dispose()
+    elif args.Length=2 && (args[0]="--capture-graph-layouts" || args[0]="--capture-graph-3d") then
+        capture (args[0].Substring 10) args[1]
+    elif Array.contains "--graph-layouts" args || Array.contains "--graph-3d" args then
+        let is3D=Array.contains "--graph-3d" args
+        use window=Window.Create((if is3D then "Ranvier.D5.Graph3D — H3, Walrus & 3D layouts" else "Ranvier.D5.Graph — compound & association engines"),820,590)
+        let phase=window.Graph.Run(fun () -> Api.createSignal 0.)
+        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) (if is3D then GraphLayoutsGallery.scene3D else GraphLayoutsGallery.scene2D))
+        let mounted=mount window.Host window.Graph (fun () -> scene.Value)
+        let timer=Stopwatch.StartNew()
+        while window.Step() do window.Graph.Run(fun () -> phase.Value<-0.5-0.5*cos(timer.Elapsed.TotalSeconds*0.5))
+        mounted.Dispose()
     elif args.Length=2 && args[0]="--capture-linked" then
         capture "linked" args[1]
     elif args.Length=2 && args[0]="--capture-hierarchy" then

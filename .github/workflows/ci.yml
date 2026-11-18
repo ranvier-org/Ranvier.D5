@@ -60,6 +60,8 @@ jobs:
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-geographic-kernels artifacts/geographic-kernels.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-projections artifacts/projections.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-advanced artifacts/advanced.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-graph-layouts artifacts/graph-layouts.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-graph-3d artifacts/graph-3d.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-projection-families artifacts/projection-families.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-map artifacts/map.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture artifacts/gallery.bmp
@@ -220,6 +222,9 @@ jobs:
           dotnet fickl src/Ranvier.D5.Geo -o artifacts/fable/geo
           dotnet fickl src/Ranvier.D5.Graph -o artifacts/fable/graph
           dotnet fickl src/Ranvier.D5.Graph3D -o artifacts/fable/graph3d
+          dotnet fickl tests/Ranvier.D5.Fickl.Tests -o artifacts/fable/tests
+          printf '{"type":"module"}\n' > artifacts/fable/tests/package.json
+          node artifacts/fable/tests/Program.js
       - uses: actions/upload-artifact@v7
         if: always()
         with:
