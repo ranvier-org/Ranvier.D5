@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <IsPackable>false</IsPackable>
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Compile Include="Site.fs" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Update="FSharp.Core" Version="10.1.403" />
+        <PackageReference Include="Nacara.Plugin.Rocq" Version="0.1.0-preview.3" />
+        <PackageReference Include="Nacara.Plugin.Markdown" Version="1.0.0-beta.2" />
+        <PackageReference Include="Nacara.Plugin.LinkValidator" Version="1.0.0-beta.2" />
+    </ItemGroup>
+
+</Project>

@@ -79,7 +79,9 @@ module Distribution =
     /// <summary>Uniform on [low,high).</summary>
     let uniform low high = check (finite [low;high;high-low] && low<=high) "Uniform bounds must be finite with low <= high." (Distribution.Uniform(low,high))
     /// <summary>Integers in [low,high), as floor of a uniform draw.</summary>
-    let integer low high = check (finite [low;high;high-low] && low<high) "Integer bounds must be finite with low < high." (Distribution.Integer(floor low,floor high))
+    let integer low high =
+        let lo,highFloor = floor low,floor high
+        check (finite [low;high;high-low] && lo<highFloor) "Integer bounds must be finite with floor low < floor high." (Distribution.Integer(lo,highFloor))
     /// <summary>Gaussian by the Box–Muller transform, using two draws per sample and no cached spare.</summary>
     let normal mean deviation = check (finite [mean;deviation] && deviation>=0.) "Normal parameters must be finite with nonnegative deviation." (Distribution.Normal(mean,deviation))
     /// <summary>exp of a normal draw with the given underlying mean and deviation.</summary>

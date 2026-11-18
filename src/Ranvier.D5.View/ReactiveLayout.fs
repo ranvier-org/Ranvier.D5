@@ -54,18 +54,22 @@ module ReactiveLayout =
                 publication<-ValueSome value
                 if not frameQueued then
                     frameQueued<-true
-                    dispatcher.RequestFrame(fun () -> onOwner(fun () ->
+                    try
+                        dispatcher.RequestFrame(fun () -> onOwner(fun () ->
+                            frameQueued<-false
+                            let next=publication
+                            publication<-ValueNone
+                            match next with
+                            | ValueSome value ->
+                                let version=match value with WorkState.Running g | WorkState.Ready(g,_) | WorkState.Failed(g,_) -> g | WorkState.Idle -> generation
+                                if version=generation then
+                                    Api.batch(fun () ->
+                                        state.Value<-value
+                                        match value with WorkState.Ready(_,result) -> lastGood.Value<-Some result | _ -> ())
+                            | ValueNone -> ()))
+                    with _ ->
                         frameQueued<-false
-                        let next=publication
-                        publication<-ValueNone
-                        match next with
-                        | ValueSome value ->
-                            let version=match value with WorkState.Running g | WorkState.Ready(g,_) | WorkState.Failed(g,_) -> g | WorkState.Idle -> generation
-                            if version=generation then
-                                Api.batch(fun () ->
-                                    state.Value<-value
-                                    match value with WorkState.Ready(_,result) -> lastGood.Value<-Some result | _ -> ())
-                        | ValueNone -> ()))
+                        reraise()
             let rec launch version input =
                 let cancellation=new CancellationTokenSource()
                 active<-ValueSome cancellation

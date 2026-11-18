@@ -61,8 +61,16 @@ module GeoMeasure =
         let total=state.Total+adjusted
         {state with Total=total;TotalCorrection=(total-state.Total)-adjusted}
 
+    let private canonicalPole (position: GeoPosition) =
+        let normalized = GeoPosition.normalize position
+        if abs normalized.Latitude = 90. then
+            match GeoPosition.create 0. normalized.Latitude with
+            | Ok pole -> pole
+            | Error _ -> normalized
+        else normalized
+
     let private areaEdge from destination state =
-        let a,b=GeoPosition.normalize from,GeoPosition.normalize destination
+        let a,b=canonicalPole from,canonicalPole destination
         if a.Latitude = -b.Latitude && (abs(a.Longitude-b.Longitude)=180. || abs a.Latitude=90.) then
             raise(AmbiguousArc "Spherical area requires an explicit intermediate point on antipodal edges.")
         let delta=b.Longitude-a.Longitude
@@ -152,8 +160,8 @@ module GeoMeasure =
         let mutable polygons=emptyVector
         let mutable inLine=false
         let mutable inPolygon=false
-        let mutable first=ValueNone
-        let mutable previous=ValueNone
+        let mutable first:GeoPosition voption=ValueNone
+        let mutable previous:GeoPosition voption=ValueNone
         let mutable firstVector=struct(0.,0.,0.)
         let mutable previousVector=struct(0.,0.,0.)
         let edge from fromVector destination destinationVector =
@@ -220,8 +228,8 @@ module GeoMeasure =
         let mutable allLongitudes=false
         let mutable inLine=false
         let mutable inPolygon=false
-        let mutable first=ValueNone
-        let mutable previous=ValueNone
+        let mutable first:GeoPosition voption=ValueNone
+        let mutable previous:GeoPosition voption=ValueNone
         let mutable seamWinding=0
         let mutable poleEntry=ValueNone
         let mutable firstPoleExit=ValueNone
@@ -298,7 +306,12 @@ module GeoMeasure =
                 inLine <- true;first <- ValueNone;previous <- ValueNone
                 poleEntry <- ValueNone;firstPoleExit <- ValueNone
             | GeoStreamEvent.Point source ->
-                let position=GeoPosition.normalize source
+                if inPolygon then
+                    match previous with
+                    | ValueSome prior when prior.Latitude = -source.Latitude && abs prior.Latitude = 90. ->
+                        raise(AmbiguousArc "Spherical bounds require an explicit intermediate point on antipodal edges.")
+                    | _ -> ()
+                let position=canonicalPole source
                 point position
                 if inLine then
                     match previous with

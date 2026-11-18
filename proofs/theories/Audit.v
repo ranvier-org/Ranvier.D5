@@ -1,0 +1,42 @@
+From RanvierD5.Pure Require Import DataScale Spatial SamplingSelection GeometryGeo TransitionWorker.
+
+(** * Assumption audit across all Ranvier.D5 proof modules *)
+
+(* Pure.DataScale *)
+Print Assumptions bisect_right_partition.
+Print Assumptions data_bin_unique_membership.
+Print Assumptions data_join_partition_and_order.
+Print Assumptions scale_clamp_within_range.
+Print Assumptions scale_nice_encloses_domain.
+Print Assumptions naive_nice_from_interior_ticks_falsified.
+Print Assumptions integer_dist_floor_bounds_safe.
+Print Assumptions naive_integer_dist_bounds_falsified.
+Print Assumptions simd_chunked_sum_eq_fold.
+
+(* Pure.Spatial *)
+Print Assumptions quadtree_aabb_lower_bound_sound.
+Print Assumptions quadtree_leaf_count_conservation.
+Print Assumptions spatial_within_sound_and_complete.
+Print Assumptions spatial_nearest_pruning_sound.
+
+(* Pure.SamplingSelection *)
+Print Assumptions minmax_run_preserves_endpoints_and_order.
+Print Assumptions hamilton_quotas_conserve_budget.
+Print Assumptions selection_reconcile_preserves_hidden_and_idempotent.
+Print Assumptions length_prefixed_key_injective.
+
+(* Pure.GeometryGeo *)
+Print Assumptions marching_squares_cell_degree_balanced.
+Print Assumptions cohen_sutherland_outcode_trivial_cases_sound.
+Print Assumptions pole_turn_seam_winding_invariant.
+Print Assumptions naive_pole_seam_winding_falsified.
+Print Assumptions sankey_move_node_clamped_in_bounds.
+
+(* Pure.TransitionWorker *)
+Print Assumptions transition_retarget_c0_continuous.
+Print Assumptions gesture_capture_release_balanced.
+Print Assumptions lasso_retained_distance_records_cumulative_motion.
+Print Assumptions naive_lasso_raw_delta_starves_falsified.
+Print Assumptions reactive_force_revision_fences_stale_worker.
+Print Assumptions naive_reactive_force_unversioned_clobbers_falsified.
+Print Assumptions svg_bounded_mark_path_excludes_outer_ancestors.

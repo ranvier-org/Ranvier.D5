@@ -1,0 +1,144 @@
+# Compiles and audits the Rocq 9.1 D5 proofs, then builds their Navigator site.
+name: Proofs site
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'proofs/**'
+      - 'src/Ranvier.D5/**'
+      - 'src/Ranvier.D5.Charts/**'
+      - 'src/Ranvier.D5.Geo/**'
+      - 'src/Ranvier.D5.View/**'
+      - 'global.json'
+      - '.github/workflows/proofs-site.yml'
+  pull_request:
+    paths:
+      - 'proofs/**'
+      - 'src/Ranvier.D5/**'
+      - 'src/Ranvier.D5.Charts/**'
+      - 'src/Ranvier.D5.Geo/**'
+      - 'src/Ranvier.D5.View/**'
+      - 'global.json'
+      - '.github/workflows/proofs-site.yml'
+  schedule:
+    - cron: '23 4 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proofs-site-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  site:
+    name: Proofs audit and Navigator site
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Key the site by its inputs
+        id: key
+        run: |
+          key="$(git rev-parse \
+            HEAD:proofs \
+            HEAD:src/Ranvier.D5 \
+            HEAD:src/Ranvier.D5.Charts \
+            HEAD:src/Ranvier.D5.Geo \
+            HEAD:src/Ranvier.D5.View \
+            HEAD:global.json \
+            HEAD:.github/workflows/proofs-site.yml | sha256sum | cut -c1-40)"
+          echo "name=proofs-site-$key" >> "$GITHUB_OUTPUT"
+      - name: Reuse a site built from the same inputs
+        id: reuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NAME: ${{ steps.key.outputs.name }}
+        run: |
+          workflow_blob="$(git rev-parse HEAD:.github/workflows/proofs-site.yml)"
+          gh api "repos/$GH_REPO/actions/artifacts?name=$NAME&per_page=20" \
+            --jq '.artifacts[] | select(.expired | not) | select(.workflow_run.head_repository_id == .workflow_run.repository_id) | "\(.workflow_run.id) \(.workflow_run.head_sha)"' |
+          while read -r run_id head_sha; do
+            blob="$(gh api "repos/$GH_REPO/contents/.github/workflows/proofs-site.yml?ref=$head_sha" --jq .sha 2>/dev/null || true)"
+            [ "$blob" = "$workflow_blob" ] || continue
+            rm -rf proofs/site/output
+            if gh run download "$run_id" --name "$NAME" --dir proofs/site/output; then
+              echo "Reused $NAME from run $run_id."
+              echo "hit=true" >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done
+      - uses: actions/setup-dotnet@v6
+        if: steps.reuse.outputs.hit != 'true'
+        with:
+          global-json-file: global.json
+      - name: Install system packages
+        if: steps.reuse.outputs.hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y opam libgmp-dev pkg-config unzip bubblewrap
+      - id: opam-cache
+        if: steps.reuse.outputs.hit != 'true'
+        uses: actions/cache@v6
+        with:
+          path: ~/.opam
+          key: rocq-d5-toolchain-${{ runner.os }}-${{ hashFiles('proofs/VERSIONS.md') }}
+          restore-keys: |
+            rocq-d5-toolchain-${{ runner.os }}-
+      - name: Install the Rocq toolchain
+        if: steps.reuse.outputs.hit != 'true' && steps.opam-cache.outputs.cache-hit != 'true'
+        env:
+          OPAMYES: '1'
+        run: |
+          if [ ! -d "$HOME/.opam/ranvier-proofs" ]; then
+            rm -rf "$HOME/.opam"
+            opam init --bare --disable-sandboxing --no-setup
+            opam switch create ranvier-proofs ocaml-base-compiler.4.14.2
+          fi
+          eval "$(opam env --switch=ranvier-proofs --set-switch)"
+          opam repo add rocq-released https://rocq-prover.org/opam/released || opam repo set-url rocq-released https://rocq-prover.org/opam/released
+          opam repo add iris-dev https://gitlab.mpi-sws.org/iris/opam.git || opam repo set-url iris-dev https://gitlab.mpi-sws.org/iris/opam.git
+          opam update
+          opam install rocq-core.9.1.0 rocq-stdlib.9.2.0 rocq-stdpp.1.13.0 zarith.1.14
+          opam clean --all-switches --download-cache --logs --repo-cache --untracked
+      - name: Audit the proofs
+        if: steps.reuse.outputs.hit != 'true'
+        run: bash proofs/check.sh
+      - name: Build the Navigator site
+        if: steps.reuse.outputs.hit != 'true'
+        env:
+          PROOFS_BASE_URL: /Ranvier.D5/proofs/
+        run: bash proofs/site.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.key.outputs.name }}
+          path: proofs/site/output
+          retention-days: 90
+          if-no-files-found: error
+
+  publish:
+    name: Deploy documentation with new proofs site
+    needs: site
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/workflows
+      - name: Trigger Docs workflow if configured
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [ -f .github/workflows/docs.yml ]; then
+            gh workflow run docs.yml --ref main
+          fi

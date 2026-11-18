@@ -224,6 +224,21 @@ let tests = testList "GeoMeasure" [
         let geometry=GeoGeometry.Collection [GeoGeometry.Point(Some(p 30. 40.));GeoGeometry.MultiLineString [[p 0. 0.;p 90. 0.];[];[p 90. 90.;p 90. 0.]];GeoGeometry.Sphere]
         near (length geometry) Math.PI 1e-14
         near (length(GeoGeometry.MultiPoint[p 0. 0.;p 180. 0.])) 0. 0.
+    testCase "spherical bounds stay invariant to arbitrary dummy longitudes on pole vertices" <| fun _ ->
+        let canonical=GeoGeometry.Polygon [[p 10. 80.;p 0. 90.;p 20. 80.;p 10. 80.]]
+        let dummyWest=GeoGeometry.Polygon [[p 10. 80.;p -170. 90.;p 20. 80.;p 10. 80.]]
+        let multiPole=GeoGeometry.Polygon [[p 10. 80.;p 120. 90.;p -120. 90.;p 0. 90.;p 20. 80.;p 10. 80.]]
+        let expected=GeoMeasure.bounds GeoStreamConfig.defaultValue canonical |> ok |> Option.get
+        let actual1=GeoMeasure.bounds GeoStreamConfig.defaultValue dummyWest |> ok |> Option.get
+        let actual2=GeoMeasure.bounds GeoStreamConfig.defaultValue multiPole |> ok |> Option.get
+        near expected.South 80. 1e-12
+        near actual1.South expected.South 1e-12
+        near actual1.North 90. 1e-12
+        near actual1.West 10. 1e-12
+        near actual1.East 20. 1e-12
+        near actual2.South expected.South 1e-12
+        near actual2.West 10. 1e-12
+        near actual2.East 20. 1e-12
     testCase "degenerate and tiny arcs retain their scale and structural validation" <| fun _ ->
         let a=p 0. 0.
         near (length(GeoGeometry.LineString [a;a])) 0. 0.

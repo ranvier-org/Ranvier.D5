@@ -1,0 +1,11 @@
+-Q theories RanvierD5
+
+theories/Pure/DataScale.v
+theories/Pure/Spatial.v
+theories/Pure/SamplingSelection.v
+theories/Pure/GeometryGeo.v
+theories/Pure/TransitionWorker.v
+theories/Extract.v
+theories/Conformance/Expected.v
+theories/Conformance/Check.v
+theories/Audit.v

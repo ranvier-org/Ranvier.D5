@@ -74,7 +74,7 @@ let tests = testList "random distributions" [
         Expect.allEqual (draws 100 (Distribution.geometric 1.)) 1. "first trial succeeds"
         Expect.allEqual (draws 100 (Distribution.irwinHall 0)) 0. "empty sum"
     testCase "invalid parameters are rejected when a distribution is created" <| fun _ ->
-        for invalid in [Distribution.uniform 2. 1.;Distribution.integer 1. 1.;Distribution.normal 0. -1.;Distribution.normal nan 1.
+        for invalid in [Distribution.uniform 2. 1.;Distribution.integer 1. 1.;Distribution.integer 0.2 0.9;Distribution.integer 1.2 1.8;Distribution.normal 0. -1.;Distribution.normal nan 1.
                         Distribution.exponential 0.;Distribution.gamma 0. 1.;Distribution.beta 1. -1.;Distribution.poisson -1.
                         Distribution.binomial -1 0.5;Distribution.binomial 5 1.5;Distribution.geometric 0.;Distribution.bernoulli 2.
                         Distribution.pareto 0.;Distribution.logistic 0. 0.;Distribution.weibull 1. 0. 0.;Distribution.cauchy 0. -1.

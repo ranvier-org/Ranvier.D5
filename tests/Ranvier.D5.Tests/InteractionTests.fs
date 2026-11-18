@@ -37,6 +37,13 @@ let tests = testList "Owned gesture contracts" [
         let c,commands=Gesture.update brush (InputEvent.Up(2,p 20. 0.)) b
         Expect.isEmpty c.Pointers "pinch ends both captures"
         Expect.isFalse (commands |> List.exists(function GestureCommand.SelectRectangle _ -> true | _ -> false)) "no accidental selection"
+    testCase "lasso records sub-pixel incremental moves once cumulative distance reaches one unit" <| fun _ ->
+        let lasso={config with Mode=GestureMode.Lasso;MaxLassoPoints=128}
+        let start,_=Gesture.update lasso (InputEvent.Down(1,p 0. 0.,None)) Gesture.empty
+        let moved=[1..10] |> List.fold (fun state i -> Gesture.update lasso (InputEvent.Move(1,p (float i*0.6) 0.)) state |> fst) start
+        let _,commands=Gesture.update lasso (InputEvent.Up(1,p 6.0 0.)) moved
+        let vertices=commands |> List.pick (function GestureCommand.SelectLasso pts -> Some pts | _ -> None)
+        Expect.isGreaterThan vertices.Length 3 "sub-pixel increments accumulate against last retained lasso vertex"
     testCase "selection discards exited IDs and retains surviving focus" <| fun _ ->
         let state=Selection.empty |> Selection.update (SelectionMessage.Available ["a";"b"]) |> Selection.update (SelectionMessage.Replace(set ["a";"b"])) |> Selection.update (SelectionMessage.Focus(Some "b"))
         let next=Selection.update (SelectionMessage.Available ["b";"c"]) state

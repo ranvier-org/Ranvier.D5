@@ -129,6 +129,17 @@ module Scale =
         let backward (x: float) = float (Math.Sign x) * Double.ExpM1(abs x) * constant
         create forward backward (fun _ -> true) domain range
 
+    let private tickStep lo hi count =
+        let raw = (hi-lo)/float count
+        if raw = 0. then 0.
+        else
+            let unit = Math.Pow(10.,floor (Math.Log10 raw))
+            let error = raw/unit
+            let factor = if error >= Math.Sqrt 50. then 10. elif error >= Math.Sqrt 10. then 5. elif error >= Math.Sqrt 2. then 2. else 1.
+            let step = factor*unit
+            Check.positive "domain" step
+            step
+
     /// <summary>Returns approximately count nice numeric ticks in domain order, bounded to 10,001 ticks.</summary>
     let ticks count scale =
         if count <= 0 then []
@@ -138,14 +149,9 @@ module Scale =
             if a=b then [a]
             else
                 let lo,hi = min a b,max a b
-                let raw = (hi-lo)/float count
-                if raw = 0. then [a;b]
+                let step = tickStep lo hi count
+                if step = 0. then [a;b]
                 else
-                    let unit = Math.Pow(10.,floor (Math.Log10 raw))
-                    let error = raw/unit
-                    let factor = if error >= Math.Sqrt 50. then 10. elif error >= Math.Sqrt 10. then 5. elif error >= Math.Sqrt 2. then 2. else 1.
-                    let step = factor*unit
-                    Check.positive "domain" step
                     let first,last = ceil (lo/step), floor (hi/step)
                     let number = last-first
                     if not (Double.IsFinite number) || number > 10000. then invalidArg "domain" "Tick range exceeds the bounded capacity."
@@ -179,19 +185,19 @@ module Scale =
     let nice count scale =
         if count <= 0 then scale
         else
-            let values = ticks count scale
-            match values with
-            | first::second::_ ->
-                let step = abs (second-first)
-                let a,b = scale.Domain
-                let lo = floor (min a b/step)*step
-                let hi = ceil (max a b/step)*step
-                let low = if scale.Accepts lo && Double.IsFinite(scale.Forward lo) then lo else min a b
-                let high = if scale.Accepts hi && Double.IsFinite(scale.Forward hi) then hi else max a b
+            if count > 10000 then invalidArg "count" "Tick count exceeds capacity."
+            let a,b = scale.Domain
+            let lo,hi = min a b,max a b
+            let step = tickStep lo hi count
+            if step = 0. then scale
+            else
+                let roundedLo = floor (lo/step)*step
+                let roundedHi = ceil (hi/step)*step
+                let low = if scale.Accepts roundedLo && Double.IsFinite(scale.Forward roundedLo) then roundedLo else lo
+                let high = if scale.Accepts roundedHi && Double.IsFinite(scale.Forward roundedHi) then roundedHi else hi
                 let domain = if a <= b then low,high else high,low
                 let candidate = create scale.Forward scale.Backward scale.Accepts domain scale.Range
                 { candidate with Clamped = scale.Clamped }
-            | _ -> scale
 
     let private categories domain =
         Check.unique "domain" id domain
