@@ -42,27 +42,36 @@ module Ribbon =
         let s0,s1=angles spec.Source
         let t0,t1=angles spec.Target
         if spec.SourceRadius=0. && spec.TargetRadius=0. then Path.empty else
-        let at radius angle=Point.create (radius*sin angle) (-radius*cos angle)
-        let arc radius first last =
-            if first=last then []
-            elif radius=0. then [LineTo(at radius last)]
+        let inline at radius angle =
+#if !FABLE_COMPILER
+            let struct(s, c) = Math.SinCos angle
+            Point.create (radius * s) (-radius * c)
+#else
+            Point.create (radius*sin angle) (-radius*cos angle)
+#endif
+        let inline prependArc radius first last tail =
+            if first=last then tail
+            elif radius=0. then LineTo(at radius last) :: tail
             elif last-first>=tau-1e-12 then
-                [ArcTo(radius,radius,0.,false,true,at radius (first+(last-first)/2.))
-                 ArcTo(radius,radius,0.,false,true,at radius last)]
-            else [ArcTo(radius,radius,0.,last-first>System.Math.PI,true,at radius last)]
-        let origin=Point.create 0. 0.
-        let start=at spec.SourceRadius s0
-        [yield MoveTo start
-         yield! arc spec.SourceRadius s0 s1
-         if s0<>t0 || s1<>t1 || spec.SourceRadius<>spec.TargetRadius then
-             match spec.ArrowHead with
-             | Some head ->
-                 let inner=spec.TargetRadius-head
-                 yield QuadraticTo(origin,at inner t0)
-                 yield LineTo(at spec.TargetRadius (t0+(t1-t0)/2.))
-                 yield LineTo(at inner t1)
-             | None ->
-                 yield QuadraticTo(origin,at spec.TargetRadius t0)
-                 yield! arc spec.TargetRadius t0 t1
-         yield QuadraticTo(origin,start)
-         yield Close] |> Path.ofCommands
+                ArcTo(radius,radius,0.,false,true,at radius (first+(last-first)/2.))
+                :: ArcTo(radius,radius,0.,false,true,at radius last)
+                :: tail
+            else ArcTo(radius,radius,0.,last-first>System.Math.PI,true,at radius last) :: tail
+        let origin = { Point.X = 0.; Y = 0. }
+        let start = at spec.SourceRadius s0
+        let closing = QuadraticTo(origin, start) :: [ Close ]
+        let afterTarget =
+            if s0<>t0 || s1<>t1 || spec.SourceRadius<>spec.TargetRadius then
+                match spec.ArrowHead with
+                | Some head ->
+                    let inner = spec.TargetRadius - head
+                    QuadraticTo(origin, at inner t0)
+                    :: LineTo(at spec.TargetRadius (t0 + (t1 - t0) / 2.))
+                    :: LineTo(at inner t1)
+                    :: closing
+                | None ->
+                    QuadraticTo(origin, at spec.TargetRadius t0)
+                    :: prependArc spec.TargetRadius t0 t1 closing
+            else closing
+        let cmds = MoveTo start :: prependArc spec.SourceRadius s0 s1 afterTarget
+        Path.ofCommands cmds

@@ -51,15 +51,43 @@ module Bounds =
 /// <summary>An immutable affine matrix using SVG's a,b,c,d,e,f convention.</summary>
 type Transform = private { A:float; B:float; C:float; D:float; E:float; F:float }
 
+#if !FABLE_COMPILER
+type internal NumberScratch() =
+    [<ThreadStatic; DefaultValue>]
+    static val mutable private buf : char array
+    static member Get() =
+        let mutable b = NumberScratch.buf
+        if isNull b then
+            b <- Array.zeroCreate<char> 32
+            NumberScratch.buf <- b
+        b
+#endif
+
 module internal Number =
     let format (value:float) = if value=0. then "0" else value.ToString("G17",CultureInfo.InvariantCulture)
+#if !FABLE_COMPILER
+    let getBuffer () = NumberScratch.Get()
+    let inline appendWith (buf:char array) (output:StringBuilder) (value:float) =
+        if value=0. then output.Append '0' |> ignore
+        else
+            let mutable written = 0
+            if value.TryFormat(Span<char>(buf), &written, "G17", CultureInfo.InvariantCulture) then
+                output.Append(buf, 0, written) |> ignore
+            else
+                output.Append(value.ToString("G17",CultureInfo.InvariantCulture)) |> ignore
+#else
+    let inline getBuffer () : char array = [||]
+    let inline appendWith (_:char array) (output:StringBuilder) (value:float) =
+        output.Append(format value) |> ignore
+#endif
 
 /// <summary>Affine transform construction, composition, application, inversion and SVG serialization.</summary>
 [<RequireQualifiedAccess>]
 module Transform =
     /// <summary>Creates a finite affine matrix.</summary>
     let create a b c d e f =
-        [a;b;c;d;e;f] |> List.iter (Check.finite "matrix")
+        Check.finite "matrix" a; Check.finite "matrix" b; Check.finite "matrix" c
+        Check.finite "matrix" d; Check.finite "matrix" e; Check.finite "matrix" f
         { A=a; B=b; C=c; D=d; E=e; F=f }
     let internal coefficients matrix = matrix.A,matrix.B,matrix.C,matrix.D,matrix.E,matrix.F
     /// <summary>The identity transform.</summary>
@@ -71,7 +99,12 @@ module Transform =
     /// <summary>Rotates by an angle in radians.</summary>
     let rotate angle =
         Check.finite "angle" angle
+#if !FABLE_COMPILER
+        let struct(s, c) = Math.SinCos angle
+        create c s -s c 0. 0.
+#else
         create (cos angle) (sin angle) (-sin angle) (cos angle) 0. 0.
+#endif
     /// <summary>Composes matrices in pipeline order: first |> thenApply next.</summary>
     let thenApply next first =
         create (next.A*first.A+next.C*first.B) (next.B*first.A+next.D*first.B)
@@ -90,9 +123,9 @@ module Transform =
             let determinant = a*d-b*c
             let rawDeterminant = matrix.A*matrix.D-matrix.B*matrix.C
             let rawUsable = rawDeterminant <> 0. && Double.IsFinite rawDeterminant
+            let inline subnormalLoss orig norm = orig <> 0. && abs norm < 2.2250738585072014e-308
             let losesCoefficient =
-                [matrix.A,a; matrix.B,b; matrix.C,c; matrix.D,d]
-                |> List.exists(fun (original, normalized) -> original <> 0. && abs normalized < 2.2250738585072014e-308)
+                subnormalLoss matrix.A a || subnormalLoss matrix.B b || subnormalLoss matrix.C c || subnormalLoss matrix.D d
             if determinant = 0. && not rawUsable then None
             else
                 let divide numerator row =
@@ -102,10 +135,23 @@ module Transform =
                     if rawUsable && (determinant = 0. || losesCoefficient) then
                         matrix.D/rawDeterminant, -matrix.B/rawDeterminant, -matrix.C/rawDeterminant, matrix.A/rawDeterminant
                     else divide d row1, divide -b row1, divide -c row2, divide a row2
-                let values = [ia; ib; ic; id; -(ia*matrix.E+ic*matrix.F); -(ib*matrix.E+id*matrix.F)]
-                if List.forall Double.IsFinite values then Some (create values[0] values[1] values[2] values[3] values[4] values[5]) else None
+                let ie = -(ia*matrix.E+ic*matrix.F)
+                let iff = -(ib*matrix.E+id*matrix.F)
+                if Double.IsFinite ia && Double.IsFinite ib && Double.IsFinite ic && Double.IsFinite id && Double.IsFinite ie && Double.IsFinite iff then
+                    Some { A=ia; B=ib; C=ic; D=id; E=ie; F=iff }
+                else None
     /// <summary>Serializes a culture-independent SVG matrix.</summary>
-    let toSvg matrix = "matrix(" + ([matrix.A;matrix.B;matrix.C;matrix.D;matrix.E;matrix.F] |> List.map Number.format |> String.concat " ") + ")"
+    let toSvg matrix =
+        let buf = Number.getBuffer ()
+        let sb = StringBuilder(64)
+        sb.Append "matrix(" |> ignore
+        Number.appendWith buf sb matrix.A; sb.Append ' ' |> ignore
+        Number.appendWith buf sb matrix.B; sb.Append ' ' |> ignore
+        Number.appendWith buf sb matrix.C; sb.Append ' ' |> ignore
+        Number.appendWith buf sb matrix.D; sb.Append ' ' |> ignore
+        Number.appendWith buf sb matrix.E; sb.Append ' ' |> ignore
+        Number.appendWith buf sb matrix.F; sb.Append ')' |> ignore
+        sb.ToString()
 
 /// <summary>Immutable SVG path instructions; arc rotation is in degrees.</summary>
 type PathCommand =
@@ -133,17 +179,17 @@ module Path =
     let empty = Path []
     /// <summary>Validates finite coordinates, nonnegative radii and a leading MoveTo.</summary>
     let ofCommands commands =
-        let validate point = Point.create point.X point.Y |> ignore
+        let inline validate (point:Point) = Check.finite "x" point.X; Check.finite "y" point.Y
         let mutable hasPoint = false
         for command in commands do
             match command with
             | MoveTo point -> validate point; hasPoint <- true
             | _ when not hasPoint -> invalidArg "commands" "A path must start with MoveTo."
             | LineTo point -> validate point
-            | CubicTo (a,b,c) -> List.iter validate [a;b;c]
-            | QuadraticTo (a,b) -> List.iter validate [a;b]
+            | CubicTo (a,b,c) -> validate a; validate b; validate c
+            | QuadraticTo (a,b) -> validate a; validate b
             | ArcTo (rx,ry,rotation,_,_,point) ->
-                List.iter (Check.finite "arc") [rx;ry;rotation]
+                Check.finite "arc" rx; Check.finite "arc" ry; Check.finite "arc" rotation
                 if rx<0. || ry<0. then invalidArg "commands" "Arc radii must be nonnegative."
                 validate point
             | Close -> ()
@@ -154,20 +200,38 @@ module Path =
     let concat paths = paths |> List.collect commands |> ofCommands
     /// <summary>Serializes a validated path using invariant round-trippable coordinates.</summary>
     let toSvg (Path commands) =
-        let output = StringBuilder()
-        let add (text:string) = output.Append text |> ignore
-        let point p = add(Number.format p.X); add ","; add(Number.format p.Y)
-        for command in commands do
-            match command with
-            | MoveTo p -> add "M"; point p
-            | LineTo p -> add "L"; point p
-            | CubicTo (a,b,c) -> add "C"; point a; add " "; point b; add " "; point c
-            | QuadraticTo (a,b) -> add "Q"; point a; add " "; point b
-            | ArcTo (rx,ry,rotation,large,clockwise,p) ->
-                add "A"; add(Number.format rx); add ","; add(Number.format ry); add " "; add(Number.format rotation)
-                add(if large then " 1," else " 0,"); add(if clockwise then "1 " else "0 "); point p
-            | Close -> add "Z"
-        output.ToString()
+        match commands with
+        | [] -> ""
+        | _ ->
+            let buf = Number.getBuffer ()
+            let output = StringBuilder(128)
+            let inline point (p:Point) =
+                Number.appendWith buf output p.X
+                output.Append ',' |> ignore
+                Number.appendWith buf output p.Y
+            for command in commands do
+                match command with
+                | MoveTo p -> output.Append 'M' |> ignore; point p
+                | LineTo p -> output.Append 'L' |> ignore; point p
+                | CubicTo (a,b,c) ->
+                    output.Append 'C' |> ignore; point a
+                    output.Append ' ' |> ignore; point b
+                    output.Append ' ' |> ignore; point c
+                | QuadraticTo (a,b) ->
+                    output.Append 'Q' |> ignore; point a
+                    output.Append ' ' |> ignore; point b
+                | ArcTo (rx,ry,rotation,large,clockwise,p) ->
+                    output.Append 'A' |> ignore
+                    Number.appendWith buf output rx
+                    output.Append ',' |> ignore
+                    Number.appendWith buf output ry
+                    output.Append ' ' |> ignore
+                    Number.appendWith buf output rotation
+                    output.Append(if large then " 1," else " 0,") |> ignore
+                    output.Append(if clockwise then "1 " else "0 ") |> ignore
+                    point p
+                | Close -> output.Append 'Z' |> ignore
+            output.ToString()
 
 /// <summary>Supported interpolation of line segments. CatmullRom tension is in [0,1].</summary>
 [<RequireQualifiedAccess>]
@@ -186,53 +250,108 @@ module Shape =
             Check.finite "tension" tension
             if tension<0. || tension>1. then invalidArg "tension" "Tension must be in [0,1]."
         | _ -> ()
-    let private runs values =
-        let segments = ResizeArray<_>()
-        let mutable current = []
+
+    let private runsArrays (values: 'T option list) : 'T array list =
+        let segments = ResizeArray<'T array>()
+        let current = ResizeArray<'T>()
         for value in values do
             match value with
-            | Some point -> current <- point::current
-            | None -> if not (List.isEmpty current) then segments.Add(List.rev current); current <- []
-        if not (List.isEmpty current) then segments.Add(List.rev current)
-        List.ofSeq segments
+            | Some item -> current.Add item
+            | None ->
+                if current.Count > 0 then
+                    segments.Add(current.ToArray())
+                    current.Clear()
+        if current.Count > 0 then segments.Add(current.ToArray())
+        Data.resizeToList segments
 
-    let private segment curve points =
-        let points = Array.ofList points
-        if points.Length=0 then []
+    let private segmentArray curve (points: Point array) =
+        let n = points.Length
+        if n = 0 then []
         else
-            let commands = ResizeArray<PathCommand>()
-            commands.Add(MoveTo points[0])
-            for i in 1..points.Length-1 do
-                let a,b = points[i-1],points[i]
-                match curve with
-                | Curve.Linear -> commands.Add(LineTo b)
-                | Curve.StepBefore -> commands.Add(LineTo(Point.create a.X b.Y)); commands.Add(LineTo b)
-                | Curve.StepAfter -> commands.Add(LineTo(Point.create b.X a.Y)); commands.Add(LineTo b)
-                | Curve.CatmullRom tension ->
-                    Check.finite "tension" tension
-                    if tension<0. || tension>1. then invalidArg "tension" "Tension must be in [0,1]."
-                    let before,after = points[max 0 (i-2)],points[min (points.Length-1) (i+1)]
-                    let factor = (1.-tension)/6.
-                    commands.Add(CubicTo(Point.create (a.X+(b.X-before.X)*factor) (a.Y+(b.Y-before.Y)*factor),
-                                         Point.create (b.X-(after.X-a.X)*factor) (b.Y-(after.Y-a.Y)*factor),b))
-            List.ofSeq commands
+            match curve with
+            | Curve.Linear ->
+                let mutable acc = []
+                for i = n - 1 downto 1 do
+                    acc <- LineTo points[i] :: acc
+                MoveTo points[0] :: acc
+            | Curve.StepBefore ->
+                let mutable acc = []
+                for i = n - 1 downto 1 do
+                    let a, b = points[i - 1], points[i]
+                    acc <- LineTo(Point.create a.X b.Y) :: LineTo b :: acc
+                MoveTo points[0] :: acc
+            | Curve.StepAfter ->
+                let mutable acc = []
+                for i = n - 1 downto 1 do
+                    let a, b = points[i - 1], points[i]
+                    acc <- LineTo(Point.create b.X a.Y) :: LineTo b :: acc
+                MoveTo points[0] :: acc
+            | Curve.CatmullRom tension ->
+                let factor = (1. - tension) / 6.
+                let mutable acc = []
+                for i = n - 1 downto 1 do
+                    let a, b = points[i - 1], points[i]
+                    let before, after = points[max 0 (i - 2)], points[min (n - 1) (i + 1)]
+                    acc <-
+                        CubicTo(
+                            Point.create (a.X + (b.X - before.X) * factor) (a.Y + (b.Y - before.Y) * factor),
+                            Point.create (b.X - (after.X - a.X) * factor) (b.Y - (after.Y - a.Y) * factor),
+                            b) :: acc
+                MoveTo points[0] :: acc
 
     /// <summary>Creates a line; None observations break the line into independent subpaths.</summary>
     let line curve points =
         validateCurve curve
-        runs points |> List.collect (segment curve) |> Path.ofCommands
+        match curve with
+        | Curve.Linear ->
+            let mutable cmdCount = 0
+            for v in points do
+                match v with
+                | Some _ -> cmdCount <- cmdCount + 1
+                | None -> ()
+            if cmdCount = 0 then Path.empty
+            else
+                let arr = Array.zeroCreate<PathCommand> cmdCount
+                let mutable w = 0
+                let mutable inRun = false
+                for v in points do
+                    match v with
+                    | Some pt ->
+                        Check.finite "x" pt.X
+                        Check.finite "y" pt.Y
+                        arr[w] <- if inRun then LineTo pt else (inRun <- true; MoveTo pt)
+                        w <- w + 1
+                    | None ->
+                        inRun <- false
+                let mutable cmds = []
+                for i = cmdCount - 1 downto 0 do
+                    cmds <- arr[i] :: cmds
+                Path cmds
+        | _ ->
+            match runsArrays points with
+            | [] -> Path.empty
+            | [single] -> segmentArray curve single |> Path.ofCommands
+            | many -> many |> List.collect (segmentArray curve) |> Path.ofCommands
+
     /// <summary>Creates closed areas from lower/upper point pairs; None observations split areas.</summary>
     let area curve points =
         validateCurve curve
-        runs points |> List.collect (fun run ->
-            let lower,upper = List.unzip run
-            let top = segment curve upper
-            let reverseCurve = match curve with Curve.StepBefore -> Curve.StepAfter | Curve.StepAfter -> Curve.StepBefore | other -> other
-            let bottom = segment reverseCurve (List.rev lower)
+        let reverseCurve = match curve with Curve.StepBefore -> Curve.StepAfter | Curve.StepAfter -> Curve.StepBefore | other -> other
+        runsArrays points |> List.collect (fun (run: (Point * Point) array) ->
+            let n = run.Length
+            let upper = Array.zeroCreate<Point> n
+            let lowerRev = Array.zeroCreate<Point> n
+            for i = 0 to n - 1 do
+                let lo, hi = run[i]
+                upper[i] <- hi
+                lowerRev[n - 1 - i] <- lo
+            let top = segmentArray curve upper
+            let bottom = segmentArray reverseCurve lowerRev
             top @ (match bottom with MoveTo p::rest -> LineTo p::rest | _ -> bottom) @ [Close]) |> Path.ofCommands
+
     /// <summary>Creates a circular sector or annulus, with zero radians at twelve o'clock and positive angles clockwise.</summary>
     let arc inner outer start finish =
-        [inner;outer;start;finish;finish-start] |> List.iter (Check.finite "arc")
+        Check.finite "arc" inner; Check.finite "arc" outer; Check.finite "arc" start; Check.finite "arc" finish; Check.finite "arc" (finish-start)
         if inner<0. || outer<inner then invalidArg "radii" "Require 0 <= inner <= outer."
         let span = finish-start
         if outer=0. || span=0. then Path.empty

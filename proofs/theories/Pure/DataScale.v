@@ -551,3 +551,180 @@ Proof.
   injection IH as Hf Hr.
   rewrite Hf, Hr. reflexivity.
 Qed.
+
+(** ** 6. Batch D2 refinements: unit-stride row-SIMD separable blur scatter and 2-lane `(X, Y)` tridiagonal spline solve *)
+
+Fixpoint vec_fma (w : Z) (src acc : list Z) : list Z :=
+  match src, acc with
+  | x :: xs, a :: as_ => (w * x + a) :: vec_fma w xs as_
+  | _, _ => []
+  end.
+
+Fixpoint zero_row (cols : nat) : list Z :=
+  match cols with
+  | 0%nat => []
+  | S k => 0 :: zero_row k
+  end.
+
+Fixpoint row_scatter_accum (ws : list Z) (rows : list (list Z)) (cols : nat) : list Z :=
+  match ws, rows with
+  | w :: wr, row :: rr => vec_fma w row (row_scatter_accum wr rr cols)
+  | _, _ => zero_row cols
+  end.
+
+Fixpoint col_gather_dot (ws : list Z) (rows : list (list Z)) (c : nat) : Z :=
+  match ws, rows with
+  | w :: wr, row :: rr => w * nth c row 0 + col_gather_dot wr rr c
+  | _, _ => 0
+  end.
+
+Lemma length_zero_row (cols : nat) :
+  length (zero_row cols) = cols.
+Proof.
+  induction cols as [|k IH]; simpl; [reflexivity | f_equal; exact IH].
+Qed.
+
+Lemma nth_zero_row (cols c : nat) :
+  nth c (zero_row cols) 0 = 0.
+Proof.
+  revert c. induction cols as [|k IH]; intros [|c]; simpl; try reflexivity; apply IH.
+Qed.
+
+Lemma length_vec_fma (w : Z) (src acc : list Z) :
+  length src = length acc ->
+  length (vec_fma w src acc) = length acc.
+Proof.
+  revert acc. induction src as [|x xs IH]; intros [|a as_] Heq; simpl in *; try discriminate; [reflexivity |].
+  f_equal. apply IH. lia.
+Qed.
+
+Lemma nth_vec_fma (w : Z) (src acc : list Z) (c : nat) :
+  (c < length src)%nat ->
+  length src = length acc ->
+  nth c (vec_fma w src acc) 0 = w * nth c src 0 + nth c acc 0.
+Proof.
+  revert acc c.
+  induction src as [|x xs IH]; intros [|a as_] [|c] Hlt Heq; simpl in *; try lia.
+  apply IH; lia.
+Qed.
+
+Lemma length_row_scatter_accum (ws : list Z) (rows : list (list Z)) (cols : nat) :
+  Forall (fun r => length r = cols) rows ->
+  length (row_scatter_accum ws rows cols) = cols.
+Proof.
+  revert rows. induction ws as [|w wr IH]; intros [|row rr] Hall; simpl.
+  - apply length_zero_row.
+  - apply length_zero_row.
+  - apply length_zero_row.
+  - inversion Hall as [|? ? Hlen Hrest].
+    rewrite length_vec_fma; [apply IH; exact Hrest |].
+    rewrite Hlen. symmetry. apply IH; exact Hrest.
+Qed.
+
+(**md
+**Unit-stride row-SIMD FMA accumulation equals per-column vertical Gaussian blur gather.**
+
+Accumulating `dst_row += w_r * src_row_r` across contiguous row slices (`Vector512`/`Vector256`/`Vector128` FMA) produces the exact per-column dot product `col_gather_dot ws rows c` at every column `c < cols`, eliminating strided column memory access.
+
+- [ws:] pre-normalized Gaussian tap weights for each contributing source row.
+- [rows:] contiguous row-major slices of source rows (`length r = cols`).
+- [cols:] grid column count.
+- [c:] column index (`c < cols`).
+*)
+Theorem separable_row_scatter_eq_gather
+    (ws : list Z) (rows : list (list Z)) (cols c : nat) :
+  Forall (fun r => length r = cols) rows ->
+  (c < cols)%nat ->
+  nth c (row_scatter_accum ws rows cols) 0 = col_gather_dot ws rows c.
+Proof.
+  revert rows. induction ws as [|w wr IH]; intros [|row rr] Hall Hc; simpl.
+  - apply nth_zero_row.
+  - apply nth_zero_row.
+  - apply nth_zero_row.
+  - inversion Hall as [|? ? Hlen Hrest].
+    pose proof (length_row_scatter_accum wr rr cols Hrest) as Hacc_len.
+    rewrite nth_vec_fma; [| lia | lia].
+    rewrite (IH rr Hrest Hc). reflexivity.
+Qed.
+
+Fixpoint tridiag_fwd_1d (mults : list (Z * Z)) (r_prev : Z) (rs : list Z) : list Z :=
+  match mults, rs with
+  | (num, den) :: mr, r :: rr =>
+    let r' := r - (num * r_prev) / den in
+    r' :: tridiag_fwd_1d mr r' rr
+  | _, _ => []
+  end.
+
+Fixpoint tridiag_fwd_xy (mults : list (Z * Z)) (r_prev : Z * Z) (rs : list (Z * Z)) : list (Z * Z) :=
+  match mults, rs with
+  | (num, den) :: mr, (rx, ry) :: rr =>
+    let rx' := rx - (num * fst r_prev) / den in
+    let ry' := ry - (num * snd r_prev) / den in
+    (rx', ry') :: tridiag_fwd_xy mr (rx', ry') rr
+  | _, _ => []
+  end.
+
+Fixpoint tridiag_bwd_1d (diags : list Z) (rs : list Z) (a_next : Z) : list Z :=
+  match diags, rs with
+  | b :: br, r :: rr =>
+    let a_cur := (r - a_next) / b in
+    a_cur :: tridiag_bwd_1d br rr a_cur
+  | _, _ => []
+  end.
+
+Fixpoint tridiag_bwd_xy (diags : list Z) (rs : list (Z * Z)) (a_next : Z * Z) : list (Z * Z) :=
+  match diags, rs with
+  | b :: br, (rx, ry) :: rr =>
+    let ax_cur := (rx - fst a_next) / b in
+    let ay_cur := (ry - snd a_next) / b in
+    (ax_cur, ay_cur) :: tridiag_bwd_xy br rr (ax_cur, ay_cur)
+  | _, _ => []
+  end.
+
+(**md
+**2-lane `(X, Y)` tridiagonal spline elimination (`Curves.natural` `Vector128<double>`) equals separate `X` and `Y` solves.**
+
+Sharing the tridiagonal diagonal pivots across a single 2-lane `(X, Y)` forward and backward sweep produces the exact `X` and `Y` control coordinates of two independent scalar tridiagonal solves while halving pivot divisions and array allocations.
+
+- [mults:] forward-elimination multiplier fractions `(a_i, b_{i-1})`.
+- [diags:] forward-eliminated diagonal pivots `b_i` (in reverse order for back-substitution).
+- [rx0:] initial `X` right-hand side.
+- [ry0:] initial `Y` right-hand side.
+- [rxs:] remaining `X` right-hand sides.
+- [rys:] remaining `Y` right-hand sides (`length rxs = length rys`).
+- [axn:] terminal `X` back-substitution seed.
+- [ayn:] terminal `Y` back-substitution seed.
+*)
+Theorem fused_xy_tridiagonal_eq_separate
+    (mults : list (Z * Z)) (diags : list Z)
+    (rx0 ry0 : Z) (rxs rys : list Z) (axn ayn : Z) :
+  length rxs = length rys ->
+  let rxy := combine rxs rys in
+  List.map fst (tridiag_fwd_xy mults (rx0, ry0) rxy) = tridiag_fwd_1d mults rx0 rxs /\
+  List.map snd (tridiag_fwd_xy mults (rx0, ry0) rxy) = tridiag_fwd_1d mults ry0 rys /\
+  List.map fst (tridiag_bwd_xy diags rxy (axn, ayn)) = tridiag_bwd_1d diags rxs axn /\
+  List.map snd (tridiag_bwd_xy diags rxy (axn, ayn)) = tridiag_bwd_1d diags rys ayn.
+Proof.
+  intros Hlen. cbv zeta.
+  assert (Hfwd :
+    forall ms px py xs ys,
+      length xs = length ys ->
+      List.map fst (tridiag_fwd_xy ms (px, py) (combine xs ys)) = tridiag_fwd_1d ms px xs /\
+      List.map snd (tridiag_fwd_xy ms (px, py) (combine xs ys)) = tridiag_fwd_1d ms py ys).
+  { induction ms as [|[num den] mr IH]; intros px py [|x xs] [|y ys] Hl; simpl in *;
+      try discriminate; try (split; reflexivity).
+    destruct (IH (x - num * px / den) (y - num * py / den) xs ys ltac:(lia)) as [IH1 IH2].
+    split; f_equal; assumption. }
+  assert (Hbwd :
+    forall ds xs ys nx ny,
+      length xs = length ys ->
+      List.map fst (tridiag_bwd_xy ds (combine xs ys) (nx, ny)) = tridiag_bwd_1d ds xs nx /\
+      List.map snd (tridiag_bwd_xy ds (combine xs ys) (nx, ny)) = tridiag_bwd_1d ds ys ny).
+  { induction ds as [|b br IH]; intros [|x xs] [|y ys] nx ny Hl; simpl in *;
+      try discriminate; try (split; reflexivity).
+    destruct (IH xs ys ((x - nx) / b) ((y - ny) / b) ltac:(lia)) as [IH1 IH2].
+    split; f_equal; assumption. }
+  destruct (Hfwd mults rx0 ry0 rxs rys Hlen) as [F1 F2].
+  destruct (Hbwd diags rxs rys axn ayn Hlen) as [B1 B2].
+  split; [exact F1 | split; [exact F2 | split; [exact B1 | exact B2]]].
+Qed.

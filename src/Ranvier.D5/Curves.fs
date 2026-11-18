@@ -1,6 +1,9 @@
 namespace Ranvier.D5
 
 open System
+#if !FABLE_COMPILER
+open System.Runtime.Intrinsics
+#endif
 
 /// <summary>Spline end handling: <c>Clamped</c> passes through both endpoints, <c>Open</c> omits the end segments,
 /// <c>Closed</c> wraps into a loop.</summary>
@@ -23,23 +26,31 @@ type CurveSpec =
 /// <summary>Pure spline kernels. Formulas adapted from d3-shape 3.2.0; see tools/reference-fixtures/licenses/d3-shape.txt.</summary>
 [<RequireQualifiedAccess>]
 module Curves =
-    let private p x y=Point.create x y
+    let inline private p x y=Point.create x y
     let private blend t (a:Point) (b:Point)=p (Check.lerp a.X b.X t) (Check.lerp a.Y b.Y t)
     let private weighted (a:Point) (b:Point) (c:Point)=p (a.X/6.+b.X*(2./3.)+c.X/6.) (a.Y/6.+b.Y*(2./3.)+c.Y/6.)
     let private linear (points:Point array) =
-        if points.Length=0 then []
-        elif points.Length=1 then [MoveTo points[0];Close]
-        else MoveTo points[0]::(points |> Array.skip 1 |> Array.map LineTo |> Array.toList)
+        let n = points.Length
+        if n=0 then []
+        elif n=1 then [MoveTo points[0];Close]
+        else
+            let mutable acc = []
+            for i = n - 1 downto 1 do
+                acc <- LineTo points[i] :: acc
+            MoveTo points[0] :: acc
 
-    let private runs points =
-        let output=ResizeArray<_>()
-        let mutable current=[]
+    let private runsArrays (points: 'T option list) : 'T array list =
+        let output = ResizeArray<'T array>()
+        let current = ResizeArray<'T>()
         for point in points do
             match point with
-            | Some value -> current<-value::current
-            | None -> if not(List.isEmpty current) then output.Add(List.rev current); current<-[]
-        if not(List.isEmpty current) then output.Add(List.rev current)
-        List.ofSeq output
+            | Some value -> current.Add value
+            | None ->
+                if current.Count > 0 then
+                    output.Add(current.ToArray())
+                    current.Clear()
+        if current.Count > 0 then output.Add(current.ToArray())
+        Data.resizeToList output
 
     let private basis boundary (points:Point array) =
         let n=points.Length
@@ -109,24 +120,101 @@ module Curves =
     let private natural (points:Point array) =
         let n=points.Length-1
         if n<2 then linear points else
-        let solve project =
-            let x=Array.map project points
-            let a,b,r=Array.zeroCreate n,Array.zeroCreate n,Array.zeroCreate n
-            b[0]<-2.;r[0]<-x[0]+2.*x[1]
-            for i in 1..n-2 do a[i]<-1.;b[i]<-4.;r[i]<-4.*x[i]+2.*x[i+1]
-            a[n-1]<-2.;b[n-1]<-7.;r[n-1]<-8.*x[n-1]+x[n]
-            for i in 1..n-1 do
-                let m=a[i]/b[i-1]
-                b[i]<-b[i]-m;r[i]<-r[i]-m*r[i-1]
-            a[n-1]<-r[n-1]/b[n-1]
-            for i in n-2.. -1 ..0 do a[i]<-(r[i]-a[i+1])/b[i]
-            b[n-1]<-(x[n]+a[n-1])/2.
-            for i in 0..n-2 do b[i]<-2.*x[i+1]-a[i+1]
-            a,b
-        let ax,bx=solve(fun p -> p.X)
-        let ay,by=solve(fun p -> p.Y)
-        [yield MoveTo points[0]
-         for i in 0..n-1 do yield CubicTo(p ax[i] ay[i],p bx[i] by[i],points[i+1])]
+#if !FABLE_COMPILER
+        if Vector128.IsHardwareAccelerated then
+            let bDiag = Array.zeroCreate<float> n
+            let rVec = Array.zeroCreate<Vector128<float>> n
+            let p0, p1 = points[0], points[1]
+            bDiag[0] <- 2.
+            let mutable rPrev = Vector128.Create(p0.X + 2. * p1.X, p0.Y + 2. * p1.Y)
+            rVec[0] <- rPrev
+            let mutable bPrev = 2.
+            let vFour = Vector128.Create 4.
+            let vTwo = Vector128.Create 2.
+            let vHalf = Vector128.Create 0.5
+            for i = 1 to n - 2 do
+                let pi = points[i]
+                let pi1 = points[i + 1]
+                let m = 1. / bPrev
+                let bi = 4. - m
+                bDiag[i] <- bi
+                bPrev <- bi
+                let rhs = Vector128.Create(4. * pi.X + 2. * pi1.X, 4. * pi.Y + 2. * pi1.Y)
+                rPrev <- rhs - Vector128.Create(m) * rPrev
+                rVec[i] <- rPrev
+            let pn1 = points[n - 1]
+            let pn = points[n]
+            let mLast = 2. / bPrev
+            let bLast = 7. - mLast
+            bDiag[n - 1] <- bLast
+            let rhsLast = Vector128.Create(8. * pn1.X + pn.X, 8. * pn1.Y + pn.Y)
+            rPrev <- rhsLast - Vector128.Create(mLast) * rPrev
+            rVec[n - 1] <- rPrev
+            let mutable aNext = rPrev / Vector128.Create bLast
+            let bLastVec = (Vector128.Create(pn.X, pn.Y) + aNext) * vHalf
+            let mutable cmds =
+                [ CubicTo(
+                    p (aNext.GetElement 0) (aNext.GetElement 1),
+                    p (bLastVec.GetElement 0) (bLastVec.GetElement 1),
+                    pn) ]
+            let _ = vFour
+            for i = n - 2 downto 0 do
+                let pi1 = points[i + 1]
+                let bCur = vTwo * Vector128.Create(pi1.X, pi1.Y) - aNext
+                let aCur = (rVec[i] - aNext) / Vector128.Create bDiag[i]
+                cmds <-
+                    CubicTo(
+                        p (aCur.GetElement 0) (aCur.GetElement 1),
+                        p (bCur.GetElement 0) (bCur.GetElement 1),
+                        pi1) :: cmds
+                aNext <- aCur
+            MoveTo p0 :: cmds
+        else
+#endif
+            let bDiag = Array.zeroCreate<float> n
+            let rx = Array.zeroCreate<float> n
+            let ry = Array.zeroCreate<float> n
+            let p0, p1 = points[0], points[1]
+            bDiag[0] <- 2.
+            let mutable rxPrev = p0.X + 2. * p1.X
+            let mutable ryPrev = p0.Y + 2. * p1.Y
+            rx[0] <- rxPrev
+            ry[0] <- ryPrev
+            let mutable bPrev = 2.
+            for i = 1 to n - 2 do
+                let pi = points[i]
+                let pi1 = points[i + 1]
+                let m = 1. / bPrev
+                let bi = 4. - m
+                bDiag[i] <- bi
+                bPrev <- bi
+                rxPrev <- (4. * pi.X + 2. * pi1.X) - m * rxPrev
+                ryPrev <- (4. * pi.Y + 2. * pi1.Y) - m * ryPrev
+                rx[i] <- rxPrev
+                ry[i] <- ryPrev
+            let pn1 = points[n - 1]
+            let pn = points[n]
+            let mLast = 2. / bPrev
+            let bLast = 7. - mLast
+            bDiag[n - 1] <- bLast
+            rxPrev <- (8. * pn1.X + pn.X) - mLast * rxPrev
+            ryPrev <- (8. * pn1.Y + pn.Y) - mLast * ryPrev
+            rx[n - 1] <- rxPrev
+            ry[n - 1] <- ryPrev
+            let mutable axNext = rxPrev / bLast
+            let mutable ayNext = ryPrev / bLast
+            let mutable cmds = [ CubicTo(p axNext ayNext, p ((pn.X + axNext) / 2.) ((pn.Y + ayNext) / 2.), pn) ]
+            for i = n - 2 downto 0 do
+                let pi1 = points[i + 1]
+                let bxCur = 2. * pi1.X - axNext
+                let byCur = 2. * pi1.Y - ayNext
+                let bi = bDiag[i]
+                let axCur = (rx[i] - axNext) / bi
+                let ayCur = (ry[i] - ayNext) / bi
+                cmds <- CubicTo(p axCur ayCur, p bxCur byCur, pi1) :: cmds
+                axNext <- axCur
+                ayNext <- ayCur
+            MoveTo p0 :: cmds
 
     let private monotone swap (points:Point array) =
         let reflect p=if swap then {X=p.Y;Y=p.X} else p
@@ -199,16 +287,25 @@ module Curves =
     /// Throws <c>ArgumentException</c> when a curve parameter is outside [0,1].</summary>
     let line curve points =
         validate curve
-        runs points |> List.collect (fun run -> segment curve (List.toArray run)) |> Path.ofCommands
+        match runsArrays points with
+        | [] -> Path.empty
+        | [single] -> segment curve single |> Path.ofCommands
+        | many -> many |> List.collect (segment curve) |> Path.ofCommands
     /// <summary>Builds a closed area per run of (lower, upper) point pairs: the curve along the upper points, then back along the lower points.
     /// Each <c>None</c> starts a new run; throws <c>ArgumentException</c> for an invalid curve parameter.</summary>
     let area curve points =
         validate curve
         let reverse=match curve with CurveSpec.StepBefore -> CurveSpec.StepAfter | CurveSpec.StepAfter -> CurveSpec.StepBefore | other -> other
-        runs points |> List.collect (fun run ->
-            let lo,hi=List.unzip run
-            let top=segment curve (List.toArray hi) |> List.filter ((<>) Close)
-            let bottom=segment reverse (lo |> List.rev |> List.toArray) |> List.filter ((<>) Close)
+        runsArrays points |> List.collect (fun (run: (Point * Point) array) ->
+            let m = run.Length
+            let hi = Array.zeroCreate<Point> m
+            let loRev = Array.zeroCreate<Point> m
+            for i = 0 to m - 1 do
+                let l, h = run[i]
+                hi[i] <- h
+                loRev[m - 1 - i] <- l
+            let top=segment curve hi |> List.filter ((<>) Close)
+            let bottom=segment reverse loRev |> List.filter ((<>) Close)
             match top,bottom with
             | [],_ | _,[] -> []
             | _,MoveTo first::rest -> top @ (LineTo first::rest) @ [Close]

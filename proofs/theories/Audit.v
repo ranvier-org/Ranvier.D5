@@ -16,6 +16,8 @@ Print Assumptions scale_precomputed_linear_eq_reference.
 Print Assumptions simd_chunked_sq_diff_eq_fold.
 Print Assumptions single_table_join_eq_data_join.
 Print Assumptions dsv_unescaped_span_slice_eq_char_scan.
+Print Assumptions separable_row_scatter_eq_gather.
+Print Assumptions fused_xy_tridiagonal_eq_separate.
 
 (* Pure.Spatial *)
 Print Assumptions quadtree_aabb_lower_bound_sound.
@@ -36,6 +38,8 @@ Print Assumptions cohen_sutherland_outcode_trivial_cases_sound.
 Print Assumptions pole_turn_seam_winding_invariant.
 Print Assumptions naive_pole_seam_winding_falsified.
 Print Assumptions sankey_move_node_clamped_in_bounds.
+Print Assumptions marching_squares_homogeneous_strip_skip_sound.
+Print Assumptions packed_contour_edge_order_isomorphic.
 
 (* Pure.TransitionWorker *)
 Print Assumptions transition_retarget_c0_continuous.
