@@ -24,6 +24,8 @@ Print Assumptions quadtree_aabb_lower_bound_sound.
 Print Assumptions quadtree_leaf_count_conservation.
 Print Assumptions spatial_within_sound_and_complete.
 Print Assumptions spatial_nearest_pruning_sound.
+Print Assumptions flat_kdtree_isomorphic.
+Print Assumptions many_body_rational_form_cancels_sqrt.
 
 (* Pure.SamplingSelection *)
 Print Assumptions minmax_run_preserves_endpoints_and_order.
@@ -40,6 +42,9 @@ Print Assumptions naive_pole_seam_winding_falsified.
 Print Assumptions sankey_move_node_clamped_in_bounds.
 Print Assumptions marching_squares_homogeneous_strip_skip_sound.
 Print Assumptions packed_contour_edge_order_isomorphic.
+Print Assumptions int128_orient2d_no_overflow.
+Print Assumptions y_straddle_filter_preserves_polygon_containment.
+Print Assumptions delaunay_cw_to_ccw_halfedge_involution.
 
 (* Pure.TransitionWorker *)
 Print Assumptions transition_retarget_c0_continuous.

@@ -30,9 +30,56 @@ module Predicates =
     // Floating filters: robust-predicates 3.0.2 / Shewchuk (Unlicense).
     // Exact dyadic fallback also handles exponent ranges unsafe for expansion arithmetic.
     let private epsilon=1.1102230246251565e-16
-    let private safe value = value=0. || (abs value>=1e-50 && abs value<=1e50)
-    let private integerCoordinate value = abs value<=16777216. && Double.IsInteger value
-    let private integerPoint (p:Point) = integerCoordinate p.X && integerCoordinate p.Y
+    let inline private safe value =
+        let av = abs value
+        av = 0. || (av >= 1e-140 && av <= 1e140)
+    let inline private integerCoordinate value = abs value<=16777216. && Double.IsInteger value
+    let inline private integerPoint (p:Point) = integerCoordinate p.X && integerCoordinate p.Y
+
+#if !FABLE_COMPILER
+    let inline private decomposeFinite (value: float) : struct(int64 * int) =
+        Check.finite "coordinate" value
+        let bits = BitConverter.DoubleToUInt64Bits value
+        let frac = bits &&& 0x000fffffffffffffUL
+        let exp = int ((bits >>> 52) &&& 0x7ffUL)
+        let mag = int64 (if exp = 0 then frac else frac ||| 0x0010000000000000UL)
+        let signedMag = if (bits >>> 63) = 0UL then mag else -mag
+        let pow2 = if exp = 0 then -1074 else exp - 1075
+        struct(signedMag, pow2)
+
+    let private orient2dExact (a: Point) (b: Point) (c: Point) : int =
+        let struct(m0, e0) = decomposeFinite a.X
+        let struct(m1, e1) = decomposeFinite a.Y
+        let struct(m2, e2) = decomposeFinite b.X
+        let struct(m3, e3) = decomposeFinite b.Y
+        let struct(m4, e4) = decomposeFinite c.X
+        let struct(m5, e5) = decomposeFinite c.Y
+        let mutable minE = Int32.MaxValue
+        let mutable maxE = Int32.MinValue
+        let inline track m e =
+            if m <> 0L then
+                if e < minE then minE <- e
+                if e > maxE then maxE <- e
+        track m0 e0; track m1 e1; track m2 e2; track m3 e3; track m4 e4; track m5 e5
+        if minE = Int32.MaxValue then 0
+        elif maxE - minE <= 9 then
+            // Proven overflow-free in GeometryGeo.v (int128_orient2d_no_overflow):
+            // |v_k| <= (2^53 - 1) * 2^9 < 2^62 and |det| < 2^127.
+            let inline scale m e = if m = 0L then 0L else m <<< (e - minE)
+            let v0 = scale m0 e0
+            let v1 = scale m1 e1
+            let v2 = scale m2 e2
+            let v3 = scale m3 e3
+            let v4 = scale m4 e4
+            let v5 = scale m5 e5
+            let p1 = Math.BigMul(v0 - v4, v3 - v5)
+            let p2 = Math.BigMul(v1 - v5, v2 - v4)
+            if p1 > p2 then 1 elif p1 < p2 then -1 else 0
+        else
+            let v, _ = ExactDyadic.integers [| a.X; a.Y; b.X; b.Y; c.X; c.Y |]
+            ((v[0] - v[4]) * (v[3] - v[5]) - (v[1] - v[5]) * (v[2] - v[4])).Sign
+#endif
+
     /// <summary>Returns the exact sign of the orientation of a, b, c: positive when they turn counterclockwise in y-up coordinates, negative when
     /// clockwise, zero when collinear. Raises ArgumentException for non-finite coordinates.</summary>
     let orient2d (a:Point) (b:Point) (c:Point) =
@@ -43,8 +90,12 @@ module Predicates =
         if safe acx && safe acy && safe bcx && safe bcy && (abs determinant>bound || (left=0. && right=0.)) then sign determinant else
         // Integer coordinates bounded by 2^24 keep both products and their difference below 2^53.
         if integerPoint a && integerPoint b && integerPoint c then sign determinant else
+#if !FABLE_COMPILER
+        orient2dExact a b c
+#else
         let v,_=ExactDyadic.integers [|a.X;a.Y;b.X;b.Y;c.X;c.Y|]
         ((v[0]-v[4])*(v[3]-v[5])-(v[1]-v[5])*(v[2]-v[4])).Sign
+#endif
     /// <summary>Returns the exact sign of the incircle test: positive when d lies inside the circle through counterclockwise a, b, c (y-up), negative
     /// outside, zero on it. Raises ArgumentException for non-finite coordinates.</summary>
     let incircle (a:Point) (b:Point) (c:Point) (d:Point) =

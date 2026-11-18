@@ -55,16 +55,28 @@ module Polygon =
         Some(Point.create (ExactDyadic.ratio x denominator exponent) (ExactDyadic.ratio y denominator exponent))
     let internal containsArrayWithCancellation (token:System.Threading.CancellationToken) (point:Point) (vertices:Point array) =
         token.ThrowIfCancellationRequested()
-        let mutable winding=0
-        let mutable boundary=false
-        for i in 0..vertices.Length-1 do
-            if i%1024=0 then token.ThrowIfCancellationRequested()
-            let a,b=vertices[i],vertices[(i+1)%vertices.Length]
-            let orientation=Predicates.orient2d a b point
-            if orientation=0 && point.X>=min a.X b.X && point.X<=max a.X b.X && point.Y>=min a.Y b.Y && point.Y<=max a.Y b.Y then boundary<-true
-            elif a.Y<=point.Y && b.Y>point.Y && orientation>0 then winding<-winding+1
-            elif a.Y>point.Y && b.Y<=point.Y && orientation<0 then winding<-winding-1
-        boundary || winding<>0
+        let n = vertices.Length
+        if n = 0 then false
+        else
+            let px = point.X
+            let py = point.Y
+            let mutable winding = 0
+            let mutable boundary = false
+            let mutable a = vertices[n - 1]
+            for i = 0 to n - 1 do
+                if (i &&& 1023) = 0 then token.ThrowIfCancellationRequested()
+                let b = vertices[i]
+                // Proven in GeometryGeo.v (y_straddle_filter_preserves_polygon_containment)
+                if not ((a.Y < py && b.Y < py) || (a.Y > py && b.Y > py)) then
+                    let orientation = Predicates.orient2d a b point
+                    if orientation = 0 && px >= min a.X b.X && px <= max a.X b.X && py >= min a.Y b.Y && py <= max a.Y b.Y then
+                        boundary <- true
+                    elif a.Y <= py && b.Y > py && orientation > 0 then
+                        winding <- winding + 1
+                    elif a.Y > py && b.Y <= py && orientation < 0 then
+                        winding <- winding - 1
+                a <- b
+            boundary || winding <> 0
 
     /// <summary>Tests whether the point lies inside the polygon by the nonzero winding rule; boundary points count as inside. Raises
     /// ArgumentException for non-finite coordinates.</summary>
@@ -73,22 +85,51 @@ module Polygon =
         let vertices=List.toArray points
         for vertex in vertices do Check.finite "x" vertex.X;Check.finite "y" vertex.Y
         containsArrayWithCancellation System.Threading.CancellationToken.None point vertices
+
+    let private pointLexComparer =
+        { new System.Collections.Generic.IComparer<Point> with
+            member _.Compare(a, b) =
+                let x = a.X.CompareTo b.X
+                if x <> 0 then x else a.Y.CompareTo b.Y }
+
+    let internal hullFromValidatedCopy (ordered: Point array) : Point list =
+#if !FABLE_COMPILER
+        Array.Sort(ordered, pointLexComparer)
+#else
+        Array.sortInPlaceWith(fun a b -> let x=compare a.X b.X in if x=0 then compare a.Y b.Y else x) ordered
+#endif
+        let unique=ResizeArray<Point>(ordered.Length)
+        for i = 0 to ordered.Length - 1 do
+            let point = ordered[i]
+            if unique.Count=0 || unique[unique.Count-1]<>point then unique.Add point
+        let m = unique.Count
+        if m = 0 then []
+        elif m = 1 then [ unique[0] ]
+        else
+            let lower = ResizeArray<Point>(16)
+            for i = 0 to m - 1 do
+                let point = unique[i]
+                while lower.Count >= 2 && Predicates.orient2d lower[lower.Count - 2] lower[lower.Count - 1] point <= 0 do
+                    lower.RemoveAt(lower.Count - 1)
+                lower.Add point
+            let upper = ResizeArray<Point>(16)
+            for i = m - 1 downto 0 do
+                let point = unique[i]
+                while upper.Count >= 2 && Predicates.orient2d upper[upper.Count - 2] upper[upper.Count - 1] point <= 0 do
+                    upper.RemoveAt(upper.Count - 1)
+                upper.Add point
+            let mutable acc = []
+            for i = upper.Count - 2 downto 0 do
+                acc <- upper[i] :: acc
+            for i = lower.Count - 2 downto 0 do
+                acc <- lower[i] :: acc
+            acc
+
     /// <summary>Returns the convex hull without duplicate or collinear points, counterclockwise in y-up coordinates from the lowest-x, then lowest-y
     /// point. Raises ArgumentException for non-finite coordinates.</summary>
     let hull points =
-        for point in points do Check.finite "x" point.X;Check.finite "y" point.Y
         let ordered=List.toArray points
-        Array.sortInPlaceWith(fun a b -> let x=compare a.X b.X in if x=0 then compare a.Y b.Y else x) ordered
-        let unique=ResizeArray<Point>()
-        for point in ordered do
-            if unique.Count=0 || unique[unique.Count-1]<>point then unique.Add point
-        let sorted=unique.ToArray()
-        if sorted.Length<2 then Array.toList sorted else
-        let chain sequence =
-            let result=ResizeArray<Point>()
-            for point in sequence do
-                while result.Count>=2 && Predicates.orient2d result[result.Count-2] result[result.Count-1] point<=0 do result.RemoveAt(result.Count-1)
-                result.Add point
-            result.RemoveAt(result.Count-1)
-            List.ofSeq result
-        chain sorted @ chain (Array.rev sorted)
+        for i = 0 to ordered.Length - 1 do
+            let point = ordered[i]
+            Check.finite "x" point.X; Check.finite "y" point.Y
+        hullFromValidatedCopy ordered
