@@ -159,17 +159,27 @@ module PlanarPath =
                             match GeoRectangle.polygons options.MaxBufferedPoints spend clip ownedRings with
                             | Ok value -> value
                             | Error error -> reject error
-                    let commands=ResizeArray<PathCommand>()
-                    for ring in visible do
+                    let ringArr=List.toArray visible
+                    let mutable hasAny=false
+                    for r=0 to ringArr.Length-1 do
+                        let ring=ringArr[r]
                         if ring.Length>0 then
+                            hasAny<-true
                             reserve ring.Length
-                            commands.Add(MoveTo ring[0])
-                            for index=1 to ring.Length-1 do
+                            spend(int64 ring.Length)
+                    if hasAny then
+                        let mutable owned=[]
+                        for r=ringArr.Length-1 downto 0 do
+                            let ring=ringArr[r]
+                            if ring.Length>0 then
                                 spend 1L
-                                commands.Add(LineTo ring[index])
-                            spend 1L
-                            commands.Add Close
-                    publish commands
+                                owned<-Close::owned
+                                for index=ring.Length-1 downto 1 do
+                                    spend 1L
+                                    owned<-LineTo ring[index]::owned
+                                spend 1L
+                                owned<-MoveTo ring[0]::owned
+                        paths.Add(Path.ofCommands owned)
                 let point value =
                     input value
                     if not emptyViewport then circle options.PointRadius (project value)

@@ -53,8 +53,15 @@ module GeoMeasure =
     type private AreaState =
         { Total: float; TotalCorrection: float
           HalfPolygon: float; PolygonCorrection: float
-          First: GeoPosition voption; Previous: GeoPosition voption
-          InPolygon: bool }
+          FirstPole: GeoPosition; FirstSin: float; FirstCos: float
+          PrevPole: GeoPosition; PrevSin: float; PrevCos: float
+          HasPrevious: bool; InPolygon: bool }
+
+    let private initialAreaState =
+        { Total=0.; TotalCorrection=0.; HalfPolygon=0.; PolygonCorrection=0.
+          FirstPole=Unchecked.defaultof<GeoPosition>; FirstSin=0.; FirstCos=1.
+          PrevPole=Unchecked.defaultof<GeoPosition>; PrevSin=0.; PrevCos=1.
+          HasPrevious=false; InPolygon=false }
 
     let private addArea value state =
         let adjusted=value-state.TotalCorrection
@@ -69,13 +76,10 @@ module GeoMeasure =
             | Error _ -> normalized
         else normalized
 
-    let private areaEdge from destination state =
-        let a,b=canonicalPole from,canonicalPole destination
+    let private areaEdgePrecomputed (a: GeoPosition) sin0 cos0 (b: GeoPosition) sin1 cos1 state =
         if a.Latitude = -b.Latitude && (abs(a.Longitude-b.Longitude)=180. || abs a.Latitude=90.) then
             raise(AmbiguousArc "Spherical area requires an explicit intermediate point on antipodal edges.")
         let delta=b.Longitude-a.Longitude
-        let struct(sin0,cos0)=GeoMath.sinCosDegrees (a.Latitude/2.+45.)
-        let struct(sin1,cos1)=GeoMath.sinCosDegrees (b.Latitude/2.+45.)
         let struct(sinDelta,cosDelta)=GeoMath.sinCosDegrees (abs delta)
         let sign=if delta < 0. then -1. else 1.
         let k=sin0*sin1
@@ -88,28 +92,31 @@ module GeoMeasure =
         match event with
         | GeoStreamEvent.Sphere -> addArea (4.*Math.PI) state
         | GeoStreamEvent.PolygonStart ->
-            {state with InPolygon=true;HalfPolygon=0.;PolygonCorrection=0.;First=ValueNone;Previous=ValueNone}
+            {state with InPolygon=true;HalfPolygon=0.;PolygonCorrection=0.;HasPrevious=false}
         | GeoStreamEvent.LineStart when state.InPolygon ->
-            {state with First=ValueNone;Previous=ValueNone}
+            {state with HasPrevious=false}
         | GeoStreamEvent.Point position when state.InPolygon ->
-            match state.Previous with
-            | ValueNone -> {state with First=ValueSome position;Previous=ValueSome position}
-            | ValueSome previous -> {areaEdge previous position state with Previous=ValueSome position}
+            let p1=canonicalPole position
+            let struct(s1,c1)=GeoMath.sinCosDegrees (p1.Latitude/2.+45.)
+            if not state.HasPrevious then
+                {state with FirstPole=p1;FirstSin=s1;FirstCos=c1;PrevPole=p1;PrevSin=s1;PrevCos=c1;HasPrevious=true}
+            else
+                let next=areaEdgePrecomputed state.PrevPole state.PrevSin state.PrevCos p1 s1 c1 state
+                {next with PrevPole=p1;PrevSin=s1;PrevCos=c1}
         | GeoStreamEvent.LineEnd when state.InPolygon ->
-            match state.First,state.Previous with
-            | ValueSome first,ValueSome previous -> areaEdge previous first state
-            | _ -> state
+            if state.HasPrevious then
+                areaEdgePrecomputed state.PrevPole state.PrevSin state.PrevCos state.FirstPole state.FirstSin state.FirstCos state
+            else state
         | GeoStreamEvent.PolygonEnd ->
             let half=if state.HalfPolygon < 0. then 2.*Math.PI+state.HalfPolygon else state.HalfPolygon
-            {addArea (2.*half) state with InPolygon=false;First=ValueNone;Previous=ValueNone}
+            {addArea (2.*half) state with InPolygon=false;HasPrevious=false}
         | _ -> state
 
     /// <summary>Measures spherical polygon area in steradians, preserving complement winding and holes.</summary>
     /// <remarks>Small clockwise exteriors select the small region; reversal selects its complement.
     /// Collections sum members without computing their union. Antipodal polygon edges are rejected.</remarks>
     let areaWithCancellation (config: GeoStreamConfig) (token: CancellationToken) (geometry: GeoGeometry) : Result<float,LayoutError list> =
-        let initial={Total=0.;TotalCorrection=0.;HalfPolygon=0.;PolygonCorrection=0.;First=ValueNone;Previous=ValueNone;InPolygon=false}
-        try GeoStream.foldWithCancellation config token areaEvent initial geometry |> Result.map(fun state -> state.Total)
+        try GeoStream.foldWithCancellation config token areaEvent initialAreaState geometry |> Result.map(fun state -> state.Total)
         with AmbiguousArc message -> Error [InvalidObservation message]
 
     /// <summary>Measures spherical polygon area without cancellation; collections sum their members.</summary>
@@ -222,7 +229,12 @@ module GeoMeasure =
     /// <remarks>Uses O(n) storage and O(n log n) longitude merging. Traversal and merging each receive MaxWork.
     /// Exact antipodal edges require an intermediate point. Pole-only geometry uses all longitudes.</remarks>
     let boundsWithCancellation (config: GeoStreamConfig) (token: CancellationToken) (geometry: GeoGeometry) : Result<Bounds option,LayoutError list> =
-        let ranges=ResizeArray<struct(float*float)>()
+        let pointLongitudes=ResizeArray<float>()
+        let westRanges=ResizeArray<float>()
+        let eastRanges=ResizeArray<float>()
+        let inline addInterval w e =
+            westRanges.Add w
+            eastRanges.Add e
         let mutable south=Double.PositiveInfinity
         let mutable north=Double.NegativeInfinity
         let mutable allLongitudes=false
@@ -235,7 +247,7 @@ module GeoMeasure =
         let mutable firstPoleExit=ValueNone
         let mutable northBoundary=false
         let mutable southBoundary=false
-        let mutable areaState={Total=0.;TotalCorrection=0.;HalfPolygon=0.;PolygonCorrection=0.;First=ValueNone;Previous=ValueNone;InPolygon=false}
+        let mutable areaState=initialAreaState
         let latitude value =
             south <- min south value
             north <- max north value
@@ -245,14 +257,14 @@ module GeoMeasure =
         let point (position:GeoPosition) =
             latitude position.Latitude
             if abs position.Latitude<90. && not allLongitudes then
-                ranges.Add(struct(position.Longitude,position.Longitude))
+                pointLongitudes.Add position.Longitude
         let poleTurn pole incoming outgoing =
             if inPolygon && not allLongitudes then
                 let west,east=if pole>0. then incoming,outgoing else outgoing,incoming
-                if west<=east then ranges.Add(struct(west,east))
+                if west<=east then addInterval west east
                 else
-                    ranges.Add(struct(west,180.))
-                    ranges.Add(struct(-180.,east))
+                    addInterval west 180.
+                    addInterval -180. east
         let edge (from:GeoPosition) (destination:GeoPosition) =
             if from.Latitude = -destination.Latitude && (abs(from.Longitude-destination.Longitude)=180. || abs from.Latitude=90.) then
                 raise(AmbiguousArc "Spherical bounds require an explicit intermediate point on antipodal edges.")
@@ -284,10 +296,10 @@ module GeoMeasure =
                     if extreme=90. then poleTurn -90. from.Longitude destination.Longitude
             if not allLongitudes && abs from.Latitude<90. && abs destination.Latitude<90. && abs delta<>180. then
                 let low,high=min from.Longitude destination.Longitude,max from.Longitude destination.Longitude
-                if abs delta<180. then ranges.Add(struct(low,high))
+                if abs delta<180. then addInterval low high
                 else
-                    ranges.Add(struct(-180.,low))
-                    ranges.Add(struct(high,180.))
+                    addInterval -180. low
+                    addInterval high 180.
         let folder () event =
             match event with
             | GeoStreamEvent.PolygonStart ->
@@ -295,6 +307,7 @@ module GeoMeasure =
                 seamWinding <- 0
                 northBoundary <- false
                 southBoundary <- false
+                areaState <- areaEvent areaState event
             | GeoStreamEvent.PolygonEnd ->
                 // Signed seam crossings distinguish polar caps; raw area alone confuses a north cap with its complement.
                 let southInside=seamWinding<0 || (seamWinding=0 && areaState.HalfPolygon<0.)
@@ -302,9 +315,11 @@ module GeoMeasure =
                 if southInside && not southBoundary then south <- -90.;allLongitudes <- true
                 if northInside && not northBoundary then north <- 90.;allLongitudes <- true
                 inPolygon <- false
+                areaState <- areaEvent areaState event
             | GeoStreamEvent.LineStart ->
                 inLine <- true;first <- ValueNone;previous <- ValueNone
                 poleEntry <- ValueNone;firstPoleExit <- ValueNone
+                if inPolygon then areaState <- areaEvent areaState event
             | GeoStreamEvent.Point source ->
                 if inPolygon then
                     match previous with
@@ -318,6 +333,7 @@ module GeoMeasure =
                     | ValueSome prior -> edge prior position
                     | ValueNone -> first <- ValueSome position
                     previous <- ValueSome position
+                if inPolygon then areaState <- areaEvent areaState event
             | GeoStreamEvent.LineEnd ->
                 if inPolygon then
                     match previous,first with
@@ -326,14 +342,83 @@ module GeoMeasure =
                     match poleEntry,firstPoleExit with
                     | ValueSome incoming,ValueSome(struct(pole,outgoing)) -> poleTurn pole incoming outgoing
                     | _ -> ()
+                    areaState <- areaEvent areaState event
                 inLine <- false;first <- ValueNone;previous <- ValueNone
             | GeoStreamEvent.Sphere -> south <- -90.;north <- 90.;allLongitudes <- true
-            areaState <- areaEvent areaState event
         let longitudeBounds () =
-            if allLongitudes || ranges.Count=0 then struct(-180.,180.)
+            let totalCount=pointLongitudes.Count+westRanges.Count
+            if allLongitudes || totalCount=0 then struct(-180.,180.)
             else
-                let mutable source=ranges.ToArray()
-                let mutable target=Array.zeroCreate source.Length
+#if !FABLE_COMPILER
+                token.ThrowIfCancellationRequested()
+                let passes =
+                    let mutable w=1
+                    let mutable p=0
+                    while w<totalCount do
+                        p<-p+1
+                        w<-if w>totalCount/2 then totalCount else w*2
+                    p
+                let requiredWork=int64 totalCount*int64 passes+int64(totalCount-1)
+                if requiredWork>config.MaxWork then raise BoundsBudget
+                if westRanges.Count=0 then
+                    let span=System.Runtime.InteropServices.CollectionsMarshal.AsSpan(pointLongitudes)
+                    MemoryExtensions.Sort(span)
+                    token.ThrowIfCancellationRequested()
+                    let start=span[0]
+                    let mutable prev=start
+                    let mutable gap= -1.
+                    let mutable west=start
+                    let mutable east=start
+                    for index=1 to span.Length-1 do
+                        if (index &&& 4095)=0 then token.ThrowIfCancellationRequested()
+                        let next=span[index]
+                        if next>prev then
+                            let d=next-prev
+                            if d>gap then
+                                gap <- d
+                                west <- next
+                                east <- prev
+                            prev <- next
+                    if start+360.-prev>gap then west<-start;east<-prev
+                    if prev-start=360. && gap<0. then struct(-180.,180.)
+                    else struct(west,east)
+                else
+                    for i=0 to pointLongitudes.Count-1 do
+                        let lon=pointLongitudes[i]
+                        westRanges.Add lon
+                        eastRanges.Add lon
+                    let wSpan=System.Runtime.InteropServices.CollectionsMarshal.AsSpan(westRanges)
+                    let eSpan=System.Runtime.InteropServices.CollectionsMarshal.AsSpan(eastRanges)
+                    MemoryExtensions.Sort(wSpan, eSpan)
+                    token.ThrowIfCancellationRequested()
+                    let start=wSpan[0]
+                    let mutable finish=eSpan[0]
+                    let mutable gap= -1.
+                    let mutable west=start
+                    let mutable east=finish
+                    for index=1 to wSpan.Length-1 do
+                        if (index &&& 4095)=0 then token.ThrowIfCancellationRequested()
+                        let nextWest=wSpan[index]
+                        let nextEast=eSpan[index]
+                        if nextWest>finish then
+                            if nextWest-finish>gap then
+                                gap <- nextWest-finish
+                                west <- nextWest
+                                east <- finish
+                            finish <- nextEast
+                        elif nextEast>finish then
+                            finish <- nextEast
+                    if start+360.-finish>gap then west<-start;east<-finish
+                    if finish-start=360. && gap<0. then struct(-180.,180.)
+                    else struct(west,east)
+#else
+                for i=0 to pointLongitudes.Count-1 do
+                    let lon=pointLongitudes[i]
+                    westRanges.Add lon
+                    eastRanges.Add lon
+                let n=westRanges.Count
+                let mutable source=Array.init n (fun i -> struct(westRanges[i],eastRanges[i]))
+                let mutable target=Array.zeroCreate n
                 let mutable work=0L
                 let tick () =
                     token.ThrowIfCancellationRequested()
@@ -353,9 +438,9 @@ module GeoMeasure =
                                 if right=finish then true
                                 elif left=middle then false
                                 else
-                                    let struct(leftStart,leftEnd)=source[left]
-                                    let struct(rightStart,rightEnd)=source[right]
-                                    leftStart<rightStart || (leftStart=rightStart && leftEnd<=rightEnd)
+                                    let struct(lw,le)=source[left]
+                                    let struct(rw,re)=source[right]
+                                    lw<rw || (lw=rw && le<=re)
                             if takeLeft then target[index]<-source[left];left<-left+1
                             else target[index]<-source[right];right<-right+1
                         offset <- finish
@@ -367,20 +452,21 @@ module GeoMeasure =
                 let mutable finish=initialEnd
                 let mutable gap= -1.
                 let mutable west=start
-                let mutable east=initialEnd
+                let mutable east=finish
                 for index in 1..source.Length-1 do
                     tick()
-                    let struct(nextStart,nextEnd)=source[index]
-                    if nextStart>finish then
-                        if nextStart-finish>gap then
-                            gap <- nextStart-finish
-                            west <- nextStart
+                    let struct(nextWest,nextEast)=source[index]
+                    if nextWest>finish then
+                        if nextWest-finish>gap then
+                            gap <- nextWest-finish
+                            west <- nextWest
                             east <- finish
-                        finish <- nextEnd
-                    else finish <- max finish nextEnd
+                        finish <- nextEast
+                    else finish <- max finish nextEast
                 if start+360.-finish>gap then west<-start;east<-finish
                 if finish-start=360. && gap<0. then struct(-180.,180.)
                 else struct(west,east)
+#endif
         try
             GeoStream.foldWithCancellation config token folder () geometry
             |> Result.map(fun () ->

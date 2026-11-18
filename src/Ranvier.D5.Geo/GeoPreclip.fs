@@ -79,7 +79,8 @@ module internal GeoPreclip =
                     let struct(b,latitudeB)=roots[index]
                     if b>a then
                         let middle=(a+b)/2.
-                        let z=arc.Z*cos middle+arc.TangentZ*sin middle
+                        let struct(sine,cosine)=Math.SinCos middle
+                        let z=arc.Z*cosine+arc.TangentZ*sine
                         if abs z<=limit then
                             let before=if a=0. then first else endpoint a latitudeA
                             let after=if b=arc.Angle then last else endpoint b latitudeB
@@ -99,7 +100,7 @@ module internal GeoPreclip =
         let turn=source.Longitude%360.
         if abs rotated.Longitude=180. && abs turn=180. then position turn rotated.Latitude else rotated
 
-    let line projection spend sink (input:IReadOnlyList<GeoPosition>) =
+    let private runPreclip projection spend sink drive =
         try
             let sink=if Projection.mercatorBand projection then mercatorBand spend sink else sink
             let cap=Projection.clipCircle projection
@@ -122,7 +123,7 @@ module internal GeoPreclip =
                 | _ -> finish(); start point
             // Snaps an interpolated route vector onto the cap boundary so its projected angle and radius are exact.
             let capBoundary (route:GeoArc) angle =
-                let sine,cosine=sin angle,cos angle
+                let struct(sine,cosine)=Math.SinCos angle
                 let y=route.Y*cosine+route.TangentY*sine
                 let z=route.Z*cosine+route.TangentZ*sine
                 let length=Double.Hypot(y,z)
@@ -156,7 +157,8 @@ module internal GeoPreclip =
                         let a,b=roots[index-1],roots[index]
                         if b>a then
                             let middle=(a+b)/2.
-                            if route.X*cos middle+route.TangentX*sin middle>=capCosine then
+                            let struct(sine,cosine)=Math.SinCos middle
+                            if route.X*cosine+route.TangentX*sine>=capCosine then
                                 let before=if a=0. then first else capBoundary route a
                                 let after=if b=route.Angle then last else capBoundary route b
                                 if a=0. then ensureStart before
@@ -231,6 +233,12 @@ module internal GeoPreclip =
                     clippedEdge source middle
                     clippedEdge middle destination
                 else clippedEdge source destination
+            drive edge finish
+            Ok ()
+        with Rejected error -> Error error
+
+    let line projection spend sink (input:IReadOnlyList<GeoPosition>) =
+        runPreclip projection spend sink (fun edge finish ->
             let rotate=rotateKeepingSeam projection
             if input.Count>0 then
                 let mutable previous=rotate input[0]
@@ -239,6 +247,18 @@ module internal GeoPreclip =
                     let current=rotate input[index]
                     edge previous current
                     previous<-current
-                finish()
-            Ok ()
-        with Rejected error -> Error error
+                finish())
+
+    let rotatedClosedRing projection spend sink (rotated:GeoPosition array) =
+        runPreclip projection spend sink (fun edge finish ->
+            if rotated.Length>0 then
+                let first=rotated[0]
+                let mutable previous=first
+                for index=1 to rotated.Length-1 do
+                    spend 1L
+                    let current=rotated[index]
+                    edge previous current
+                    previous<-current
+                spend 1L
+                edge previous first
+                finish())
