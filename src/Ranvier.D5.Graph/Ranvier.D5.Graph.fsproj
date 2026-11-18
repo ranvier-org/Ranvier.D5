@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Ranvier.D5.Graph$(RanvierPackageSuffix)</PackageId>
+    <Description>High-performance 2D compound graph, grouping, port, orthogonal routing and association-machine layout engines for Ranvier.D5.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="DiagramTypes.fs" />
+    <Compile Include="DiagramGraph.fs" />
+    <Compile Include="GraphKernels.fs" />
+    <Compile Include="BoxPack.fs" />
+    <Compile Include="RadialTree.fs" />
+    <Compile Include="OrthogonalRouter.fs" />
+    <Compile Include="Sugiyama.fs" />
+    <Compile Include="Cola.fs" />
+    <Compile Include="FCose.fs" />
+    <Compile Include="Stress2D.fs" />
+    <Compile Include="ModularityForce2D.fs" />
+    <Compile Include="DiagramScene.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(MSBuildProjectFile);*.fs" Pack="true" PackagePath="fable/" />
+    <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>
