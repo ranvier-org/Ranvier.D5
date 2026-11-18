@@ -58,6 +58,7 @@ module InputAdapter =
                             if element.hasPointerCapture id then element.releasePointerCapture id
                         | _ -> execute command)
         let send event = graph.Run(fun () -> Api.runWithOwner owner (fun () -> Api.untrack(fun () -> sendCore event)))
+        let rootElement=element :> Ranvier.Dom.Element
         let pointer kind (event:Ranvier.Dom.Event) =
             match event with
             | Pointer pointer ->
@@ -66,15 +67,16 @@ module InputAdapter =
                         let target =
                             match event.target with
                             | Element target ->
-                                let value=target.closest("[data-d5-key]")
-                                if isNull value then None else
-                                let mutable path=[value.getAttribute "data-d5-key"]
-                                let mutable parent=value.parentElement
-                                while not(isNull parent) do
-                                    let group=parent.getAttribute "data-d5-group"
-                                    if not(String.IsNullOrEmpty group) then path<-group::path
-                                    parent<-parent.parentElement
-                                Some path
+                                let mutable cursor=target
+                                let mutable path=[]
+                                while not(isNull cursor) && not(obj.ReferenceEquals(cursor,rootElement)) do
+                                    if path.IsEmpty then
+                                        if cursor.hasAttribute "data-d5-key" then path<-[cursor.getAttribute "data-d5-key"]
+                                    elif cursor.hasAttribute "data-d5-group" then
+                                        let group=cursor.getAttribute "data-d5-group"
+                                        if not(String.IsNullOrEmpty group) then path<-group::path
+                                    cursor<-cursor.parentElement
+                                if not path.IsEmpty && obj.ReferenceEquals(cursor,rootElement) then Some path else None
                             | _ -> None
                         match kind with
                         | "pointerdown" -> send(InputEvent.Down(pointer.pointerId,point,target))

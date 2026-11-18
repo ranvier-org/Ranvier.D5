@@ -73,7 +73,11 @@ module Gesture =
                 | GestureMode.Drag -> {state with Pointers=pointers},[GestureCommand.DragBy(state.Target,delta)]
                 | GestureMode.Rectangle -> {state with Pointers=pointers},[]
                 | GestureMode.Lasso ->
-                    let points=if Double.Hypot(delta.X,delta.Y)<1. then state.Lasso else point::state.Lasso
+                    let tooClose =
+                        match state.Lasso with
+                        | last::_ -> Double.Hypot(point.X-last.X,point.Y-last.Y)<1.
+                        | [] -> false
+                    let points=if tooClose then state.Lasso else point::state.Lasso
                     let points=if points.Length>config.MaxLassoPoints then points |> List.indexed |> List.choose (fun (i,p) -> if i%2=0 || i=points.Length-1 then Some p else None) else points
                     {state with Pointers=pointers;Lasso=points},[]
     /// <summary>Applies one event and returns the next state with the commands to perform, in order.

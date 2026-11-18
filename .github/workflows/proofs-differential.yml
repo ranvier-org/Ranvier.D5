@@ -1,0 +1,55 @@
+# Runs the extracted Rocq pure model against the live F# D5 libraries on seeded random programs.
+# Uses the committed proofs/differential/engine.ml, so it needs OCaml + .NET without compiling Rocq.
+name: Proofs differential
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/Ranvier.D5/**'
+      - 'src/Ranvier.D5.Charts/**'
+      - 'src/Ranvier.D5.Geo/**'
+      - 'src/Ranvier.D5.View/**'
+      - 'global.json'
+      - 'proofs/**'
+      - '.github/workflows/proofs-differential.yml'
+  pull_request:
+    paths:
+      - 'src/Ranvier.D5/**'
+      - 'src/Ranvier.D5.Charts/**'
+      - 'src/Ranvier.D5.Geo/**'
+      - 'src/Ranvier.D5.View/**'
+      - 'global.json'
+      - 'proofs/**'
+      - '.github/workflows/proofs-differential.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proofs-differential-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  differential:
+    name: Differential conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '4.14.2'
+      - name: Build D5 assemblies
+        run: |
+          dotnet build src/Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj -c Release -p:CopyLocalLockFileAssemblies=true --nologo
+          dotnet build src/Ranvier.D5.Geo/Ranvier.D5.Geo.fsproj -c Release -p:CopyLocalLockFileAssemblies=true --nologo
+          dotnet build src/Ranvier.D5.View/Ranvier.D5.View.fsproj -c Release -p:CopyLocalLockFileAssemblies=true --nologo
+      - name: Compare the extracted model and the F# implementation
+        run: opam exec -- bash proofs/differential/run.sh 1000 "${GITHUB_RUN_NUMBER:-1}"

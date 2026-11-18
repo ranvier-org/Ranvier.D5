@@ -3,7 +3,28 @@
 artifacts/
 .serena/
 .superpowers/
+.worktrees/
 *.user
 
 **/node_modules/
 **/__pycache__/
+
+# Rocq build and scratch artifacts
+proofs/Makefile.rocq*
+proofs/.Makefile.rocq.d
+proofs/**/*.vo
+proofs/**/*.vok
+proofs/**/*.vos
+proofs/**/*.glob
+proofs/**/*.aux
+proofs/**/.lia.cache
+proofs/**/.nia.cache
+proofs/engine.ml
+proofs/engine.mli
+proofs/site/.work/
+proofs/site/output/
+proofs/differential/.run.*
+proofs/differential/driver
+proofs/differential/*.cmx
+proofs/differential/*.cmi
+proofs/differential/*.o

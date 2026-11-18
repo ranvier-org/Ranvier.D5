@@ -1,0 +1,5 @@
+*.sh text eol=lf
+*.v text eol=lf
+*.ml text eol=lf
+*.mli text eol=lf
+proofs/_CoqProject text eol=lf

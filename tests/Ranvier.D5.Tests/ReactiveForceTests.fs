@@ -48,6 +48,23 @@ let tests=testList "Reactive force" [
             rounds<-rounds+1
         Expect.isTrue (graph.Run(fun () -> force.Snapshot.Finished)) "replacement finishes"
         Expect.equal (graph.Run(fun () -> force.Snapshot.Nodes |> List.map(fun node -> node.Id))) ["a"] "late worker does not resurrect removed node"
+    testCase "in-flush Dispatch on State notification is not clobbered by prior worker revision" <| fun _ ->
+        use graph=new Graph()
+        use pump=new ReactiveLayoutTests.Pump()
+        let force=graph.Run(fun () -> ReactiveForce.create pump.Dispatcher chunk (initial()))
+        let mutable triggered=false
+        let _observer=graph.Run(fun () ->
+            Api.createEffect(fun () ->
+                match force.State with
+                | WorkState.Ready _ when not triggered ->
+                    triggered<-true
+                    Api.untrack(fun () -> force.Dispatch(ForceMessage.Pin("a",Point.create 42. 84.)) |> ok)
+                | _ -> ()))
+        pump.Post()
+        pump.Frame()
+        let pinned=graph.Run(fun () -> force.Snapshot.Nodes |> List.find(fun node -> node.Id="a"))
+        Expect.equal pinned.Pinned (Some(Point.create 42. 84.)) "synchronous dispatch during Ready flush survives stale LastGood"
+        (force:>IDisposable).Dispose()
     testCase "disposed controller rejects messages" <| fun _ ->
         use graph=new Graph()
         use pump=new ReactiveLayoutTests.Pump()

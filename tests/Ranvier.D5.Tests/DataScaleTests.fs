@@ -89,6 +89,13 @@ let tests = testList "Data and scales" [
         near 100. (Scale.timeMap scale (first.AddDays 1.))
         Expect.equal (Scale.timeInvert scale 100.) (first.AddDays 1.) "time inverse"
         Expect.equal (Scale.timeTicks TimeInterval.Day scale) [first;first.AddDays 1.;last] "leap day"
+    testCase "nice rounds domains even when fewer than two interior ticks exist" <| fun _ ->
+        let n1 = Scale.linear (1.01,1.99) (0.,100.) |> Scale.nice 1
+        let n2 = Scale.linear (1.01,1.99) (0.,100.) |> Scale.nice 2
+        let rev = Scale.linear (1.99,1.01) (0.,100.) |> Scale.nice 1
+        Expect.equal (Scale.invert n1 0.,Scale.invert n1 100.) (1.0,2.0) "nice count=1 encloses domain"
+        Expect.equal (Scale.invert n2 0.,Scale.invert n2 100.) (1.0,2.0) "nice count=2 encloses domain"
+        Expect.equal (Scale.invert rev 0.,Scale.invert rev 100.) (2.0,1.0) "nice preserves reversed direction"
     testCase "sequential and diverging accept a reusable interpolator" <| fun _ ->
         let seq = Scale.sequential (0.,10.) (fun t -> t*t)
         near 0.25 (seq 5. |> Option.get)

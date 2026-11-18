@@ -114,20 +114,23 @@ let acceptance () =
         host.Cycle()
         host.Click(40, 40) |> ignore
         Expect.isTrue (events.Contains ("a", "click")) "retained mark receives pointer event"
+        container.setAttribute("data-d5-group","leaked-html-ancestor")
         let svg=container.querySelector "svg" :?> Ranvier.Dom.SVGGraphicsElement
         let commands=ResizeArray<GestureCommand>()
-        let config={Mode=GestureMode.Pan;MinZoom=0.1;MaxZoom=10.;WheelSensitivity=0.01;MaxLassoPoints=128}
+        let config={Mode=GestureMode.Drag;MinZoom=0.1;MaxZoom=10.;WheelSensitivity=0.01;MaxLassoPoints=128}
         let inputOwner,input,state=graph.Run(fun () ->
             Api.createRoot(fun owner ->
                 let state=Api.createSignal Gesture.empty
                 let input=InputAdapter.attach svg (fun () -> config) (fun () -> state.Value) (fun value -> state.Value<-value) commands.Add
                 owner,input,state))
         host.Mouse(1,40,40,0,1,0) |> ignore
+        Expect.equal (graph.Run(fun () -> state.Value.Target)) (Some ["a"]) "InputAdapter stops group walk at host svg"
         host.Mouse(0,60,50,0,0,0) |> ignore
         Expect.isTrue (svg.hasPointerCapture 1) "native pointer capture"
         host.Mouse(2,60,50,0,1,0) |> ignore
         Expect.isFalse (svg.hasPointerCapture 1) "pointer release"
-        Expect.isTrue (commands |> Seq.exists(function GestureCommand.ZoomChanged _ -> true | _ -> false)) "native event enters signal graph"
+        Expect.isTrue (commands |> Seq.exists(function GestureCommand.DragBy(Some ["a"],_) -> true | _ -> false)) "native event enters signal graph without leaked HTML group"
+        container.removeAttribute "data-d5-group"
         Expect.isEmpty (graph.Run(fun () -> state.Value.Pointers)) "pointer state released"
         inputOwner.Dispose()
         let count=commands.Count

@@ -61,6 +61,33 @@ let tests=testList "Owned background layout" [
         layout.Retry()
         pump.Post();pump.Frame()
         Expect.isTrue (graph.Run(fun () -> match layout.State with WorkState.Ready(_,7) -> true | _ -> false)) "retry succeeds"
+    testCase "transient RequestFrame failure resets frameQueued so subsequent frames publish" <| fun _ ->
+        use graph=new Graph()
+        let posts=new BlockingCollection<unit->unit>()
+        let frames=ResizeArray<unit->unit>()
+        let mutable throwNextFrame=false
+        let dispatcher={
+            HostDispatcher.Post=posts.Add
+            RequestFrame=fun cb ->
+                if throwNextFrame then
+                    throwNextFrame<-false
+                    invalidOp "frame queue unavailable"
+                frames.Add cb
+        }
+        let mutable current=1
+        use layout=graph.Run(fun () -> ReactiveLayout.create dispatcher (fun () -> current) (fun _ v -> Ok v))
+        let cb0=posts.Take()
+        cb0()
+        for f in frames.ToArray() do f()
+        frames.Clear()
+        current<-2
+        throwNextFrame<-true
+        Expect.throwsT<InvalidOperationException> (fun () -> layout.Retry()) "transient RequestFrame failure throws"
+        layout.Retry()
+        let cb1=posts.Take()
+        cb1()
+        for f in frames.ToArray() do f()
+        Expect.equal (graph.Run(fun () -> layout.LastGood)) (Some 2) "subsequent RequestFrame on the same layout publishes cleanly"
     testCase "completion after disposal is inert and cancellation reaches kernel" <| fun _ ->
         use graph=new Graph()
         use pump=new Pump()

@@ -48,7 +48,7 @@ module ReactiveForce =
             let mutable revision=0L
             let input=Api.createSignal struct (revision,initial)
             let snapshot=Api.createSignal(Force.snapshot initial)
-            let worker=ReactiveLayout.create dispatcher (fun () -> input.Value) (fun token struct (_,state) ->
+            let worker=ReactiveLayout.create dispatcher (fun () -> input.Value) (fun token struct (rev,state) ->
                 let timer=System.Diagnostics.Stopwatch.StartNew()
                 let mutable result=state
                 let mutable steps=0
@@ -56,18 +56,24 @@ module ReactiveForce =
                     result<-Force.stepWithCancellation token 1 result
                     steps<-steps+1
                 token.ThrowIfCancellationRequested()
-                Ok result)
+                Ok(struct (rev,result)))
             let request state =
                 revision<-revision+1L
                 input.Value<-struct (revision,state)
+            let mapState = function
+                | WorkState.Idle -> WorkState.Idle
+                | WorkState.Running g -> WorkState.Running g
+                | WorkState.Ready(g,struct (_,s)) -> WorkState.Ready(g,s)
+                | WorkState.Failed(g,errors) -> WorkState.Failed(g,errors)
             Api.onCleanup(fun () -> disposed<-true)
             Api.createEffect(fun () ->
                 let next=worker.LastGood
                 Api.untrack(fun () ->
-                    next |> Option.iter(fun state ->
-                        current<-state
-                        snapshot.Value<-Force.snapshot state
-                        if not(Force.isFinished state) then request state))) |> ignore
+                    next |> Option.iter(fun struct (rev,state) ->
+                        if rev=revision then
+                            current<-state
+                            snapshot.Value<-Force.snapshot state
+                            if not(Force.isFinished state) then request state))) |> ignore
             let dispatch message =
                 graph.AssertOnGraphThread "OwnedForce.Dispatch"
                 if disposed then raise(ObjectDisposedException "OwnedForce")
@@ -85,5 +91,5 @@ module ReactiveForce =
                         Api.batch(fun () ->
                             snapshot.Value<-Force.snapshot state
                             request state)))
-            new OwnedForce((fun () -> snapshot.Value),(fun () -> worker.State),dispatch,
+            new OwnedForce((fun () -> snapshot.Value),(fun () -> mapState worker.State),dispatch,
                 (fun () -> graph.Run(fun () -> owner.Dispose()))))
