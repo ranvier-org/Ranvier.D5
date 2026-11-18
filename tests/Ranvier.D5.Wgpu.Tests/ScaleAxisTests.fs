@@ -1,0 +1,431 @@
+module Ranvier.D5.Wgpu.Tests.ScaleAxisTests
+
+open System
+open System.Numerics
+open Expecto
+open Ranvier.D5
+open Ranvier.D5.Wgpu
+open Ranvier.Wgpu
+
+let private expectVec3Close (eps: float32) (actual: Vector3) (expected: Vector3) (msg: string) =
+    let acc = { absolute = float eps; relative = 0.0 }
+    Expect.floatClose acc (float actual.X) (float expected.X) ($"{msg} (X)")
+    Expect.floatClose acc (float actual.Y) (float expected.Y) ($"{msg} (Y)")
+    Expect.floatClose acc (float actual.Z) (float expected.Z) ($"{msg} (Z)")
+
+let private expectPoint3Close (eps: float) (actual: Point3) (expected: Point3) (msg: string) =
+    let acc = { absolute = eps; relative = 0.0 }
+    Expect.floatClose acc actual.X expected.X ($"{msg} (X)")
+    Expect.floatClose acc actual.Y expected.Y ($"{msg} (Y)")
+    Expect.floatClose acc actual.Z expected.Z ($"{msg} (Z)")
+
+[<Tests>]
+let scaleAxisTests =
+    testSequenced
+    <| testList
+        "Ranvier.D5.Wgpu.ScaleAndAxis3D"
+        [
+            testCase "Scale3D round-trips invert(map p) across ZUp/YUp, linear, log, symlog, piecewise, timeUtc, and reversed domains"
+            <| fun () ->
+                for tolOverride, label, scale, pts in
+                    [
+                        None,
+                        "ZUp tight 1e-5 linear/log/symlog/reversed",
+                        Scale3D.create
+                            BoxAspect.ChartDefault
+                            UpAxis.ZUp
+                            (AxisScale3D.linear (10.0, -10.0))
+                            (AxisScale3D.log 10.0 (1.0, 100.0))
+                            (AxisScale3D.symlog 2.0 (-10.0, 10.0)),
+                        [
+                            Point3.create 10.0 1.0 -10.0
+                            Point3.create -2.5 10.0 0.0
+                            Point3.create -10.0 100.0 10.0
+                            Point3.create 3.25 31.6227766 -4.5
+                        ]
+
+                        None,
+                        "YUp tight 1e-5 linear/log/symlog/reversed",
+                        Scale3D.create
+                            BoxAspect.Cube
+                            UpAxis.YUp
+                            (AxisScale3D.linear (10.0, -10.0))
+                            (AxisScale3D.log 10.0 (1.0, 100.0))
+                            (AxisScale3D.symlog 2.0 (-10.0, 10.0)),
+                        [
+                            Point3.create 10.0 1.0 -10.0
+                            Point3.create 0.0 10.0 0.0
+                            Point3.create -10.0 100.0 10.0
+                            Point3.create -3.5 25.0 4.5
+                        ]
+
+                        Some 1e-4,
+                        "ZUp wide linear/log/symlog",
+                        Scale3D.create
+                            BoxAspect.ChartDefault
+                            UpAxis.ZUp
+                            (AxisScale3D.linear (-5.0, 15.0))
+                            (AxisScale3D.log 10.0 (1.0, 1000.0))
+                            (AxisScale3D.symlog 2.0 (-100.0, 100.0)),
+                        [
+                            Point3.create -5.0 1.0 -100.0
+                            Point3.create 2.5 10.0 0.0
+                            Point3.create 15.0 1000.0 100.0
+                            Point3.create 7.25 31.6227766 -12.5
+                        ]
+
+                        Some 1e-4,
+                        "YUp reversed & piecewise",
+                        Scale3D.create
+                            BoxAspect.Cube
+                            UpAxis.YUp
+                            (AxisScale3D.linear (10.0, -10.0))
+                            (AxisScale3D.piecewise [ 0.0; 10.0; 100.0 ] [ 0.0; 0.5; 1.0 ])
+                            (AxisScale3D.log 10.0 (100.0, 1.0)),
+                        [
+                            Point3.create 10.0 0.0 100.0
+                            Point3.create 0.0 5.0 10.0
+                            Point3.create -10.0 55.0 1.0
+                            Point3.create -3.5 100.0 25.0
+                        ]
+
+                        Some 500.0,
+                        "ZUp TimeUtc & Manual",
+                        Scale3D.create
+                            (BoxAspect.Manual (3.0, 1.5, 2.25))
+                            UpAxis.ZUp
+                            (AxisScale3D.timeUtc (DateTimeOffset (2026, 1, 1, 0, 0, 0, TimeSpan.Zero), DateTimeOffset (2026, 1, 11, 0, 0, 0, TimeSpan.Zero)))
+                            (AxisScale3D.linear (0.0, 20.0))
+                            (AxisScale3D.linear (100.0, 0.0)),
+                        [
+                            Point3.create (float ((DateTimeOffset (2026, 1, 1, 0, 0, 0, TimeSpan.Zero)).ToUnixTimeMilliseconds ())) 0.0 100.0
+                            Point3.create (float ((DateTimeOffset (2026, 1, 6, 12, 0, 0, TimeSpan.Zero)).ToUnixTimeMilliseconds ())) 10.0 50.0
+                            Point3.create (float ((DateTimeOffset (2026, 1, 11, 0, 0, 0, TimeSpan.Zero)).ToUnixTimeMilliseconds ())) 20.0 0.0
+                        ]
+                    ] do
+                    for p in pts do
+                        let world = Scale3D.map scale p
+                        let recovered = Scale3D.invert scale world
+                        let tol = defaultArg tolOverride 1e-5
+                        expectPoint3Close tol recovered p $"{label}: round-trip"
+
+                // Verify explicit ZUp world axis mapping: (X, Y, Z) -> (wx, wz, -wy)
+                let cart = Scale3D.cartesian (0.0, 10.0) (0.0, 10.0) (0.0, 10.0)
+                expectVec3Close 1e-5f (Scale3D.map cart (Point3.create 10.0 0.0 0.0)) (Vector3 (1.0f, -2.0f / 3.0f, 1.0f)) "ZUp max X, min Y, min Z"
+                expectVec3Close 1e-5f (Scale3D.map cart (Point3.create 0.0 10.0 10.0)) (Vector3 (-1.0f, 2.0f / 3.0f, -1.0f)) "ZUp min X, max Y, max Z"
+
+                // Log scale rejects non-positive observations via tryMap / map
+                let logScale = Scale3D.create BoxAspect.Cube UpAxis.ZUp (AxisScale3D.log 10.0 (1.0, 100.0)) (AxisScale3D.linear (0.0, 1.0)) (AxisScale3D.linear (0.0, 1.0))
+                Expect.equal (Scale3D.tryMap logScale (Point3.create 0.0 0.5 0.5)) ValueNone "log scale omits zero"
+                Expect.throwsT<ArgumentException> (fun () -> Scale3D.map logScale (Point3.create -1.0 0.5 0.5) |> ignore) "log scale throws on negative"
+
+                // Categorical band & point mapping
+                let catScale =
+                    Scale3D.create
+                        BoxAspect.ChartDefault
+                        UpAxis.ZUp
+                        (AxisScale3D.band [ "A"; "B" ] 0.0 0.0)
+                        (AxisScale3D.point [ "Y0"; "Y1" ] 0.5)
+                        (AxisScale3D.linear (0.0, 10.0))
+
+                let hitCat = Scale3D.tryMapCategory catScale (Some "A") (Some "Y1") 10.0
+                Expect.isTrue hitCat.IsSome "known categories map cleanly"
+                expectVec3Close 1e-5f hitCat.Value (Vector3 (-0.5f, 2.0f / 3.0f, -0.5f)) "categorical band & point positions"
+                Expect.equal (Scale3D.tryMapCategory catScale (Some "Missing") (Some "Y1") 10.0) ValueNone "unknown category returns ValueNone"
+
+            testCase "Constant single-value domains map to 0.0f without NaN and BoxAspect.Auto guards > 4x span ratios"
+            <| fun () ->
+                let constScale = Scale3D.cartesian (5.0, 5.0) (0.0, 10.0) (-3.0, -3.0)
+                let mapped = Scale3D.map constScale (Point3.create 5.0 5.0 -3.0)
+                expectVec3Close 1e-6f mapped Vector3.Zero "constant domains map to world midpoint 0.0f"
+                let mappedOther = Scale3D.map constScale (Point3.create 99.0 5.0 12.0)
+                expectVec3Close 1e-6f mappedOther Vector3.Zero "constant domains stay at 0.0f without NaN"
+                let recovered = Scale3D.invert constScale mapped
+                expectPoint3Close 1e-6 recovered (Point3.create 5.0 5.0 -3.0) "constant domains invert cleanly"
+
+                // Auto with 100x ratio (> 4x) falls back to ChartDefault (2.0, 4/3, 2.0)
+                let extremeAuto =
+                    Scale3D.create
+                        BoxAspect.Auto
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (0.0, 1.0))
+                        (AxisScale3D.linear (0.0, 1.0))
+                        (AxisScale3D.linear (0.0, 100.0))
+
+                expectVec3Close 1e-5f (Scale3D.worldExtents extremeAuto) (Vector3 (2.0f, 4.0f / 3.0f, 2.0f)) "100x span falls back to ChartDefault"
+
+                // Auto with constant zero-span axis falls back to ChartDefault
+                let zeroAuto =
+                    Scale3D.create
+                        BoxAspect.Auto
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (0.0, 1.0))
+                        (AxisScale3D.linear (5.0, 5.0))
+                        (AxisScale3D.linear (0.0, 2.0))
+
+                expectVec3Close 1e-5f (Scale3D.worldExtents zeroAuto) (Vector3 (2.0f, 4.0f / 3.0f, 2.0f)) "zero span falls back to ChartDefault"
+
+                // Auto with 2x ratio (<= 4x) uses proportional Data extents
+                let mildAuto =
+                    Scale3D.create
+                        BoxAspect.Auto
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (0.0, 2.0))
+                        (AxisScale3D.linear (0.0, 1.0))
+                        (AxisScale3D.linear (0.0, 1.0))
+
+                expectVec3Close 1e-5f (Scale3D.worldExtents mildAuto) (Vector3 (2.0f, 1.0f, 1.0f)) "2x span uses proportional Data extents"
+
+                // Auto at exact 4.0x boundary still uses Data extents; 4.01x falls back
+                let exactFour =
+                    Scale3D.create
+                        BoxAspect.Auto
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (0.0, 4.0))
+                        (AxisScale3D.linear (0.0, 1.0))
+                        (AxisScale3D.linear (0.0, 1.0))
+
+                expectVec3Close 1e-5f (Scale3D.worldExtents exactFour) (Vector3 (2.0f, 0.5f, 0.5f)) "exact 4x boundary uses Data extents"
+
+                let justOverFour =
+                    Scale3D.create
+                        BoxAspect.Auto
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (0.0, 4.01))
+                        (AxisScale3D.linear (0.0, 1.0))
+                        (AxisScale3D.linear (0.0, 1.0))
+
+                expectVec3Close 1e-5f (Scale3D.worldExtents justOverFour) (Vector3 (2.0f, 4.0f / 3.0f, 2.0f)) "4.01x falls back to ChartDefault"
+
+            testCase "All 8 camera octants (ortho & perspective) emit 3 non-occluding back panels, 1 tick spine per axis, and stable label keys"
+            <| fun () ->
+                let scale = Scale3D.cartesian (0.0, 10.0) (0.0, 10.0) (0.0, 10.0)
+                let spec = Axis3D.defaultSpec scale
+                let ext = Scale3D.worldExtents scale
+                let hx, hy, hz = ext.X * 0.5f, ext.Y * 0.5f, ext.Z * 0.5f
+
+                let octants =
+                    [
+                        for sx in [ -1.0f; 1.0f ] do
+                            for sy in [ -1.0f; 1.0f ] do
+                                for sz in [ -1.0f; 1.0f ] do
+                                    yield sx, sy, sz
+                    ]
+
+                let mutable expectedKeys: Set<string> option = None
+
+                for (sx, sy, sz) in octants do
+                    let eye = Vector3 (sx * 5.0f, sy * 5.0f, sz * 5.0f)
+
+                    let orthoCam =
+                        {
+                            Position = eye
+                            Target = Vector3.Zero
+                            Up = Vector3.UnitY
+                            FovYDeg = -2.2f
+                            NearPlane = 0.05f
+                            FarPlane = 50.0f
+                        }
+
+                    let perspCam =
+                        {
+                            Position = eye
+                            Target = Vector3.Zero
+                            Up = Vector3.UnitY
+                            FovYDeg = 40.0f
+                            NearPlane = 0.05f
+                            FarPlane = 50.0f
+                        }
+
+                    for isOrtho, cam in [ true, orthoCam; false, perspCam ] do
+                        let tag = $"octant ({sx},{sy},{sz}) ortho={isOrtho}"
+                        let frame = Axis3D.build spec 800 600 cam
+
+                        // 1. Back wall planes match far cuboid faces
+                        let struct (bx, by, bz) = Axis3D.backWallPlanes frame
+                        let acc = { absolute = 1e-5; relative = 0.0 }
+                        Expect.floatClose acc (float bx) (float (-sx * hx)) $"{tag} worldBackX"
+                        Expect.floatClose acc (float by) (float (-sy * hy)) $"{tag} worldFloorY"
+                        Expect.floatClose acc (float bz) (float (-sz * hz)) $"{tag} worldBackZ"
+
+                        // 2. Exactly 3 back-facing panel instances with negative dot(inwardNormal, camToWall)
+                        let panels = Axis3D.panelInstances frame
+                        Expect.equal panels.Length 3 $"{tag} emits 3 panel instances"
+
+                        let panelSpan = panels.Span
+
+                        for i = 0 to panelSpan.Length - 1 do
+                            let p = panelSpan[i]
+                            Expect.equal p.PickId 0u $"{tag} panel[{i}] has zero PickId"
+                            Expect.equal p.Flags (InstanceFlags.Unlit ||| InstanceFlags.IgnoreSectionPlane) $"{tag} panel[{i}] flags"
+                            let inwardN = Vector3.Normalize (Vector3 (p.ModelCol2.X, p.ModelCol2.Y, p.ModelCol2.Z))
+                            let wallPos = Vector3 (p.ModelCol3.X, p.ModelCol3.Y, p.ModelCol3.Z)
+                            let camToWall = if isOrtho then Vector3.Normalize (cam.Target - cam.Position) else wallPos - cam.Position
+                            let dotVal = Vector3.Dot (inwardN, camToWall)
+                            Expect.isLessThan dotVal 0.0f $"{tag} panel[{i}] inward normal has negative dot with camera-to-wall ({dotVal})"
+
+                        // 3. Exactly 1 outer silhouette tick spine per axis (detectable from tick hairlines in lineVertices)
+                        let verts = Axis3D.lineVertices frame
+                        Expect.isGreaterThan verts.Length 0 $"{tag} has line vertices"
+                        Expect.equal (verts.Length % 2) 0 $"{tag} line vertices paired"
+
+                        let tickColorV4 = spec.Theme.TickColor.ToVector4 ()
+                        let vArr = verts.ToArray ()
+
+                        let tickStarts =
+                            [
+                                for i = 0 to (vArr.Length / 2) - 1 do
+                                    let a = vArr[i * 2]
+                                    let b = vArr[i * 2 + 1]
+                                    if (a.Color - tickColorV4).LengthSquared () < 1e-6f then
+                                        yield a.Position, b.Position
+                            ]
+
+                        // Group tick start positions by which cuboid axis they vary along -> must be 1 distinct spine per axis
+                        let xSpines =
+                            tickStarts
+                            |> List.choose (fun (a, b) ->
+                                if abs (abs a.Y - hy) < 1e-4f && abs (abs a.Z - hz) < 1e-4f && abs (a.X - b.X) < 1e-4f then
+                                    Some (MathF.Round (a.Y, 3), MathF.Round (a.Z, 3))
+                                else
+                                    None)
+                            |> List.distinct
+
+                        let ySpines =
+                            tickStarts
+                            |> List.choose (fun (a, b) ->
+                                if abs (abs a.X - hx) < 1e-4f && abs (abs a.Z - hz) < 1e-4f && abs (a.Y - b.Y) < 1e-4f then
+                                    Some (MathF.Round (a.X, 3), MathF.Round (a.Z, 3))
+                                else
+                                    None)
+                            |> List.distinct
+
+                        let zSpines =
+                            tickStarts
+                            |> List.choose (fun (a, b) ->
+                                if abs (abs a.X - hx) < 1e-4f && abs (abs a.Y - hy) < 1e-4f && abs (a.Z - b.Z) < 1e-4f then
+                                    Some (MathF.Round (a.X, 3), MathF.Round (a.Y, 3))
+                                else
+                                    None)
+                            |> List.distinct
+
+                        Expect.equal xSpines.Length 1 $"{tag} exactly 1 tick spine along world X"
+                        Expect.equal ySpines.Length 1 $"{tag} exactly 1 tick spine along world Y"
+                        Expect.equal zSpines.Length 1 $"{tag} exactly 1 tick spine along world Z"
+
+                        // Each tick spine must be a silhouette edge (one back sign, one front sign — never interior corner or frontmost corner)
+                        let xSy, xSz = xSpines.Head
+                        Expect.notEqual (sign xSy, sign xSz) (sign by, sign bz) $"{tag} X spine is not interior corner"
+                        Expect.notEqual (sign xSy, sign xSz) (-sign by, -sign bz) $"{tag} X spine is not frontmost corner"
+                        let ySx, ySz = ySpines.Head
+                        Expect.notEqual (sign ySx, sign ySz) (sign bx, sign bz) $"{tag} Y spine is not interior corner"
+                        Expect.notEqual (sign ySx, sign ySz) (-sign bx, -sign bz) $"{tag} Y spine is not frontmost corner"
+                        let zSx, zSy = zSpines.Head
+                        Expect.notEqual (sign zSx, sign zSy) (sign bx, sign by) $"{tag} Z spine is not interior corner"
+                        Expect.notEqual (sign zSx, sign zSy) (-sign bx, -sign by) $"{tag} Z spine is not frontmost corner"
+
+                        // 4. Stable AxisLabel2D keys across all octants and valid Scene overlay
+                        let labels = Axis3D.labels frame
+                        let keys = labels |> Seq.map _.Key |> Set.ofSeq
+                        Expect.isTrue (keys.Contains "axis/x/title") $"{tag} has axis/x/title"
+                        Expect.isTrue (keys.Contains "axis/y/title") $"{tag} has axis/y/title"
+                        Expect.isTrue (keys.Contains "axis/z/title") $"{tag} has axis/z/title"
+                        Expect.isTrue (keys.Contains "axis/x/tick/0") $"{tag} has axis/x/tick/0"
+
+                        match expectedKeys with
+                        | None -> expectedKeys <- Some keys
+                        | Some firstKeys -> Expect.equal keys firstKeys $"{tag} label keys stay identical across rotation"
+
+                        let scene = Axis3D.overlayScene 800.0 600.0 frame
+                        let sceneKeys = Scene.marks scene |> List.map Mark.key |> Set.ofList
+                        Expect.equal sceneKeys keys $"{tag} overlayScene marks match label keys"
+
+            testCase "Axis3D panels and lines render cleanly on offscreen WgpuContext"
+            <| fun () ->
+                let scale = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+                let spec = Axis3D.defaultSpec scale
+                let cam = Camera3D.orbitPerspectiveness Vector3.Zero 35.0f 25.0f (Scale3D.fitRadius scale) 0.0f
+                let frame = Axis3D.build spec 128 128 cam
+
+                use ctx = new WgpuContext (initialWidth = 128, initialHeight = 128)
+                use boxMesh = ctx.UploadMesh (Primitives.unitBox ())
+                use panelBatch = ctx.CreateBatch (boxMesh, BlendMode.AlphaBlend, false)
+                use lineBatch = ctx.CreateLineBatch ()
+
+                panelBatch.UpdateInstances ((Axis3D.panelInstances frame).Span)
+                lineBatch.UpdateVertices ((Axis3D.lineVertices frame).Span)
+
+                let metrics =
+                    ScenePass.create cam
+                    |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                    |> ScenePass.withBatches [| panelBatch |]
+                    |> ScenePass.withLines [| lineBatch |]
+                    |> WgpuContext.render ctx
+
+                Expect.equal metrics.InstanceCount 3 "3 back wall panels rendered"
+                let hasVisible = ctx.RgbaPixels |> Array.chunkBySize 4 |> Array.exists (fun px -> px[0] > 5uy || px[1] > 5uy || px[2] > 5uy)
+                Expect.isTrue hasVisible "axis panels/lines produce non-black pixels on GPU"
+
+            testCase "Axis3D configuration toggles, TimeUtc formatting, Protrusions defaults, and invalid argument guards"
+            <| fun () ->
+                Expect.equal Protrusions.defaultValue { Left = 36.0; Right = 36.0; Top = 28.0; Bottom = 32.0 } "Protrusions.defaultValue"
+
+                // BoxAspect.Data with one zero-span axis & all-constant fallback
+                let dataOneZero =
+                    Scale3D.create
+                        BoxAspect.Data
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (0.0, 2.0))
+                        (AxisScale3D.linear (5.0, 5.0))
+                        (AxisScale3D.linear (0.0, 1.0))
+
+                expectVec3Close 1e-5f (Scale3D.worldExtents dataOneZero) (Vector3 (2.0f, 1.0f, 0.0f)) "Data keeps zero extent on constant axis"
+                Expect.isGreaterThan (Scale3D.fitRadius dataOneZero) 0.0f "Data with one constant axis has positive fitRadius"
+                expectPoint3Close 1e-6 (Scale3D.invert dataOneZero (Vector3.Zero)) (Point3.create 1.0 5.0 0.5) "Data zero extent inverts without NaN"
+
+                let allConst = Scale3D.create BoxAspect.Data UpAxis.ZUp (AxisScale3D.linear (5.0, 5.0)) (AxisScale3D.linear (5.0, 5.0)) (AxisScale3D.linear (5.0, 5.0))
+                expectVec3Close 1e-5f (Scale3D.worldExtents allConst) (Vector3 (2.0f, 4.0f / 3.0f, 2.0f)) "all-constant Data falls back to ChartDefault"
+                Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float (Scale3D.fitRadius allConst)) (Bounds3.boundingRadius (Scale3D.worldBounds allConst)) "fitRadius matches worldBounds radius"
+
+                // Validation guards
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () ->
+                    Scale3D.create (BoxAspect.Manual (0.0, 1.0, 1.0)) UpAxis.ZUp (AxisScale3D.linear (0.0, 1.0)) (AxisScale3D.linear (0.0, 1.0)) (AxisScale3D.linear (0.0, 1.0)) |> ignore)
+                    "Manual rejects non-positive width"
+
+                Expect.throwsT<ArgumentException> (fun () ->
+                    Scale3D.invert allConst (Vector3 (Single.NaN, 0.0f, 0.0f)) |> ignore)
+                    "invert rejects non-finite vector"
+
+                let tScale =
+                    Scale3D.create
+                        BoxAspect.ChartDefault
+                        UpAxis.ZUp
+                        (AxisScale3D.timeUtc (DateTimeOffset (2026, 1, 1, 0, 0, 0, TimeSpan.Zero), DateTimeOffset (2026, 1, 11, 0, 0, 0, TimeSpan.Zero)))
+                        (AxisScale3D.linear (0.0, 10.0))
+                        (AxisScale3D.linear (0.0, 10.0))
+
+                let cam = Camera3D.orbitPerspectiveness Vector3.Zero 35.0f 25.0f (Scale3D.fitRadius tScale) 0.0f
+                let baseSpec = Axis3D.defaultSpec tScale
+                let baseFrame = Axis3D.build baseSpec 640 480 cam
+                let frontFrame = Axis3D.build { baseSpec with ShowFrontSpines = true } 640 480 cam
+                Expect.equal (Axis3D.lineVertices frontFrame).Length ((Axis3D.lineVertices baseFrame).Length + 6) "ShowFrontSpines adds 3 front edges (6 vertices)"
+
+                let noXPanelFrame = Axis3D.build { baseSpec with X = { baseSpec.X with ShowPanel = false } } 640 480 cam
+                Expect.equal (Axis3D.panelInstances noXPanelFrame).Length 2 "ShowPanel = false omits 1 back panel"
+
+                let customFmtSpec =
+                    { baseSpec with
+                        Y = { baseSpec.Y with FormatTick = Some (fun v -> $"y={int v}") }
+                        Z = { baseSpec.Z with ShowGrid = false }
+                    }
+
+                let customFrame = Axis3D.build customFmtSpec 640 480 cam
+                let yLabels = Axis3D.labels customFrame |> Seq.filter (fun l -> l.Axis = AxisId3D.Y && not l.IsTitle) |> Seq.map _.Text |> Seq.toList
+                Expect.isTrue (yLabels |> List.exists (fun s -> s.StartsWith "y=")) "FormatTick custom formatter applied"
+
+                let xLabels = Axis3D.labels customFrame |> Seq.filter (fun l -> l.Axis = AxisId3D.X && not l.IsTitle) |> Seq.map _.Text |> Seq.toList
+                Expect.isTrue (xLabels |> List.exists (fun s -> s.StartsWith "2026-")) "TimeUtc formats ISO-date ticks"
+
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Axis3D.build baseSpec 0 480 cam |> ignore) "rejects zero viewportWidth"
+                Expect.throwsT<ArgumentException> (fun () -> Axis3D.build baseSpec 640 480 { cam with Position = cam.Target } |> ignore) "rejects Position = Target"
+        ]

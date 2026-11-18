@@ -8,6 +8,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Contracts3D.fs" />
+    <Compile Include="Scale3D.fs" />
+    <Compile Include="Axis3D.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />

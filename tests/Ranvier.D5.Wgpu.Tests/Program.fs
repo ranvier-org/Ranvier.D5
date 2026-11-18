@@ -88,4 +88,12 @@ let contracts3DTests =
 
 [<EntryPoint>]
 let main args =
-    runTestsWithCLIArgs [] args contracts3DTests
+    let allTests =
+        testList
+            "Ranvier.D5.Wgpu"
+            [
+                contracts3DTests
+                ScaleAxisTests.scaleAxisTests
+            ]
+
+    runTestsWithCLIArgs [] args allTests
