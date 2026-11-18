@@ -139,11 +139,172 @@ module internal SimdMath =
 #endif
 
     let zeroMeanInPlace (x: float[]) (length: int) : unit =
+#if FABLE_COMPILER
         if length > 0 then
             let mutable sum = 0.
             for i = 0 to length - 1 do sum <- sum + x[i]
             let mean = sum / float length
             for i = 0 to length - 1 do x[i] <- x[i] - mean
+#else
+        if length > 0 then
+            let rx = &MemoryMarshal.GetArrayDataReference(x)
+            let ulen = uint32 length
+            let mutable i = 0u
+            let mutable sum = 0.
+            if Vector512.IsHardwareAccelerated && Vector512<float>.IsSupported then
+                let step = uint32 Vector512<float>.Count
+                let mutable acc = Vector512<float>.Zero
+                while i + step <= ulen do
+                    acc <- acc + Vector512.LoadUnsafe(&rx, unativeint i)
+                    i <- i + step
+                sum <- Vector512.Sum(acc)
+            elif Vector256.IsHardwareAccelerated && Vector256<float>.IsSupported then
+                let step = uint32 Vector256<float>.Count
+                let mutable acc = Vector256<float>.Zero
+                while i + step <= ulen do
+                    acc <- acc + Vector256.LoadUnsafe(&rx, unativeint i)
+                    i <- i + step
+                sum <- Vector256.Sum(acc)
+            elif Vector128.IsHardwareAccelerated && Vector128<float>.IsSupported then
+                let step = uint32 Vector128<float>.Count
+                let mutable acc = Vector128<float>.Zero
+                while i + step <= ulen do
+                    acc <- acc + Vector128.LoadUnsafe(&rx, unativeint i)
+                    i <- i + step
+                sum <- Vector128.Sum(acc)
+            let mutable idx = int i
+            while idx < length do
+                sum <- sum + x[idx]
+                idx <- idx + 1
+            let mean = sum / float length
+            let mutable j = 0u
+            if Vector512.IsHardwareAccelerated && Vector512<float>.IsSupported then
+                let step = uint32 Vector512<float>.Count
+                let vm = Vector512.Create(mean)
+                while j + step <= ulen do
+                    (Vector512.LoadUnsafe(&rx, unativeint j) - vm).StoreUnsafe(&rx, unativeint j)
+                    j <- j + step
+            elif Vector256.IsHardwareAccelerated && Vector256<float>.IsSupported then
+                let step = uint32 Vector256<float>.Count
+                let vm = Vector256.Create(mean)
+                while j + step <= ulen do
+                    (Vector256.LoadUnsafe(&rx, unativeint j) - vm).StoreUnsafe(&rx, unativeint j)
+                    j <- j + step
+            elif Vector128.IsHardwareAccelerated && Vector128<float>.IsSupported then
+                let step = uint32 Vector128<float>.Count
+                let vm = Vector128.Create(mean)
+                while j + step <= ulen do
+                    (Vector128.LoadUnsafe(&rx, unativeint j) - vm).StoreUnsafe(&rx, unativeint j)
+                    j <- j + step
+            let mutable jdx = int j
+            while jdx < length do
+                x[jdx] <- x[jdx] - mean
+                jdx <- jdx + 1
+#endif
+
+    let accumRowAndSum (r: float[]) (rowSum: float[]) (length: int) : float =
+#if FABLE_COMPILER
+        let mutable sum = 0.
+        for i = 0 to length - 1 do
+            let v = r[i]
+            sum <- sum + v
+            rowSum[i] <- rowSum[i] + v
+        sum
+#else
+        if length <= 0 then 0.
+        else
+            let rr = &MemoryMarshal.GetArrayDataReference(r)
+            let rs = &MemoryMarshal.GetArrayDataReference(rowSum)
+            let ulen = uint32 length
+            let mutable i = 0u
+            let mutable sum = 0.
+            if Vector512.IsHardwareAccelerated && Vector512<float>.IsSupported then
+                let step = uint32 Vector512<float>.Count
+                let mutable acc = Vector512<float>.Zero
+                while i + step <= ulen do
+                    let off = unativeint i
+                    let vr = Vector512.LoadUnsafe(&rr, off)
+                    let vs = Vector512.LoadUnsafe(&rs, off)
+                    (vs + vr).StoreUnsafe(&rs, off)
+                    acc <- acc + vr
+                    i <- i + step
+                sum <- Vector512.Sum(acc)
+            elif Vector256.IsHardwareAccelerated && Vector256<float>.IsSupported then
+                let step = uint32 Vector256<float>.Count
+                let mutable acc = Vector256<float>.Zero
+                while i + step <= ulen do
+                    let off = unativeint i
+                    let vr = Vector256.LoadUnsafe(&rr, off)
+                    let vs = Vector256.LoadUnsafe(&rs, off)
+                    (vs + vr).StoreUnsafe(&rs, off)
+                    acc <- acc + vr
+                    i <- i + step
+                sum <- Vector256.Sum(acc)
+            elif Vector128.IsHardwareAccelerated && Vector128<float>.IsSupported then
+                let step = uint32 Vector128<float>.Count
+                let mutable acc = Vector128<float>.Zero
+                while i + step <= ulen do
+                    let off = unativeint i
+                    let vr = Vector128.LoadUnsafe(&rr, off)
+                    let vs = Vector128.LoadUnsafe(&rs, off)
+                    (vs + vr).StoreUnsafe(&rs, off)
+                    acc <- acc + vr
+                    i <- i + step
+                sum <- Vector128.Sum(acc)
+            let mutable idx = int i
+            while idx < length do
+                let v = r[idx]
+                sum <- sum + v
+                rowSum[idx] <- rowSum[idx] + v
+                idx <- idx + 1
+            sum
+#endif
+
+    let doubleCenterRowInPlace (r: float[]) (rowMean: float[]) (offset: float) (length: int) : unit =
+#if FABLE_COMPILER
+        for i = 0 to length - 1 do
+            r[i] <- -0.5 * (r[i] - rowMean[i] + offset)
+#else
+        if length > 0 then
+            let rr = &MemoryMarshal.GetArrayDataReference(r)
+            let rm = &MemoryMarshal.GetArrayDataReference(rowMean)
+            let ulen = uint32 length
+            let mutable i = 0u
+            if Vector512.IsHardwareAccelerated && Vector512<float>.IsSupported then
+                let step = uint32 Vector512<float>.Count
+                let vOff = Vector512.Create(offset)
+                let vScale = Vector512.Create(-0.5)
+                while i + step <= ulen do
+                    let off = unativeint i
+                    let vr = Vector512.LoadUnsafe(&rr, off)
+                    let vrm = Vector512.LoadUnsafe(&rm, off)
+                    ((vr - vrm + vOff) * vScale).StoreUnsafe(&rr, off)
+                    i <- i + step
+            elif Vector256.IsHardwareAccelerated && Vector256<float>.IsSupported then
+                let step = uint32 Vector256<float>.Count
+                let vOff = Vector256.Create(offset)
+                let vScale = Vector256.Create(-0.5)
+                while i + step <= ulen do
+                    let off = unativeint i
+                    let vr = Vector256.LoadUnsafe(&rr, off)
+                    let vrm = Vector256.LoadUnsafe(&rm, off)
+                    ((vr - vrm + vOff) * vScale).StoreUnsafe(&rr, off)
+                    i <- i + step
+            elif Vector128.IsHardwareAccelerated && Vector128<float>.IsSupported then
+                let step = uint32 Vector128<float>.Count
+                let vOff = Vector128.Create(offset)
+                let vScale = Vector128.Create(-0.5)
+                while i + step <= ulen do
+                    let off = unativeint i
+                    let vr = Vector128.LoadUnsafe(&rr, off)
+                    let vrm = Vector128.LoadUnsafe(&rm, off)
+                    ((vr - vrm + vOff) * vScale).StoreUnsafe(&rr, off)
+                    i <- i + step
+            let mutable idx = int i
+            while idx < length do
+                r[idx] <- -0.5 * (r[idx] - rowMean[idx] + offset)
+                idx <- idx + 1
+#endif
 
 /// <summary>Compressed Sparse Row (CSR) directed and symmetric graph representation over dense 0..N-1 indices.</summary>
 type internal CsrGraph =
@@ -170,6 +331,137 @@ type internal CoarseLevel =
       FineToCoarse: int[]
       Mass: float[]
       Radius: float[] }
+
+[<Struct>]
+type internal FlatQuadNode2D =
+    val MinX: float
+    val MinY: float
+    val MaxX: float
+    val MaxY: float
+    val Cx: float
+    val Cy: float
+    val Mass: float
+    val ItemStart: int
+    val ItemCount: int
+    val FirstChild: int
+    val ChildCount: int
+    new(minX, minY, maxX, maxY, cx, cy, mass, itemStart, itemCount, firstChild, childCount) =
+        { MinX = minX; MinY = minY; MaxX = maxX; MaxY = maxY
+          Cx = cx; Cy = cy; Mass = mass
+          ItemStart = itemStart; ItemCount = itemCount
+          FirstChild = firstChild; ChildCount = childCount }
+
+type internal BhQuadWorkspace2D =
+    { mutable Nodes: FlatQuadNode2D[]
+      mutable NodeCount: int
+      Perm: int[]
+      Scratch: int[]
+      Stack: int[] }
+
+module internal BhQuadtree2D =
+    let inline private interp a b t =
+        if (a >= 0.) = (b >= 0.) then a + (b - a) * t else a * (1. - t) + b * t
+
+    let create (capacity: int) : BhQuadWorkspace2D =
+        let cap = max 16 capacity
+        { Nodes = Array.zeroCreate<FlatQuadNode2D> (max 32 (cap / 2 + 16))
+          NodeCount = 0
+          Perm = Array.zeroCreate<int> cap
+          Scratch = Array.zeroCreate<int> cap
+          Stack = Array.zeroCreate<int> 384 }
+
+    // Verified by Rocq: quadtree_leaf_count_conservation & flat_cell_children_contiguous_slice_exact
+    let rebuildInPlace
+        (ws: BhQuadWorkspace2D)
+        (token: System.Threading.CancellationToken)
+        (xs: float[])
+        (ys: float[])
+        (masses: float[])
+        (count: int)
+        : unit =
+        if count <= 0 then
+            ws.NodeCount <- 0
+        else
+            let perm = ws.Perm
+            let scratch = ws.Scratch
+            for i = 0 to count - 1 do perm[i] <- i
+            ws.NodeCount <- 1
+
+            let rec fillSlot (slot: int) (depth: int) (offset: int) (len: int) =
+                SimdMath.check token slot
+                let i0 = perm[offset]
+                let mutable x0, y0 = xs[i0], ys[i0]
+                let mutable x1, y1 = x0, y0
+                let mutable total, cx, cy = 0., 0., 0.
+                for k = 0 to len - 1 do
+                    let idx = perm[offset + k]
+                    let px, py = xs[idx], ys[idx]
+                    let pm = masses[idx]
+                    if px < x0 then x0 <- px
+                    if py < y0 then y0 <- py
+                    if px > x1 then x1 <- px
+                    if py > y1 then y1 <- py
+                    if pm > 0. then
+                        let next = total + pm
+                        let t = pm / next
+                        cx <- interp cx px t
+                        cy <- interp cy py t
+                        total <- next
+
+                let mx, my = interp x0 x1 0.5, interp y0 y1 0.5
+                let sx, sy = (mx > x0 && mx < x1), (my > y0 && my < y1)
+                let fcx, fcy = if total = 0. then mx, my else cx, cy
+
+                if len <= 8 || depth >= 64 || not (sx || sy) then
+                    ws.Nodes[slot] <- FlatQuadNode2D(x0, y0, x1, y1, fcx, fcy, total, offset, len, -1, 0)
+                else
+                    let mutable c0, c1, c2, c3 = 0, 0, 0, 0
+                    for k = 0 to len - 1 do
+                        let idx = perm[offset + k]
+                        let q = (if sx && xs[idx] >= mx then 1 else 0) + (if sy && ys[idx] >= my then 2 else 0)
+                        match q with
+                        | 0 -> c0 <- c0 + 1
+                        | 1 -> c1 <- c1 + 1
+                        | 2 -> c2 <- c2 + 1
+                        | _ -> c3 <- c3 + 1
+
+                    let childCount =
+                        (if c0 > 0 then 1 else 0) + (if c1 > 0 then 1 else 0) +
+                        (if c2 > 0 then 1 else 0) + (if c3 > 0 then 1 else 0)
+
+                    if childCount <= 1 then
+                        ws.Nodes[slot] <- FlatQuadNode2D(x0, y0, x1, y1, fcx, fcy, total, offset, len, -1, 0)
+                    else
+                        let o0 = 0
+                        let o1 = c0
+                        let o2 = o1 + c1
+                        let o3 = o2 + c2
+                        let mutable w0, w1, w2, w3 = o0, o1, o2, o3
+                        for k = 0 to len - 1 do
+                            let idx = perm[offset + k]
+                            let q = (if sx && xs[idx] >= mx then 1 else 0) + (if sy && ys[idx] >= my then 2 else 0)
+                            match q with
+                            | 0 -> scratch[w0] <- idx; w0 <- w0 + 1
+                            | 1 -> scratch[w1] <- idx; w1 <- w1 + 1
+                            | 2 -> scratch[w2] <- idx; w2 <- w2 + 1
+                            | _ -> scratch[w3] <- idx; w3 <- w3 + 1
+
+                        Array.Copy(scratch, 0, perm, offset, len)
+                        let firstChild = ws.NodeCount
+                        if ws.Nodes.Length < firstChild + childCount then
+                            let grown = Array.zeroCreate<FlatQuadNode2D> (max (firstChild + childCount) (ws.Nodes.Length * 2))
+                            Array.Copy(ws.Nodes, 0, grown, 0, ws.NodeCount)
+                            ws.Nodes <- grown
+                        ws.NodeCount <- firstChild + childCount
+                        ws.Nodes[slot] <- FlatQuadNode2D(x0, y0, x1, y1, fcx, fcy, total, offset, 0, firstChild, childCount)
+
+                        let mutable cw = firstChild
+                        if c0 > 0 then fillSlot cw (depth + 1) (offset + o0) c0; cw <- cw + 1
+                        if c1 > 0 then fillSlot cw (depth + 1) (offset + o1) c1; cw <- cw + 1
+                        if c2 > 0 then fillSlot cw (depth + 1) (offset + o2) c2; cw <- cw + 1
+                        if c3 > 0 then fillSlot cw (depth + 1) (offset + o3) c3
+
+            fillSlot 0 0 0 count
 
 module internal GraphKernels =
     let buildCsr (eff: EffectiveDiagram) : CsrGraph =
@@ -210,32 +502,96 @@ module internal GraphKernels =
             inEdges[inCursor[v]] <- e
             inCursor[v] <- inCursor[v] + 1
 
-        // Build deduplicated symmetric adjacency for shortest-path, component, and coarsening kernels.
-        let adjMaps = Array.init n (fun _ -> Dictionary<int, float>())
+        // Build deduplicated symmetric adjacency in flat arrays without per-vertex Dictionaries.
+        let rawUndirDeg = Array.zeroCreate<int> n
+        for e = 0 to m - 1 do
+            let u, v = src[e], dst[e]
+            if u <> v then
+                rawUndirDeg[u] <- rawUndirDeg[u] + 1
+                rawUndirDeg[v] <- rawUndirDeg[v] + 1
+
+        let rawOffsets = Array.zeroCreate<int> (n + 1)
+        for i = 0 to n - 1 do
+            rawOffsets[i + 1] <- rawOffsets[i] + rawUndirDeg[i]
+        let totalRaw = rawOffsets[n]
+        let rawTargets = Array.zeroCreate<int> totalRaw
+        let rawWeights = Array.zeroCreate<float> totalRaw
+        let rawCursor = Array.copy rawOffsets
         for e = 0 to m - 1 do
             let u, v = src[e], dst[e]
             if u <> v then
                 let w = wt[e]
-                match adjMaps[u].TryGetValue v with
-                | true, prev -> if w > prev then adjMaps[u][v] <- w
-                | _ -> adjMaps[u].Add(v, w)
-                match adjMaps[v].TryGetValue u with
-                | true, prev -> if w > prev then adjMaps[v][u] <- w
-                | _ -> adjMaps[v].Add(u, w)
+                let cu = rawCursor[u]
+                rawTargets[cu] <- v
+                rawWeights[cu] <- w
+                rawCursor[u] <- cu + 1
+                let cv = rawCursor[v]
+                rawTargets[cv] <- u
+                rawWeights[cv] <- w
+                rawCursor[v] <- cv + 1
 
         let undirOffsets = Array.zeroCreate<int> (n + 1)
+        let mutable writePos = 0
         for i = 0 to n - 1 do
-            undirOffsets[i + 1] <- undirOffsets[i] + adjMaps[i].Count
-        let totalUndir = undirOffsets[n]
-        let undirTargets = Array.zeroCreate<int> totalUndir
-        let undirWeights = Array.zeroCreate<float> totalUndir
-        for i = 0 to n - 1 do
-            let pairs = adjMaps[i] |> Seq.toArray
-            Array.Sort(pairs, Comparer<KeyValuePair<int, float>>.Create(fun a b -> compare a.Key b.Key))
-            let baseIdx = undirOffsets[i]
-            for k = 0 to pairs.Length - 1 do
-                undirTargets[baseIdx + k] <- pairs[k].Key
-                undirWeights[baseIdx + k] <- pairs[k].Value
+            undirOffsets[i] <- writePos
+            let start = rawOffsets[i]
+            let stop = rawOffsets[i + 1]
+            let deg = stop - start
+            if deg = 1 then
+                rawTargets[writePos] <- rawTargets[start]
+                rawWeights[writePos] <- rawWeights[start]
+                writePos <- writePos + 1
+            elif deg > 1 then
+                if deg <= 32 then
+                    for a = start + 1 to stop - 1 do
+                        let kt = rawTargets[a]
+                        let kw = rawWeights[a]
+                        let mutable b = a - 1
+                        while b >= start && rawTargets[b] > kt do
+                            rawTargets[b + 1] <- rawTargets[b]
+                            rawWeights[b + 1] <- rawWeights[b]
+                            b <- b - 1
+                        rawTargets[b + 1] <- kt
+                        rawWeights[b + 1] <- kw
+                else
+#if FABLE_COMPILER
+                    let mutable gap = deg / 2
+                    while gap > 0 do
+                        for a = start + gap to stop - 1 do
+                            let kt = rawTargets[a]
+                            let kw = rawWeights[a]
+                            let mutable b = a
+                            while b >= start + gap && rawTargets[b - gap] > kt do
+                                rawTargets[b] <- rawTargets[b - gap]
+                                rawWeights[b] <- rawWeights[b - gap]
+                                b <- b - gap
+                            rawTargets[b] <- kt
+                            rawWeights[b] <- kw
+                        gap <- gap / 2
+#else
+                    Array.Sort(rawTargets, rawWeights, start, deg)
+#endif
+                let mutable prevT = rawTargets[start]
+                let mutable maxW = rawWeights[start]
+                for k = start + 1 to stop - 1 do
+                    let curT = rawTargets[k]
+                    let curW = rawWeights[k]
+                    if curT = prevT then
+                        if curW > maxW then maxW <- curW
+                    else
+                        rawTargets[writePos] <- prevT
+                        rawWeights[writePos] <- maxW
+                        writePos <- writePos + 1
+                        prevT <- curT
+                        maxW <- curW
+                rawTargets[writePos] <- prevT
+                rawWeights[writePos] <- maxW
+                writePos <- writePos + 1
+        undirOffsets[n] <- writePos
+
+        let undirTargets, undirWeights =
+            if writePos = totalRaw then rawTargets, rawWeights
+            else Array.sub rawTargets 0 writePos, Array.sub rawWeights 0 writePos
 
         { NodeCount = n
           EdgeCount = m
@@ -250,6 +606,101 @@ module internal GraphKernels =
           UndirOffsets = undirOffsets
           UndirTargets = undirTargets
           UndirWeights = undirWeights }
+
+    /// <summary>Finds all groups in <c>eff</c> containing at least one descendant node in <c>members</c> in O(|members| + G).</summary>
+    let filterSubGroups (eff: EffectiveDiagram) (members: int[]) : (DiagramGroup * int)[] =
+        let gCount = eff.Groups.Length
+        if gCount = 0 then [||]
+        else
+            let gIdx = Dictionary<string, int>(StringComparer.Ordinal)
+            for gi = 0 to gCount - 1 do gIdx.Add(eff.Groups[gi].Id, gi)
+            let hasMember = Array.zeroCreate<bool> gCount
+            for li = 0 to members.Length - 1 do
+                match eff.Nodes[members[li]].ParentGroup with
+                | Some gid ->
+                    match gIdx.TryGetValue gid with
+                    | true, gi -> hasMember[gi] <- true
+                    | _ -> ()
+                | None -> ()
+            // eff.Groups is sorted ascending by depth, so walking backward propagates membership from nested groups to ancestors in O(G).
+            for gi = gCount - 1 downto 0 do
+                if hasMember[gi] then
+                    match eff.Groups[gi].ParentGroup with
+                    | Some pid ->
+                        match gIdx.TryGetValue pid with
+                        | true, pi -> hasMember[pi] <- true
+                        | _ -> ()
+                    | None -> ()
+            let mutable hitCount = 0
+            for gi = 0 to gCount - 1 do if hasMember[gi] then hitCount <- hitCount + 1
+            let res = Array.zeroCreate<DiagramGroup * int> hitCount
+            let mutable w = 0
+            for gi = 0 to gCount - 1 do
+                if hasMember[gi] then
+                    res[w] <- (eff.Groups[gi], eff.GroupDepth[gi])
+                    w <- w + 1
+            res
+
+    /// <summary>Computes local member index arrays <c>0 .. members.Length - 1</c> for each group in <c>subGroups</c> in O(|members| * depth + G).</summary>
+    let subGroupMemberLists (eff: EffectiveDiagram) (members: int[]) (subGroups: (DiagramGroup * int)[]) : int[][] =
+        let gCount = subGroups.Length
+        if gCount = 0 then [||]
+        else
+            let gIdx = Dictionary<string, int>(StringComparer.Ordinal)
+            for gi = 0 to gCount - 1 do gIdx.Add((fst subGroups[gi]).Id, gi)
+            let gParent = Array.create gCount -1
+            for gi = 0 to gCount - 1 do
+                match (fst subGroups[gi]).ParentGroup with
+                | Some pid ->
+                    match gIdx.TryGetValue pid with
+                    | true, pi -> gParent[gi] <- pi
+                    | _ -> ()
+                | None -> ()
+            let buckets = Array.init gCount (fun _ -> ResizeArray<int>())
+            for li = 0 to members.Length - 1 do
+                match eff.Nodes[members[li]].ParentGroup with
+                | Some gid ->
+                    match gIdx.TryGetValue gid with
+                    | true, startGi ->
+                        let mutable cur = startGi
+                        while cur >= 0 do
+                            buckets[cur].Add li
+                            cur <- gParent[cur]
+                    | _ -> ()
+                | None -> ()
+            buckets |> Array.map (fun b -> b.ToArray())
+
+    /// <summary>Slices <c>eff</c> to a connected component, reusing <c>eff</c> zero-copy when the component covers the entire graph.</summary>
+    let sliceComponentEff (eff: EffectiveDiagram) (csr: CsrGraph) (members: int[]) (subGroups: (DiagramGroup * int)[]) : EffectiveDiagram =
+        let subN = members.Length
+        if subN = eff.Nodes.Length && subGroups.Length = eff.Groups.Length then
+            if eff.Constraints.IsEmpty then eff
+            else { eff with Constraints = [] }
+        else
+            let inComp = Array.zeroCreate<bool> eff.Nodes.Length
+            for li = 0 to subN - 1 do inComp[members[li]] <- true
+            let subNodes = Array.init subN (fun li -> eff.Nodes[members[li]])
+            let mutable edgeHit = 0
+            for e = 0 to csr.EdgeCount - 1 do
+                if inComp[csr.Src[e]] && inComp[csr.Dst[e]] then edgeHit <- edgeHit + 1
+            let subAssocs = Array.zeroCreate<Association> edgeHit
+            let mutable ew = 0
+            for e = 0 to csr.EdgeCount - 1 do
+                if inComp[csr.Src[e]] && inComp[csr.Dst[e]] then
+                    subAssocs[ew] <- eff.Associations[e]
+                    ew <- ew + 1
+#if FABLE_COMPILER
+            let subMap = Dictionary<string, int>(StringComparer.Ordinal)
+#else
+            let subMap = Dictionary<string, int>(subN, StringComparer.Ordinal)
+#endif
+            for li = 0 to subN - 1 do subMap.Add(subNodes[li].Id, li)
+            { Nodes = subNodes
+              Groups = Array.init subGroups.Length (fun gi -> fst subGroups[gi])
+              GroupDepth = Array.init subGroups.Length (fun gi -> snd subGroups[gi])
+              Associations = subAssocs
+              ReversedIdMap = subMap
+              Constraints = [] }
 
     /// <summary>Finds connected components in O(V + E), also keeping nodes sharing a common compound group in the same visual component.</summary>
     let connectedComponents (eff: EffectiveDiagram) (csr: CsrGraph) : int[] * int[][] =
@@ -419,8 +870,13 @@ module internal GraphKernels =
         : int[] * float[][] =
         let subN = members.Length
         let k = min subN (max 1 maxPivots)
-        let globalToLocal = Dictionary<int, int>(subN)
-        for li = 0 to subN - 1 do globalToLocal.Add(members[li], li)
+        let isFull = (subN = csr.NodeCount)
+        let globalToLocal =
+            if isFull then [||]
+            else
+                let arr = Array.create csr.NodeCount -1
+                for li = 0 to subN - 1 do arr[members[li]] <- li
+                arr
 
         let pivots = Array.zeroCreate<int> k
         let dists = Array.init k (fun _ -> Array.create subN infinity)
@@ -434,20 +890,31 @@ module internal GraphKernels =
             let mutable tail = 0
             queue[tail] <- localStart
             tail <- tail + 1
-            while head < tail do
-                SimdMath.check token head
-                let lu = queue[head]
-                head <- head + 1
-                let dNext = targetRow[lu] + 1.
-                let gu = members[lu]
-                for idx = csr.UndirOffsets[gu] to csr.UndirOffsets[gu + 1] - 1 do
-                    let gv = csr.UndirTargets[idx]
-                    match globalToLocal.TryGetValue gv with
-                    | true, lv when targetRow[lv] = infinity ->
-                        targetRow[lv] <- dNext
-                        queue[tail] <- lv
-                        tail <- tail + 1
-                    | _ -> ()
+            if isFull then
+                while head < tail do
+                    SimdMath.check token head
+                    let u = queue[head]
+                    head <- head + 1
+                    let dNext = targetRow[u] + 1.
+                    for idx = csr.UndirOffsets[u] to csr.UndirOffsets[u + 1] - 1 do
+                        let v = csr.UndirTargets[idx]
+                        if targetRow[v] = infinity then
+                            targetRow[v] <- dNext
+                            queue[tail] <- v
+                            tail <- tail + 1
+            else
+                while head < tail do
+                    SimdMath.check token head
+                    let lu = queue[head]
+                    head <- head + 1
+                    let dNext = targetRow[lu] + 1.
+                    let gu = members[lu]
+                    for idx = csr.UndirOffsets[gu] to csr.UndirOffsets[gu + 1] - 1 do
+                        let lv = globalToLocal[csr.UndirTargets[idx]]
+                        if lv >= 0 && targetRow[lv] = infinity then
+                            targetRow[lv] <- dNext
+                            queue[tail] <- lv
+                            tail <- tail + 1
 
         // Choose first pivot by peripheral sweep from local vertex 0
         if k > 0 then
@@ -461,8 +928,7 @@ module internal GraphKernels =
                     first <- li
             pivots[0] <- first
             bfsFrom first dists[0]
-            for li = 0 to subN - 1 do
-                minDist[li] <- dists[0][li]
+            Array.blit dists[0] 0 minDist 0 subN
 
             for p = 1 to k - 1 do
                 token.ThrowIfCancellationRequested()
@@ -473,10 +939,11 @@ module internal GraphKernels =
                         best <- minDist[li]
                         nextPivot <- li
                 pivots[p] <- nextPivot
-                bfsFrom nextPivot dists[p]
+                let row = dists[p]
+                bfsFrom nextPivot row
                 for li = 0 to subN - 1 do
-                    if dists[p][li] < minDist[li] then
-                        minDist[li] <- dists[p][li]
+                    if row[li] < minDist[li] then
+                        minDist[li] <- row[li]
 
         pivots, dists
 
@@ -498,36 +965,27 @@ module internal GraphKernels =
         else
             let pivots, dists = componentPivotDistances token csr members maxPivots
             let k = pivots.Length
-            // Build double-centered matrix C (shape k rows x subN cols; transposed so each row is contiguous length subN for SIMD!).
-            // C[p][i] = -0.5 * (d^2 - rowMean_i - colMean_p + grandMean)
-            let cRows = Array.init k (fun p ->
-                let row = Array.zeroCreate<float> subN
+            // Reuse dists[p] in-place as double-centered matrix C (shape k rows x subN cols; contiguous length subN for SIMD!).
+            let fallbackD = float subN
+            for p = 0 to k - 1 do
                 let dRow = dists[p]
                 for i = 0 to subN - 1 do
-                    let d = if Double.IsFinite dRow[i] then dRow[i] else float subN
-                    row[i] <- d * d
-                row)
+                    let d = if Double.IsFinite dRow[i] then dRow[i] else fallbackD
+                    dRow[i] <- d * d
+            let cRows = dists
 
             let colMean = Array.zeroCreate<float> k // mean over subN for each pivot p
             let rowMean = Array.zeroCreate<float> subN // mean over k for each vertex i
             let mutable grandSum = 0.
+            let invSubN = 1. / float subN
             for p = 0 to k - 1 do
-                let mutable pSum = 0.
-                let r = cRows[p]
-                for i = 0 to subN - 1 do
-                    let v = r[i]
-                    pSum <- pSum + v
-                    rowMean[i] <- rowMean[i] + v
-                colMean[p] <- pSum / float subN
+                let pSum = SimdMath.accumRowAndSum cRows[p] rowMean subN
+                colMean[p] <- pSum * invSubN
                 grandSum <- grandSum + pSum
             let grandMean = grandSum / float (k * subN)
-            for i = 0 to subN - 1 do
-                rowMean[i] <- rowMean[i] / float k
+            SimdMath.scaleInPlace (1. / float k) rowMean subN
             for p = 0 to k - 1 do
-                let r = cRows[p]
-                let cm = colMean[p]
-                for i = 0 to subN - 1 do
-                    r[i] <- -0.5 * (r[i] - rowMean[i] - cm + grandMean)
+                SimdMath.doubleCenterRowInPlace cRows[p] rowMean (grandMean - colMean[p]) subN
 
             // Small k x k PSD matrix M = C * C^T (where C here is k x subN, so M[p,q] = dot(cRows[p], cRows[q])).
             let mMat = Array.init k (fun _ -> Array.zeroCreate<float> k)
@@ -830,7 +1288,8 @@ module internal GraphKernels =
 
     /// <summary>Places source, center and target association labels cleanly along a polyline waypoint chain.</summary>
     let placeLabelsOnWaypoints (assoc: Association) (pts: Point[]) : PositionedLabel option * PositionedLabel option * PositionedLabel option =
-        if pts.Length = 0 then None, None, None
+        if (assoc.SourceLabel.IsNone && assoc.CenterLabel.IsNone && assoc.TargetLabel.IsNone) || pts.Length = 0 then
+            None, None, None
         else
             let segLen = Array.init (max 0 (pts.Length - 1)) (fun i -> Double.Hypot(pts[i + 1].X - pts[i].X, pts[i + 1].Y - pts[i].Y))
             let totalLen = segLen |> Array.sum
@@ -881,67 +1340,64 @@ module internal GraphKernels =
         (reversedFlags: bool[] option)
         : RoutedAssociation list =
         let m = eff.Associations.Length
-        let pairCounts = Dictionary<string, int>(StringComparer.Ordinal)
-        let pairSeen = Dictionary<string, int>(StringComparer.Ordinal)
-        for e = 0 to m - 1 do
-            let a = eff.Associations[e]
-            let s, t = a.Source.NodeId, a.Target.NodeId
-            let key = if String.CompareOrdinal(s, t) <= 0 then s + "\u0000" + t else t + "\u0000" + s
-            match pairCounts.TryGetValue key with
-            | true, c -> pairCounts[key] <- c + 1
-            | _ -> pairCounts.Add(key, 1)
+        if m = 0 then []
+        else
+            let srcIdx = Array.zeroCreate<int> m
+            let dstIdx = Array.zeroCreate<int> m
+#if FABLE_COMPILER
+            let pairCounts = Dictionary<uint64, int>()
+#else
+            let pairCounts = Dictionary<uint64, int>(m)
+#endif
+            let mutable anyParallel = false
+            for e = 0 to m - 1 do
+                let a = eff.Associations[e]
+                let ui = eff.ReversedIdMap[a.Source.NodeId]
+                let vi = eff.ReversedIdMap[a.Target.NodeId]
+                srcIdx[e] <- ui
+                dstIdx[e] <- vi
+                if ui <> vi then
+                    let lo, hi = min ui vi, max ui vi
+                    let key = (uint64 lo <<< 32) ||| uint64 (uint32 hi)
+                    match pairCounts.TryGetValue key with
+                    | true, c ->
+                        pairCounts[key] <- c + 1
+                        anyParallel <- true
+                    | _ -> pairCounts.Add(key, 1)
 
-        let lookupPort (node: PositionedNode) (portId: string option) =
-            match portId with
-            | None -> None
-            | Some pid -> node.Ports |> List.tryFind (fun p -> p.Id = pid) |> Option.map (fun p -> p.Anchor)
+            let lookupPort (node: PositionedNode) (portId: string option) =
+                match portId with
+                | None -> None
+                | Some pid ->
+                    if node.Ports.IsEmpty then None
+                    else node.Ports |> List.tryFind (fun p -> p.Id = pid) |> Option.map (fun p -> p.Anchor)
 
-        [ for e = 0 to m - 1 do
-            let a = eff.Associations[e]
-            let ui = eff.ReversedIdMap[a.Source.NodeId]
-            let vi = eff.ReversedIdMap[a.Target.NodeId]
-            let uNode, vNode = nodes[ui], nodes[vi]
-            let rev = reversedFlags |> Option.map (fun flags -> flags[e]) |> Option.defaultValue false
-            if ui = vi then
-                // Clean corner self-loop
-                let b = uNode.Bounds
-                let rx = Bounds.x b + Bounds.width b
-                let ty = Bounds.y b
-                let p0 = lookupPort uNode a.Source.PortId |> Option.defaultValue (Point.create (rx - min 12. (Bounds.width b * 0.25)) ty)
-                let p3 = lookupPort uNode a.Target.PortId |> Option.defaultValue (Point.create rx (ty + min 12. (Bounds.height b * 0.35)))
-                let c1 = Point.create (rx + 22.) (ty - 24.)
-                let c2 = Point.create (rx + 26.) (ty + 18.)
-                let mid = Point.create (rx + 18.) (ty - 4.)
-                let wps = [ p0; mid; p3 ]
-                let path = Path.ofCommands [ MoveTo p0; CubicTo(c1, c2, p3) ]
-                let sLbl, mLbl, tLbl = placeLabelsOnWaypoints a (List.toArray wps)
-                yield
-                    { Id = a.Id
-                      Source = a.Source
-                      Target = a.Target
-                      Kind = a.Kind
-                      Waypoints = wps
-                      Path = path
-                      ReversedInCycle = rev
-                      SourceLabel = sLbl
-                      CenterLabel = mLbl
-                      TargetLabel = tLbl }
-            else
-                let s, t = a.Source.NodeId, a.Target.NodeId
-                let key = if String.CompareOrdinal(s, t) <= 0 then s + "\u0000" + t else t + "\u0000" + s
-                let totalParallel = pairCounts[key]
-                let slot =
-                    match pairSeen.TryGetValue key with
-                    | true, cur -> pairSeen[key] <- cur + 1; cur
-                    | _ -> pairSeen.Add(key, 1); 0
+            let outArr = Array.zeroCreate<RoutedAssociation> m
+#if FABLE_COMPILER
+            let pairSeen = if anyParallel then Dictionary<uint64, int>() else Unchecked.defaultof<_>
+#else
+            let pairSeen = if anyParallel then Dictionary<uint64, int>(m) else Unchecked.defaultof<_>
+#endif
 
-                let rawStart = lookupPort uNode a.Source.PortId |> Option.defaultValue (clipRectBoundary uNode.Bounds vNode.Center)
-                let rawEnd = lookupPort vNode a.Target.PortId |> Option.defaultValue (clipRectBoundary vNode.Bounds uNode.Center)
-                if totalParallel <= 1 then
-                    let wps = [ rawStart; rawEnd ]
-                    let path = Path.ofCommands [ MoveTo rawStart; LineTo rawEnd ]
-                    let sLbl, mLbl, tLbl = placeLabelsOnWaypoints a [| rawStart; rawEnd |]
-                    yield
+            for e = 0 to m - 1 do
+                let a = eff.Associations[e]
+                let ui, vi = srcIdx[e], dstIdx[e]
+                let uNode, vNode = nodes[ui], nodes[vi]
+                let rev = match reversedFlags with Some flags -> flags[e] | None -> false
+                let hasLabels = a.SourceLabel.IsSome || a.CenterLabel.IsSome || a.TargetLabel.IsSome
+                if ui = vi then
+                    let b = uNode.Bounds
+                    let rx = Bounds.x b + Bounds.width b
+                    let ty = Bounds.y b
+                    let p0 = lookupPort uNode a.Source.PortId |> Option.defaultValue (Point.create (rx - min 12. (Bounds.width b * 0.25)) ty)
+                    let p3 = lookupPort uNode a.Target.PortId |> Option.defaultValue (Point.create rx (ty + min 12. (Bounds.height b * 0.35)))
+                    let c1 = Point.create (rx + 22.) (ty - 24.)
+                    let c2 = Point.create (rx + 26.) (ty + 18.)
+                    let mid = Point.create (rx + 18.) (ty - 4.)
+                    let wps = [ p0; mid; p3 ]
+                    let path = Path.ofCommands [ MoveTo p0; CubicTo(c1, c2, p3) ]
+                    let sLbl, mLbl, tLbl = if hasLabels then placeLabelsOnWaypoints a [| p0; mid; p3 |] else None, None, None
+                    outArr[e] <-
                         { Id = a.Id
                           Source = a.Source
                           Target = a.Target
@@ -953,28 +1409,73 @@ module internal GraphKernels =
                           CenterLabel = mLbl
                           TargetLabel = tLbl }
                 else
-                    let offsetIndex = float slot - float (totalParallel - 1) * 0.5
-                    let dx, dy = rawEnd.X - rawStart.X, rawEnd.Y - rawStart.Y
-                    let dist = Double.Hypot(dx, dy)
-                    let nx, ny = if dist <= 1e-9 then 0., -1. else -dy / dist, dx / dist
-                    let signFlip = if String.CompareOrdinal(s, t) <= 0 then 1. else -1.
-                    let bend = offsetIndex * 18. * signFlip
-                    let ctrl = Point.create ((rawStart.X + rawEnd.X) * 0.5 + nx * bend) ((rawStart.Y + rawEnd.Y) * 0.5 + ny * bend)
-                    let midOnQuad = Point.create (0.25 * rawStart.X + 0.5 * ctrl.X + 0.25 * rawEnd.X) (0.25 * rawStart.Y + 0.5 * ctrl.Y + 0.25 * rawEnd.Y)
-                    let wps = [ rawStart; midOnQuad; rawEnd ]
-                    let path = Path.ofCommands [ MoveTo rawStart; QuadraticTo(ctrl, rawEnd) ]
-                    let sLbl, mLbl, tLbl = placeLabelsOnWaypoints a (List.toArray wps)
-                    yield
-                        { Id = a.Id
-                          Source = a.Source
-                          Target = a.Target
-                          Kind = a.Kind
-                          Waypoints = wps
-                          Path = path
-                          ReversedInCycle = rev
-                          SourceLabel = sLbl
-                          CenterLabel = mLbl
-                          TargetLabel = tLbl } ]
+                    let totalParallel, slot =
+                        if not anyParallel then 1, 0
+                        else
+                            let lo, hi = min ui vi, max ui vi
+                            let key = (uint64 lo <<< 32) ||| uint64 (uint32 hi)
+                            let tot = pairCounts[key]
+                            if tot <= 1 then 1, 0
+                            else
+                                let sl =
+                                    match pairSeen.TryGetValue key with
+                                    | true, cur -> pairSeen[key] <- cur + 1; cur
+                                    | _ -> pairSeen.Add(key, 1); 0
+                                tot, sl
+
+                    let rawStart =
+                        match a.Source.PortId with
+                        | None -> clipRectBoundary uNode.Bounds vNode.Center
+                        | Some _ -> lookupPort uNode a.Source.PortId |> Option.defaultValue (clipRectBoundary uNode.Bounds vNode.Center)
+                    let rawEnd =
+                        match a.Target.PortId with
+                        | None -> clipRectBoundary vNode.Bounds uNode.Center
+                        | Some _ -> lookupPort vNode a.Target.PortId |> Option.defaultValue (clipRectBoundary vNode.Bounds uNode.Center)
+
+                    if totalParallel <= 1 then
+                        let wps = [ rawStart; rawEnd ]
+                        let path = Path.ofCommands [ MoveTo rawStart; LineTo rawEnd ]
+                        let sLbl, mLbl, tLbl = if hasLabels then placeLabelsOnWaypoints a [| rawStart; rawEnd |] else None, None, None
+                        outArr[e] <-
+                            { Id = a.Id
+                              Source = a.Source
+                              Target = a.Target
+                              Kind = a.Kind
+                              Waypoints = wps
+                              Path = path
+                              ReversedInCycle = rev
+                              SourceLabel = sLbl
+                              CenterLabel = mLbl
+                              TargetLabel = tLbl }
+                    else
+                        let offsetIndex = float slot - float (totalParallel - 1) * 0.5
+                        let dx, dy = rawEnd.X - rawStart.X, rawEnd.Y - rawStart.Y
+                        let dist = sqrt (dx * dx + dy * dy)
+                        let nx, ny = if dist <= 1e-9 then 0., -1. else -dy / dist, dx / dist
+                        // eff.Nodes is sorted by ordinal Id, so ui <= vi <=> String.CompareOrdinal(s, t) <= 0!
+                        let signFlip = if ui <= vi then 1. else -1.
+                        let bend = offsetIndex * 18. * signFlip
+                        let ctrl = Point.create ((rawStart.X + rawEnd.X) * 0.5 + nx * bend) ((rawStart.Y + rawEnd.Y) * 0.5 + ny * bend)
+                        let midOnQuad = Point.create (0.25 * rawStart.X + 0.5 * ctrl.X + 0.25 * rawEnd.X) (0.25 * rawStart.Y + 0.5 * ctrl.Y + 0.25 * rawEnd.Y)
+                        let wps = [ rawStart; midOnQuad; rawEnd ]
+                        let path = Path.ofCommands [ MoveTo rawStart; QuadraticTo(ctrl, rawEnd) ]
+                        let sLbl, mLbl, tLbl = if hasLabels then placeLabelsOnWaypoints a [| rawStart; midOnQuad; rawEnd |] else None, None, None
+                        outArr[e] <-
+                            { Id = a.Id
+                              Source = a.Source
+                              Target = a.Target
+                              Kind = a.Kind
+                              Waypoints = wps
+                              Path = path
+                              ReversedInCycle = rev
+                              SourceLabel = sLbl
+                              CenterLabel = mLbl
+                              TargetLabel = tLbl }
+
+            let mutable res = []
+            for e = m - 1 downto 0 do
+                res <- outArr[e] :: res
+            res
 
     /// <summary>Computes the enclosing <c>Bounds</c> of nodes, groups, route waypoints and labels.</summary>
     let computeDiagramBounds
@@ -984,19 +1485,34 @@ module internal GraphKernels =
         (assocs: RoutedAssociation list)
         : Bounds =
         let mutable hasAny = false
-        let mutable acc = Bounds.create 0. 0. 0. 0.
-        let includeBox b =
-            acc <- if not hasAny then (hasAny <- true; b) else Bounds.union acc b
-        let includePt (p: Point) =
-            includeBox (Bounds.create p.X p.Y 0. 0.)
+        let mutable minX = infinity
+        let mutable minY = infinity
+        let mutable maxX = -infinity
+        let mutable maxY = -infinity
+        let inline includeBox (b: Bounds) =
+            let x0 = Bounds.x b
+            let y0 = Bounds.y b
+            let x1 = x0 + Bounds.width b
+            let y1 = y0 + Bounds.height b
+            hasAny <- true
+            if x0 < minX then minX <- x0
+            if y0 < minY then minY <- y0
+            if x1 > maxX then maxX <- x1
+            if y1 > maxY then maxY <- y1
+        let inline includePt (p: Point) =
+            hasAny <- true
+            if p.X < minX then minX <- p.X
+            if p.Y < minY then minY <- p.Y
+            if p.X > maxX then maxX <- p.X
+            if p.Y > maxY then maxY <- p.Y
         for n in nodes do includeBox n.Bounds
         for g in groups do includeBox g.Bounds
         for a in assocs do
             for wp in a.Waypoints do includePt wp
-            a.SourceLabel |> Option.iter (fun l -> includeBox l.Bounds)
-            a.CenterLabel |> Option.iter (fun l -> includeBox l.Bounds)
-            a.TargetLabel |> Option.iter (fun l -> includeBox l.Bounds)
-        if hasAny then acc else fallback
+            match a.SourceLabel with Some l -> includeBox l.Bounds | None -> ()
+            match a.CenterLabel with Some l -> includeBox l.Bounds | None -> ()
+            match a.TargetLabel with Some l -> includeBox l.Bounds | None -> ()
+        if hasAny then Bounds.create minX minY (maxX - minX) (maxY - minY) else fallback
 
     /// <summary>Translates an entire <c>DiagramLayout2D</c> by <c>(dx, dy)</c>.</summary>
     let translateLayout (dx: float) (dy: float) (layout: DiagramLayout2D) : DiagramLayout2D =
@@ -1064,28 +1580,28 @@ type SpanningForest =
 /// <summary>Extracts rooted spanning trees and classifies backbone vs. cross-link associations over any <c>DiagramGraph</c>.</summary>
 [<RequireQualifiedAccess>]
 module SpanningTree =
-    /// <summary>Extracts a spanning forest from <c>graph</c> (resolving collapsed groups), optionally starting at <c>preferredRoot</c>.</summary>
-    let extract (strategy: SpanningTreeStrategy) (preferredRoot: string option) (graph: DiagramGraph) : SpanningForest =
-        let eff = DiagramGraph.effective graph
-        let csr = GraphKernels.buildCsr eff
+    /// <summary>Zero-Map/Set index-space spanning forest extractor returning <c>(rootIndices, parentIdx, childrenIdx, depthArr, isTreeAssoc)</c>.</summary>
+    let internal extractIndexed
+        (strategy: SpanningTreeStrategy)
+        (preferredRoot: string option)
+        (eff: EffectiveDiagram)
+        (csr: CsrGraph)
+        : int[] * int[] * int[][] * int[] * bool[] =
         let n = csr.NodeCount
+        let m = csr.EdgeCount
         if n = 0 then
-            { Roots = []
-              ParentOf = Map.empty
-              DepthOf = Map.empty
-              ChildrenOf = Map.empty
-              TreeAssociationIds = Set.empty
-              CrossAssociationIds = Set.empty }
+            [||], [||], [||], [||], [||]
         else
             let visited = Array.zeroCreate<bool> n
             let parentIdx = Array.create n -1
             let depthArr = Array.zeroCreate<int> n
-            let treeEdges = HashSet<string>(StringComparer.Ordinal)
+            let isTreeAssoc = Array.zeroCreate<bool> m
             let roots = ResizeArray<int>()
 
             // Candidate root priority: preferredRoot first, then InitialState, then highest (outDeg - inDeg), then ordinal index.
-            let rootPriority = Array.init n id
-            let score u =
+            // Pack (-score <<< 32) ||| uint32 u into int64 so primitive Array.Sort preserves exact tie-breaking with zero delegate allocations!
+            let packedPriority = Array.zeroCreate<int64> n
+            for u = 0 to n - 1 do
                 let outD = csr.OutOffsets[u + 1] - csr.OutOffsets[u]
                 let inD = csr.InOffsets[u + 1] - csr.InOffsets[u]
                 let kindBonus =
@@ -1093,32 +1609,35 @@ module SpanningTree =
                     | NodeKind.InitialState -> 1_000_000
                     | NodeKind.FinalState -> -100_000
                     | _ -> (if inD = 0 && outD > 0 then 50_000 else 0)
-                kindBonus + (outD - inD) * 16 + outD
+                let sc = kindBonus + (outD - inD) * 16 + outD
+                packedPriority[u] <- ((-int64 sc) <<< 32) ||| int64 (uint32 u)
+            Array.Sort(packedPriority)
 
-            Array.Sort(rootPriority, Comparer<int>.Create(fun a b ->
-                let c = compare (score b) (score a)
-                if c <> 0 then c else compare a b))
+            let prefIdx =
+                match preferredRoot with
+                | Some id ->
+                    match eff.ReversedIdMap.TryGetValue id with
+                    | true, idx -> idx
+                    | _ -> -1
+                | None -> -1
 
-            let startCandidates = ResizeArray<int>(n + 1)
-            preferredRoot
-            |> Option.bind (fun id ->
-                match eff.ReversedIdMap.TryGetValue id with
-                | true, idx -> Some idx
-                | _ -> None)
-            |> Option.iter startCandidates.Add
-            for idx in rootPriority do startCandidates.Add idx
+            let bfsQueue = if strategy = SpanningTreeStrategy.Bfs then Array.zeroCreate<int> n else [||]
 
-            for candidate in startCandidates do
+            let runFromRoot (candidate: int) =
                 if not visited[candidate] then
                     roots.Add candidate
                     match strategy with
                     | SpanningTreeStrategy.Bfs ->
                         visited[candidate] <- true
                         depthArr[candidate] <- 0
-                        let q = Queue<int>()
-                        q.Enqueue candidate
-                        while q.Count > 0 do
-                            let u = q.Dequeue()
+                        let mutable head = 0
+                        let mutable tail = 0
+                        bfsQueue[tail] <- candidate
+                        tail <- tail + 1
+                        while head < tail do
+                            let u = bfsQueue[head]
+                            head <- head + 1
+                            let nextD = depthArr[u] + 1
                             // First pass: forward outgoing associations
                             for idx = csr.OutOffsets[u] to csr.OutOffsets[u + 1] - 1 do
                                 let e = csr.OutEdges[idx]
@@ -1126,9 +1645,10 @@ module SpanningTree =
                                 if not visited[v] then
                                     visited[v] <- true
                                     parentIdx[v] <- u
-                                    depthArr[v] <- depthArr[u] + 1
-                                    treeEdges.Add eff.Associations[e].Id |> ignore
-                                    q.Enqueue v
+                                    depthArr[v] <- nextD
+                                    isTreeAssoc[e] <- true
+                                    bfsQueue[tail] <- v
+                                    tail <- tail + 1
                             // Second pass: incoming associations treated undirected so weakly connected nodes attach
                             for idx = csr.InOffsets[u] to csr.InOffsets[u + 1] - 1 do
                                 let e = csr.InEdges[idx]
@@ -1136,9 +1656,10 @@ module SpanningTree =
                                 if not visited[v] then
                                     visited[v] <- true
                                     parentIdx[v] <- u
-                                    depthArr[v] <- depthArr[u] + 1
-                                    treeEdges.Add eff.Associations[e].Id |> ignore
-                                    q.Enqueue v
+                                    depthArr[v] <- nextD
+                                    isTreeAssoc[e] <- true
+                                    bfsQueue[tail] <- v
+                                    tail <- tail + 1
                     | SpanningTreeStrategy.MaxWeight
                     | SpanningTreeStrategy.MinDepth ->
 #if FABLE_COMPILER
@@ -1174,29 +1695,63 @@ module SpanningTree =
                                 visited[v] <- true
                                 parentIdx[v] <- p
                                 depthArr[v] <- d
-                                treeEdges.Add eff.Associations[e].Id |> ignore
+                                isTreeAssoc[e] <- true
                                 pushNeighbors v
 
-            let childrenLists = Array.init n (fun _ -> ResizeArray<string>())
+            if prefIdx >= 0 then runFromRoot prefIdx
+            for k = 0 to n - 1 do
+                let u = int (uint32 packedPriority[k])
+                if not visited[u] then runFromRoot u
+
+            let childDeg = Array.zeroCreate<int> n
             for i = 0 to n - 1 do
                 let p = parentIdx[i]
-                if p >= 0 then childrenLists[p].Add eff.Nodes[i].Id
+                if p >= 0 then childDeg[p] <- childDeg[p] + 1
+            let childrenIdx = Array.init n (fun i -> if childDeg[i] = 0 then [||] else Array.zeroCreate<int> childDeg[i])
+            let childCur = Array.zeroCreate<int> n
+            for i = 0 to n - 1 do
+                let p = parentIdx[i]
+                if p >= 0 then
+                    let c = childCur[p]
+                    childrenIdx[p][c] <- i
+                    childCur[p] <- c + 1
+
+            roots.ToArray(), parentIdx, childrenIdx, depthArr, isTreeAssoc
+
+    /// <summary>Extracts a spanning forest from <c>graph</c> (resolving collapsed groups), optionally starting at <c>preferredRoot</c>.</summary>
+    let extract (strategy: SpanningTreeStrategy) (preferredRoot: string option) (graph: DiagramGraph) : SpanningForest =
+        let eff = DiagramGraph.effective graph
+        let csr = GraphKernels.buildCsr eff
+        let n = csr.NodeCount
+        if n = 0 then
+            { Roots = []
+              ParentOf = Map.empty
+              DepthOf = Map.empty
+              ChildrenOf = Map.empty
+              TreeAssociationIds = Set.empty
+              CrossAssociationIds = Set.empty }
+        else
+            let rootArr, parentIdx, childrenIdx, depthArr, isTreeAssoc =
+                extractIndexed strategy preferredRoot eff csr
 
             let parentMap =
                 [ for i in 0 .. n - 1 ->
                     eff.Nodes[i].Id, (if parentIdx[i] < 0 then None else Some eff.Nodes[parentIdx[i]].Id) ]
                 |> Map.ofList
             let depthMap = [ for i in 0 .. n - 1 -> eff.Nodes[i].Id, depthArr[i] ] |> Map.ofList
-            let childMap = [ for i in 0 .. n - 1 -> eff.Nodes[i].Id, List.ofSeq childrenLists[i] ] |> Map.ofList
-            let treeSet = Set.ofSeq treeEdges
-            let crossSet =
-                eff.Associations
-                |> Seq.choose (fun a -> if treeSet.Contains a.Id then None else Some a.Id)
-                |> Set.ofSeq
+            let childMap =
+                [ for i in 0 .. n - 1 ->
+                    eff.Nodes[i].Id, (childrenIdx[i] |> Array.map (fun ci -> eff.Nodes[ci].Id) |> Array.toList) ]
+                |> Map.ofList
+            let treeIds = ResizeArray<string>()
+            let crossIds = ResizeArray<string>()
+            for e = 0 to eff.Associations.Length - 1 do
+                if isTreeAssoc[e] then treeIds.Add eff.Associations[e].Id
+                else crossIds.Add eff.Associations[e].Id
 
-            { Roots = roots |> Seq.map (fun i -> eff.Nodes[i].Id) |> Seq.toList
+            { Roots = rootArr |> Array.map (fun i -> eff.Nodes[i].Id) |> Array.toList
               ParentOf = parentMap
               DepthOf = depthMap
               ChildrenOf = childMap
-              TreeAssociationIds = treeSet
-              CrossAssociationIds = crossSet }
+              TreeAssociationIds = Set.ofSeq treeIds
+              CrossAssociationIds = Set.ofSeq crossIds }

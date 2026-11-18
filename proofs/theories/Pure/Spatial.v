@@ -444,3 +444,282 @@ Proof.
       symmetry; apply Z.max_l; exact Hge2. }
   split; [exact Hsq | rewrite Hsq; ring].
 Qed.
+
+(** ** 5. Batch D6 refinements: 3D `Octree`, `sqrt`-free `ForceAtlas2` Barnes–Hut, and `(3+1)D` Minkowski `H3`/`Walrus` identities *)
+
+Record pt3 := {
+  px3 : Z;
+  py3 : Z;
+  pz3 : Z
+}.
+
+Record aabb3 := {
+  min_x3 : Z;
+  max_x3 : Z;
+  min_y3 : Z;
+  max_y3 : Z;
+  min_z3 : Z;
+  max_z3 : Z
+}.
+
+Definition in_aabb3 (b : aabb3) (p : pt3) : bool :=
+  Z.leb (min_x3 b) (px3 p) && Z.leb (px3 p) (max_x3 b) &&
+  Z.leb (min_y3 b) (py3 p) && Z.leb (py3 p) (max_y3 b) &&
+  Z.leb (min_z3 b) (pz3 p) && Z.leb (pz3 p) (max_z3 b).
+
+Definition dist_sq3 (a b : pt3) : Z :=
+  let dx := px3 a - px3 b in
+  let dy := py3 a - py3 b in
+  let dz := pz3 a - pz3 b in
+  dx * dx + dy * dy + dz * dz.
+
+Definition closest_on_aabb3 (b : aabb3) (q : pt3) : pt3 :=
+  {| px3 := clamp_1d (min_x3 b) (max_x3 b) (px3 q);
+     py3 := clamp_1d (min_y3 b) (max_y3 b) (py3 q);
+     pz3 := clamp_1d (min_z3 b) (max_z3 b) (pz3 q) |}.
+
+Definition octant_bucket (mx my mz : Z) (oct : nat) (p : pt3) : bool :=
+  let gx := Z.geb (px3 p) mx in
+  let gy := Z.geb (py3 p) my in
+  let gz := Z.geb (pz3 p) mz in
+  match oct with
+  | 0%nat => negb gx && negb gy && negb gz
+  | 1%nat => gx && negb gy && negb gz
+  | 2%nat => negb gx && gy && negb gz
+  | 3%nat => gx && gy && negb gz
+  | 4%nat => negb gx && negb gy && gz
+  | 5%nat => gx && negb gy && gz
+  | 6%nat => negb gx && gy && gz
+  | _ => gx && gy && gz
+  end.
+
+Lemma partition_eight_counts (mx my mz : Z) (pts : list pt3) :
+  (length (List.filter (octant_bucket mx my mz 0) pts) +
+   length (List.filter (octant_bucket mx my mz 1) pts) +
+   length (List.filter (octant_bucket mx my mz 2) pts) +
+   length (List.filter (octant_bucket mx my mz 3) pts) +
+   length (List.filter (octant_bucket mx my mz 4) pts) +
+   length (List.filter (octant_bucket mx my mz 5) pts) +
+   length (List.filter (octant_bucket mx my mz 6) pts) +
+   length (List.filter (octant_bucket mx my mz 7) pts) = length pts)%nat.
+Proof.
+  induction pts as [|p rest IH]; [reflexivity |].
+  simpl.
+  set (f0 := List.filter (octant_bucket mx my mz 0) rest) in *.
+  set (f1 := List.filter (octant_bucket mx my mz 1) rest) in *.
+  set (f2 := List.filter (octant_bucket mx my mz 2) rest) in *.
+  set (f3 := List.filter (octant_bucket mx my mz 3) rest) in *.
+  set (f4 := List.filter (octant_bucket mx my mz 4) rest) in *.
+  set (f5 := List.filter (octant_bucket mx my mz 5) rest) in *.
+  set (f6 := List.filter (octant_bucket mx my mz 6) rest) in *.
+  set (f7 := List.filter (octant_bucket mx my mz 7) rest) in *.
+  unfold octant_bucket.
+  destruct (Z.geb (px3 p) mx), (Z.geb (py3 p) my), (Z.geb (pz3 p) mz); simpl; lia.
+Qed.
+
+(**md
+**3D `Octree` clamped cuboid closest-point squared distance lower-bounds cell members and 8-way octant partitioning conserves all points.**
+
+Justifies squared-distance priority and child pre-filtering in `Octree.nearest` as well as in-place 8-way counting-partition slice construction in `Octree.buildWithCancellation`.
+
+- [cell:] 3D axis-aligned bounding cuboid of an `Octree` node.
+- [q:] 3D query point.
+- [p:] any 3D point inside `cell`.
+- [mx:] X split midpoint.
+- [my:] Y split midpoint.
+- [mz:] Z split midpoint.
+- [pts:] points partitioned across the eight child octants.
+*)
+Theorem octree_aabb3_lower_bound_and_leaf_conservation
+    (cell : aabb3) (q p : pt3) (mx my mz : Z) (pts : list pt3) :
+  (in_aabb3 cell p = true -> dist_sq3 q (closest_on_aabb3 cell q) <= dist_sq3 q p) /\
+  (length (List.filter (octant_bucket mx my mz 0) pts) +
+   length (List.filter (octant_bucket mx my mz 1) pts) +
+   length (List.filter (octant_bucket mx my mz 2) pts) +
+   length (List.filter (octant_bucket mx my mz 3) pts) +
+   length (List.filter (octant_bucket mx my mz 4) pts) +
+   length (List.filter (octant_bucket mx my mz 5) pts) +
+   length (List.filter (octant_bucket mx my mz 6) pts) +
+   length (List.filter (octant_bucket mx my mz 7) pts) = length pts)%nat.
+Proof.
+  split.
+  - intros Hin. unfold in_aabb3 in Hin.
+    repeat (apply andb_prop in Hin as [Hin ?]).
+    apply Z.leb_le in Hin. apply Z.leb_le in H. apply Z.leb_le in H0.
+    apply Z.leb_le in H1. apply Z.leb_le in H2. apply Z.leb_le in H3.
+    unfold dist_sq3, closest_on_aabb3; simpl.
+    pose proof (clamp_1d_sq_le (min_x3 cell) (max_x3 cell) (px3 q) (px3 p) Hin H3).
+    pose proof (clamp_1d_sq_le (min_y3 cell) (max_y3 cell) (py3 q) (py3 p) H2 H1).
+    pose proof (clamp_1d_sq_le (min_z3 cell) (max_z3 cell) (pz3 q) (pz3 p) H0 H).
+    lia.
+  - apply partition_eight_counts.
+Qed.
+
+(**md
+**`ForceAtlas2` / `LinLog` Barnes–Hut opening test (`sz^2 < theta^2 * d^2`), `1/d` repulsion, and linear attraction/gravity eliminate `sqrt`.**
+
+For nonnegative `sz, theta, d >= 0`: (1) `sz < theta * d <-> sz^2 < theta^2 * d^2`, avoiding `sqrt` on every visited Barnes–Hut cell; (2) `(dx / d) * (kr_m / d) = (dx * kr_m) / d^2` (cross-multiplied); and (3) `(dx / d) * (w * d) = dx * w` for `ForceAtlas2` attraction and central gravity.
+
+- [sz:] Barnes–Hut cell extent width.
+- [theta:] Barnes–Hut opening angle parameter (`theta >= 0`).
+- [d:] Euclidean distance (`d >= 0`).
+- [dx:] coordinate separation along X, Y, or Z.
+- [kr_m:] repulsion numerator (`kr * m_i * m_cell`).
+- [w:] linear spring or central-gravity weight.
+*)
+Theorem forceatlas2_rational_repulsion_and_linear_forces_cancel_sqrt
+    (sz theta d dx kr_m w : Z) :
+  0 <= sz ->
+  0 <= theta ->
+  0 <= d ->
+  (sz < theta * d <-> sz * sz < (theta * theta) * (d * d)) /\
+  (dx * kr_m) * (d * d) = (dx * d) * (kr_m * d) /\
+  dx * (w * d) = (dx * w) * d.
+Proof.
+  intros Hsz Hth Hd.
+  split.
+  - split; intros Hlt.
+    + assert (Hnn : 0 <= theta * d) by nia.
+      replace ((theta * theta) * (d * d)) with ((theta * d) * (theta * d)) by ring.
+      nia.
+    + replace ((theta * theta) * (d * d)) with ((theta * d) * (theta * d)) in Hlt by ring.
+      assert (Hcases : sz < theta * d \/ theta * d <= sz) by lia.
+      destruct Hcases as [Hok | Hge]; [exact Hok |].
+      assert (Hnn : 0 <= theta * d) by nia.
+      nia.
+  - split; ring.
+Qed.
+
+(**md
+**Minkowski `(3+1)D` upper-sheet points project strictly inside the open Klein & Poincaré unit balls (`H3` & `Walrus`).**
+
+Whenever `x^2 + y^2 + z^2 - w^2 = -1` and `1 <= w`, `1 + x^2 + y^2 + z^2 = w^2`, `x^2 + y^2 + z^2 < w^2` (so Klein `||(x/w, y/w, z/w)|| < 1`), and `(1 + w)^2 - (x^2 + y^2 + z^2) = 2 * (1 + w)` (so Poincaré `1 - ||u||^2 = 2 / (1 + w)`), justifying fused SIMD `projectBallSoA` and direct endpoint reuse for Klein straight-chord geodesics.
+
+- [x:] spacelike X coordinate.
+- [y:] spacelike Y coordinate.
+- [z:] spacelike Z coordinate.
+- [w:] timelike W coordinate (`w >= 1`).
+*)
+Theorem minkowski_sheet_ball_and_klein_chord_identities (x y z w : Z) :
+  x * x + y * y + z * z - w * w = -1 ->
+  1 <= w ->
+  1 + x * x + y * y + z * z = w * w /\
+  x * x + y * y + z * z < w * w /\
+  (1 + w) * (1 + w) - (x * x + y * y + z * z) = 2 * (1 + w).
+Proof.
+  intros Hsheet Hw.
+  repeat split; lia.
+Qed.
+
+Definition bip_crosses (pos : Z -> Z) (u1 v1 u2 v2 : Z) : Prop :=
+  (u1 < u2 /\ pos v2 < pos v1) \/ (u2 < u1 /\ pos v1 < pos v2).
+
+Definition swap_adj_pos (pos : Z -> Z) (a b k v : Z) : Z :=
+  if Z.eqb v a then k + 1
+  else if Z.eqb v b then k
+  else pos v.
+
+(**md
+**`Sugiyama` adjacent-swap crossing delta depends exclusively on edges incident to `(a, b)`.**
+
+When `pos a = k`, `pos b = k + 1`, and every other vertex `c` has `pos c <> k` and `pos c <> k + 1`, swapping `a` and `b` leaves `bip_crosses` unchanged on every edge pair except `(u1, a)` vs `(u2, b)` (and symmetrically `(u1, b)` vs `(u2, a)`), where `(u1, a)` and `(u2, b)` cross before iff `u2 < u1` and after iff `u1 < u2`.
+
+- [pos:] current 0-based horizontal layer position map.
+- [a:] left adjacent vertex at `pos a = k`.
+- [b:] right adjacent vertex at `pos b = k + 1` (`a <> b`).
+- [k:] adjacent slot index.
+- [u1:] upper-layer neighbor of `v1`.
+- [v1:] lower-layer endpoint 1.
+- [u2:] upper-layer neighbor of `v2`.
+- [v2:] lower-layer endpoint 2.
+*)
+Theorem sugiyama_adjacent_swap_crossing_delta
+    (pos : Z -> Z) (a b k u1 v1 u2 v2 : Z) :
+  a <> b ->
+  pos a = k ->
+  pos b = k + 1 ->
+  (forall c, c <> a -> c <> b -> pos c <> k /\ pos c <> k + 1) ->
+  let pos' := swap_adj_pos pos a b k in
+  ((~(v1 = a /\ v2 = b) /\ ~(v1 = b /\ v2 = a)) ->
+    (bip_crosses pos' u1 v1 u2 v2 <-> bip_crosses pos u1 v1 u2 v2)) /\
+  (bip_crosses pos u1 a u2 b <-> u2 < u1) /\
+  (bip_crosses pos' u1 a u2 b <-> u1 < u2).
+Proof.
+  intros Hab Ha Hb Hother. cbv zeta.
+  split.
+  - intros [Hnot_ab Hnot_ba].
+    unfold bip_crosses, swap_adj_pos.
+    destruct (Z.eqb_spec v1 a) as [Hv1a | Hv1a];
+    destruct (Z.eqb_spec v1 b) as [Hv1b | Hv1b];
+    destruct (Z.eqb_spec v2 a) as [Hv2a | Hv2a];
+    destruct (Z.eqb_spec v2 b) as [Hv2b | Hv2b];
+    try (exfalso; congruence);
+    try (exfalso; apply Hnot_ab; split; assumption);
+    try (exfalso; apply Hnot_ba; split; assumption);
+    try tauto;
+    try (destruct (Hother v2 Hv2a Hv2b); rewrite ?Hv1a, ?Hv1b in *; split; intros [[? ?] | [? ?]]; lia);
+    try (destruct (Hother v1 Hv1a Hv1b); rewrite ?Hv2a, ?Hv2b in *; split; intros [[? ?] | [? ?]]; lia);
+    (rewrite ?Hv1a, ?Hv1b, ?Hv2a, ?Hv2b in *; split; intros [[? ?] | [? ?]]; lia).
+  - unfold bip_crosses, swap_adj_pos.
+    assert (Haa : Z.eqb a a = true) by (apply Z.eqb_eq; reflexivity).
+    assert (Hbb : Z.eqb b b = true) by (apply Z.eqb_eq; reflexivity).
+    assert (Hba : Z.eqb b a = false) by (apply Z.eqb_neq; congruence).
+    rewrite Haa, Hba, Hbb, Ha, Hb.
+    split; (split; [intros [[? ?] | [? ?]]; lia | intros ?; lia]).
+Qed.
+
+Definition accept_sparse_pivot_pair (is_piv : Z -> bool) (lp lj d : Z) : bool :=
+  Z.ltb 1 d && (negb (is_piv lj) || Z.ltb lp lj).
+
+(**md
+**`HashSet`-free sparse `Stress2D` / `Stress3D` edge + pivot pair emission visits each unordered pair `{u, v}` at most once.**
+
+Emitting undirected edges (`d = 1`) first and then emitting pivot pairs `(lp, lj)` with `d > 1` guarded by `negb (is_piv lj) || lp < lj` covers every edge and pivot pair while guaranteeing that `(lp, lj)` neither collides with any `d = 1` edge nor gets emitted in reverse as `(lj, lp)`.
+
+- [is_piv:] boolean membership flag for the `k`-center landmark pivot set.
+- [lp:] current landmark pivot index (`is_piv lp = true`).
+- [lj:] target vertex index (`lp <> lj`).
+- [d:] shortest-path hop distance `dist(lp, lj)`.
+*)
+Theorem sparse_stress_pivot_edge_dedup_exact
+    (is_piv : Z -> bool) (lp lj d : Z) :
+  is_piv lp = true ->
+  lp <> lj ->
+  (accept_sparse_pivot_pair is_piv lp lj 1 = false) /\
+  (is_piv lj = true -> 1 < d ->
+    accept_sparse_pivot_pair is_piv lp lj d = negb (accept_sparse_pivot_pair is_piv lj lp d)).
+Proof.
+  intros Hpiv_lp Hneq.
+  unfold accept_sparse_pivot_pair.
+  split.
+  - reflexivity.
+  - intros Hpiv_lj Hd.
+    assert (Hd_true : Z.ltb 1 d = true) by (apply Z.ltb_lt; exact Hd).
+    rewrite Hd_true, Hpiv_lp, Hpiv_lj; simpl.
+    destruct (Z.ltb lp lj) eqn:Hlt1; destruct (Z.ltb lj lp) eqn:Hlt2; auto.
+    + apply Z.ltb_lt in Hlt1. apply Z.ltb_lt in Hlt2. lia.
+    + apply Z.ltb_ge in Hlt1. apply Z.ltb_ge in Hlt2. lia.
+Qed.
+
+(**md
+**Contiguous arena reservation (`firstChild .. firstChild + childCount - 1`) indexes every child cell without pointer arrays (`FlatOctree` & `FlatQuadtree2D`).**
+
+When `children` are appended at `first_child = length arena` before any descendant allocations (`arena ++ children ++ descendants`), looking up `nth_error` at `first_child + k` for any `k < length children` retrieves the exact `k`-th child `nth_error children k`, eliminating per-node child-array and leaf-list heap allocations in 2D/3D Barnes–Hut trees.
+
+- [arena:] prefix of already-reserved flat nodes (`first_child = length arena`).
+- [children:] contiguous block of child nodes reserved for the current internal cell.
+- [descendants:] nodes subsequently appended by recursive child subdivisions.
+- [k:] child offset (`0 <= k < length children`).
+*)
+Theorem flat_cell_children_contiguous_slice_exact
+    {N : Type} (arena children descendants : list N) (k : nat) :
+  (k < length children)%nat ->
+  nth_error (arena ++ children ++ descendants) (length arena + k)%nat =
+  nth_error children k.
+Proof.
+  intros Hk.
+  rewrite nth_error_app2 by lia.
+  replace (length arena + k - length arena)%nat with k by lia.
+  rewrite nth_error_app1 by exact Hk.
+  reflexivity.
+Qed.

@@ -18,6 +18,8 @@ Print Assumptions single_table_join_eq_data_join.
 Print Assumptions dsv_unescaped_span_slice_eq_char_scan.
 Print Assumptions separable_row_scatter_eq_gather.
 Print Assumptions fused_xy_tridiagonal_eq_separate.
+Print Assumptions simd_double_centering_row_eq_scalar.
+Print Assumptions running_extrema_union_eq_box_fold.
 
 (* Pure.Spatial *)
 Print Assumptions quadtree_aabb_lower_bound_sound.
@@ -26,6 +28,12 @@ Print Assumptions spatial_within_sound_and_complete.
 Print Assumptions spatial_nearest_pruning_sound.
 Print Assumptions flat_kdtree_isomorphic.
 Print Assumptions many_body_rational_form_cancels_sqrt.
+Print Assumptions octree_aabb3_lower_bound_and_leaf_conservation.
+Print Assumptions forceatlas2_rational_repulsion_and_linear_forces_cancel_sqrt.
+Print Assumptions minkowski_sheet_ball_and_klein_chord_identities.
+Print Assumptions sugiyama_adjacent_swap_crossing_delta.
+Print Assumptions sparse_stress_pivot_edge_dedup_exact.
+Print Assumptions flat_cell_children_contiguous_slice_exact.
 
 (* Pure.SamplingSelection *)
 Print Assumptions minmax_run_preserves_endpoints_and_order.

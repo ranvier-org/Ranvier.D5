@@ -19,6 +19,9 @@
     <Compile Include="DiagramScene.fs" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Ranvier.D5.Graph3D" />
+  </ItemGroup>
+  <ItemGroup>
     <None Include="$(MSBuildProjectFile);*.fs" Pack="true" PackagePath="fable/" />
     <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />

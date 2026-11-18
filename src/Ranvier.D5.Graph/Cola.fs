@@ -65,6 +65,7 @@ module Cola =
             let adj = Array.init n (fun _ -> ResizeArray<struct(int * float)>())
             let accepted = ResizeArray<SeparationConstraint>(ordered.Length)
             let visited = Array.create n -1
+            let dfsStack = Array.zeroCreate<int> n
             let mutable stamp = 0
 
             let canReach (start: int) (goal: int) =
@@ -72,24 +73,39 @@ module Cola =
                 else
                     stamp <- stamp + 1
                     let curStamp = stamp
-                    let stack = Stack<int>()
                     visited[start] <- curStamp
-                    stack.Push start
+                    let mutable sp = 0
+                    dfsStack[sp] <- start
+                    sp <- sp + 1
                     let mutable hit = false
-                    while stack.Count > 0 && not hit do
-                        let u = stack.Pop()
-                        for edge in adj[u] do
-                            let struct(v, _) = edge
+                    while sp > 0 && not hit do
+                        sp <- sp - 1
+                        let u = dfsStack[sp]
+                        let list = adj[u]
+                        let mutable k = 0
+                        while k < list.Count && not hit do
+                            let struct(v, _) = list[k]
                             if v = goal then hit <- true
                             elif visited[v] <> curStamp then
                                 visited[v] <- curStamp
-                                stack.Push v
+                                dfsStack[sp] <- v
+                                sp <- sp + 1
+                            k <- k + 1
                     hit
 
-            for c in ordered do
+            for ci = 0 to ordered.Length - 1 do
+                let c = ordered[ci]
                 if c.Left <> c.Right then
                     // Check if c.Right can already reach c.Left (except exact zero-sum alignment pairs x_a <= x_b and x_b <= x_a)
-                    if c.Gap = 0. && adj[c.Right] |> Seq.exists (fun (struct(t, g)) -> t = c.Left && g = 0.) then
+                    let mutable zeroPair = false
+                    if c.Gap = 0. then
+                        let rList = adj[c.Right]
+                        let mutable k = 0
+                        while k < rList.Count && not zeroPair do
+                            let struct(t, g) = rList[k]
+                            if t = c.Left && g = 0. then zeroPair <- true
+                            k <- k + 1
+                    if zeroPair then
                         accepted.Add c
                     elif not (canReach c.Right c.Left) then
                         adj[c.Left].Add(struct(c.Right, c.Gap))
@@ -165,7 +181,12 @@ module Cola =
 
             // Sweep-line by left X edge so we avoid O(N^2) checks on spread-out layouts!
             let order = Array.init n id
+#if FABLE_COMPILER
             Array.Sort(order, Comparer<int>.Create(fun a b -> compare (xs[a] - halfW[a]) (xs[b] - halfW[b])))
+#else
+            let leftEdges = Array.init n (fun i -> xs[i] - halfW[i])
+            Array.Sort(leftEdges, order)
+#endif
             for i = 0 to n - 1 do
                 let u = order[i]
                 let uxMax = xs[u] + halfW[u] + margin
@@ -335,19 +356,8 @@ module Cola =
                     let pairsArr = stressPairs.ToArray()
 
                     // Group containment variables: each visible group in component gets Left/Right in X and Top/Bottom in Y
-                    let subGroupsWithDepth =
-                        eff.Groups
-                        |> Array.indexed
-                        |> Array.choose (fun (gi, g) ->
-                            let hasMember = members |> Array.exists (fun mi ->
-                                let mutable cur = eff.Nodes[mi].ParentGroup
-                                let mutable hit = false
-                                while cur.IsSome && not hit do
-                                    if cur.Value = g.Id then hit <- true
-                                    else
-                                        cur <- eff.Groups |> Array.tryFind (fun og -> og.Id = cur.Value) |> Option.bind (fun og -> og.ParentGroup)
-                                hit)
-                            if hasMember then Some(g, eff.GroupDepth[gi]) else None)
+                    let subGroupsWithDepth = GraphKernels.filterSubGroups eff members
+                    let groupMembers = GraphKernels.subGroupMemberLists eff members subGroupsWithDepth
 
                     let gCount = subGroupsWithDepth.Length
                     let subGMap = Dictionary<string, int>(StringComparer.Ordinal)
@@ -406,7 +416,7 @@ module Cola =
                             let struct(u, v, ideal, w) = pairsArr[p]
                             let dx = xs[u] - xs[v]
                             let dy = ys[u] - ys[v]
-                            let dist = Double.Hypot(dx, dy)
+                            let dist = sqrt (dx * dx + dy * dy)
                             let ux, uy =
                                 if dist <= 1e-6 then
                                     let ang = float ((u * 31 + v * 17 + iter) % 360) * (Math.PI / 180.)
@@ -438,22 +448,18 @@ module Cola =
 
                         // Desired group bounds gently pull inward toward member centroid so group boxes stay compact!
                         for gi = 0 to gCount - 1 do
-                            let gid = (fst subGroupsWithDepth[gi]).Id
-                            let mutable sumX, sumY, cnt = 0., 0., 0
-                            for li = 0 to subN - 1 do
-                                let mutable cur = eff.Nodes[members[li]].ParentGroup
-                                let mutable inside = false
-                                while cur.IsSome && not inside do
-                                    if cur.Value = gid then inside <- true
-                                    else
-                                        cur <- eff.Groups |> Array.tryFind (fun og -> og.Id = cur.Value) |> Option.bind (fun og -> og.ParentGroup)
-                                if inside then
-                                    sumX <- sumX + desX[li]
-                                    sumY <- sumY + desY[li]
-                                    cnt <- cnt + 1
-                            let mx = if cnt > 0 then sumX / float cnt else cx0
-                            let my = if cnt > 0 then sumY / float cnt else cy0
-                            // Left/Top pulled gently toward +mx (right/down), Right/Bottom pulled gently toward mx (left/up) to tighten box!
+                            let mems = groupMembers[gi]
+                            let cnt = mems.Length
+                            let mx, my =
+                                if cnt = 0 then cx0, cy0
+                                else
+                                    let mutable sumX, sumY = 0., 0.
+                                    for k = 0 to cnt - 1 do
+                                        let li = mems[k]
+                                        sumX <- sumX + desX[li]
+                                        sumY <- sumY + desY[li]
+                                    let invC = 1. / float cnt
+                                    sumX * invC, sumY * invC
                             desX[subN + 2 * gi] <- mx
                             desX[subN + 2 * gi + 1] <- mx
                             desY[subN + 2 * gi] <- my
@@ -519,20 +525,8 @@ module Cola =
                             let py = solveVpsc desY extWeights extPinY fy
                             for li = 0 to subN - 1 do xs[li] <- px[li]; ys[li] <- py[li]
 
-                    let subNodes = members |> Array.map (fun gi -> eff.Nodes[gi])
-                    let subNodeIds = subNodes |> Array.map (fun nd -> nd.Id) |> Set.ofArray
-                    let subAssocs =
-                        eff.Associations
-                        |> Array.filter (fun a -> subNodeIds.Contains a.Source.NodeId && subNodeIds.Contains a.Target.NodeId)
-                    let subMap = Dictionary<string, int>(StringComparer.Ordinal)
-                    for li = 0 to subN - 1 do subMap.Add(subNodes[li].Id, li)
-                    let subEff =
-                        { Nodes = subNodes
-                          Groups = subGroupsWithDepth |> Array.map fst
-                          GroupDepth = subGroupsWithDepth |> Array.map snd
-                          Associations = subAssocs
-                          ReversedIdMap = subMap
-                          Constraints = [] }
+                    let subEff = GraphKernels.sliceComponentEff eff csr members subGroupsWithDepth
+                    let subNodes = subEff.Nodes
 
                     let rawPosNodes =
                         Array.init subN (fun li ->

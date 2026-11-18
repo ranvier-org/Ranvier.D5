@@ -56,10 +56,10 @@ module Layered3D =
            || config.ExplicitStrata |> Map.exists (fun _ s -> s < 0 || s > 4096) then
             Error [ InvalidObservation "Layered3D requires positive LayerSpacing, nonnegative IntraLayerSpacing, 1..64 Sweeps and strata in [0,4096]." ]
         else
-            // Reuse Sugiyama's cycle breaking and network-simplex ranking on the resolved graph for automatic strata!
             let resolved = DiagramGraph.resolveCollapsed graph
-            let nodes = DiagramGraph.nodes resolved |> List.toArray
-            let assocs = DiagramGraph.associations resolved |> List.toArray
+            let eff = DiagramGraph.effective resolved
+            let nodes = eff.Nodes
+            let assocs = eff.Associations
             let n = nodes.Length
             if n = 0 then
                 Ok { Bounds = config.Bounds; Nodes = []; Groups = Kernels3D.computeGroups3D resolved [||]; Associations = [] }
@@ -71,19 +71,20 @@ module Layered3D =
                 match Sugiyama.layoutWithCancellation token sugCfg resolved with
                 | Error errs -> Error errs
                 | Ok sug2D ->
-                    let nodeIdx = Dictionary<string, int>(StringComparer.Ordinal)
-                    for i = 0 to n - 1 do nodeIdx.Add(nodes[i].Id, i)
+                    let nodeIdx = eff.ReversedIdMap
 
-                    let revAssocSet =
-                        sug2D.Associations
-                        |> Seq.choose (fun ra -> if ra.ReversedInCycle then Some ra.Id else None)
-                        |> Set.ofSeq
+                    let revAssocSet = HashSet<string>(StringComparer.Ordinal)
+                    for ra in sug2D.Associations do
+                        if ra.ReversedInCycle then revAssocSet.Add ra.Id |> ignore
 
                     let strata = Array.zeroCreate<int> n
+                    let hasExplicit = not (Map.isEmpty config.ExplicitStrata)
                     for pn in sug2D.Nodes do
                         let idx = nodeIdx[pn.Id]
-                        let autoLayer = pn.Layer |> Option.defaultValue 0
-                        strata[idx] <- config.ExplicitStrata |> Map.tryFind pn.Id |> Option.defaultValue autoLayer
+                        let autoLayer = match pn.Layer with Some l -> l | None -> 0
+                        strata[idx] <-
+                            if hasExplicit then config.ExplicitStrata |> Map.tryFind pn.Id |> Option.defaultValue autoLayer
+                            else autoLayer
 
                     // Compact strata to contiguous 0 .. numStrata-1
                     let distinctStrata = strata |> Array.distinct |> Array.sort
@@ -96,29 +97,33 @@ module Layered3D =
                     for i = 0 to n - 1 do layerBuckets[strata[i]].Add i
                     let layers = layerBuckets |> Array.map (fun b -> b.ToArray())
 
+                    let m = assocs.Length
+                    let assocSrc = Array.zeroCreate<int> m
+                    let assocDst = Array.zeroCreate<int> m
                     let upNbs = Array.init n (fun _ -> ResizeArray<int>())
                     let downNbs = Array.init n (fun _ -> ResizeArray<int>())
-                    for a in assocs do
+                    for e = 0 to m - 1 do
+                        let a = assocs[e]
                         let u, v = nodeIdx[a.Source.NodeId], nodeIdx[a.Target.NodeId]
+                        assocSrc[e] <- u
+                        assocDst[e] <- v
                         if u <> v && strata[u] <> strata[v] then
                             let lo, hi = if strata[u] < strata[v] then u, v else v, u
                             downNbs[lo].Add hi
                             upNbs[hi].Add lo
 
-                    // Initialize intra-plane 2D coordinates (uCoord, vCoord) on deterministic golden-angle disc per stratum, grouped by ParentGroup!
                     let uCoord = Array.zeroCreate<float> n
                     let vCoord = Array.zeroCreate<float> n
                     let planeRad =
                         Array.init n (fun i ->
                             let nd = nodes[i]
                             match config.Axis with
-                            | StratumAxis.Y -> 0.5 * Double.Hypot(nd.Size.Width, nd.DepthSize)
-                            | StratumAxis.Z -> 0.5 * Double.Hypot(nd.Size.Width, nd.Size.Height))
+                            | StratumAxis.Y -> 0.5 * sqrt (nd.Size.Width * nd.Size.Width + nd.DepthSize * nd.DepthSize)
+                            | StratumAxis.Z -> 0.5 * sqrt (nd.Size.Width * nd.Size.Width + nd.Size.Height * nd.Size.Height))
 
                     let goldenAngle = Math.PI * (3. - sqrt 5.)
                     for s = 0 to numStrata - 1 do
                         let row = layers[s]
-                        // Sort by ParentGroup first so grouped nodes start adjacent on their 3D plane!
                         let sortedRow = Array.copy row
                         Array.Sort(sortedRow, Comparer<int>.Create(fun a b ->
                             let ga = Option.defaultValue "" nodes[a].ParentGroup
@@ -132,6 +137,9 @@ module Layered3D =
                             uCoord[ni] <- r * cos ang
                             vCoord[ni] <- r * sin ang
 
+                    let hasGroups = eff.Groups.Length > 0
+                    let gSums = if hasGroups then Dictionary<string, struct(float * float * int)>(StringComparer.Ordinal) else Unchecked.defaultof<_>
+
                     // Iterative 2D intra-plane barycenter attraction + non-overlap repulsion + compound group cohesion!
                     for sweep = 0 to config.Sweeps - 1 do
                         token.ThrowIfCancellationRequested()
@@ -139,43 +147,61 @@ module Layered3D =
                         let mutable s = sStart
                         while (if sStep > 0 then s <= sEnd else s >= sEnd) do
                             let row = layers[s]
-                            // Pull toward mean (u, v) of adjacent-strata neighbors
-                            for ni in row do
-                                let mutable su, sv, cnt = 0., 0., 0
-                                for p in upNbs[ni] do su <- su + uCoord[p]; sv <- sv + vCoord[p]; cnt <- cnt + 1
-                                for c in downNbs[ni] do su <- su + uCoord[c]; sv <- sv + vCoord[c]; cnt <- cnt + 1
+                            for ri = 0 to row.Length - 1 do
+                                let ni = row[ri]
+                                let uList = upNbs[ni]
+                                let dList = downNbs[ni]
+                                let cnt = uList.Count + dList.Count
                                 if cnt > 0 then
-                                    let tu, tv = su / float cnt, sv / float cnt
-                                    uCoord[ni] <- uCoord[ni] * 0.35 + tu * 0.65
-                                    vCoord[ni] <- vCoord[ni] * 0.35 + tv * 0.65
+                                    let mutable su, sv = 0., 0.
+                                    for k = 0 to uList.Count - 1 do
+                                        let p = uList[k]
+                                        su <- su + uCoord[p]; sv <- sv + vCoord[p]
+                                    for k = 0 to dList.Count - 1 do
+                                        let c = dList[k]
+                                        su <- su + uCoord[c]; sv <- sv + vCoord[c]
+                                    let invC = 1. / float cnt
+                                    uCoord[ni] <- uCoord[ni] * 0.35 + (su * invC) * 0.65
+                                    vCoord[ni] <- vCoord[ni] * 0.35 + (sv * invC) * 0.65
 
                             // Group cohesion within this stratum
-                            if row.Length > 1 then
-                                let gSums = Dictionary<string, struct(float * float * int)>(StringComparer.Ordinal)
-                                for ni in row do
-                                    nodes[ni].ParentGroup |> Option.iter (fun gid ->
+                            if hasGroups && row.Length > 1 then
+                                gSums.Clear()
+                                for ri = 0 to row.Length - 1 do
+                                    let ni = row[ri]
+                                    match nodes[ni].ParentGroup with
+                                    | Some gid ->
                                         let struct(au, av, ac) = match gSums.TryGetValue gid with true, v -> v | _ -> struct(0., 0., 0)
-                                        gSums[gid] <- struct(au + uCoord[ni], av + vCoord[ni], ac + 1))
-                                for ni in row do
-                                    nodes[ni].ParentGroup |> Option.iter (fun gid ->
+                                        gSums[gid] <- struct(au + uCoord[ni], av + vCoord[ni], ac + 1)
+                                    | None -> ()
+                                for ri = 0 to row.Length - 1 do
+                                    let ni = row[ri]
+                                    match nodes[ni].ParentGroup with
+                                    | Some gid ->
                                         let struct(au, av, ac) = gSums[gid]
                                         if ac > 1 then
-                                            uCoord[ni] <- uCoord[ni] + (au / float ac - uCoord[ni]) * 0.25
-                                            vCoord[ni] <- vCoord[ni] + (av / float ac - vCoord[ni]) * 0.25)
+                                            let invAc = 1. / float ac
+                                            uCoord[ni] <- uCoord[ni] + (au * invAc - uCoord[ni]) * 0.25
+                                            vCoord[ni] <- vCoord[ni] + (av * invAc - vCoord[ni]) * 0.25
+                                    | None -> ()
 
-                            // Resolve 2D intra-stratum overlaps
+                            // Resolve 2D intra-stratum overlaps (prune non-overlapping pairs via squared distance!)
                             if row.Length > 1 then
                                 for _ = 0 to 2 do
                                     for a = 0 to row.Length - 1 do
+                                        let ia = row[a]
+                                        let ra = planeRad[ia]
+                                        let ga = nodes[ia].ParentGroup
                                         for b = a + 1 to row.Length - 1 do
-                                            let ia, ib = row[a], row[b]
+                                            let ib = row[b]
                                             let du = uCoord[ib] - uCoord[ia]
                                             let dv = vCoord[ib] - vCoord[ia]
-                                            let d = Double.Hypot(du, dv)
                                             let minSep =
-                                                planeRad[ia] + planeRad[ib] + config.IntraLayerSpacing
-                                                + (if nodes[ia].ParentGroup <> nodes[ib].ParentGroup then 16. else 0.)
-                                            if d < minSep then
+                                                ra + planeRad[ib] + config.IntraLayerSpacing
+                                                + (if ga <> nodes[ib].ParentGroup then 16. else 0.)
+                                            let dSq = du * du + dv * dv
+                                            if dSq < minSep * minSep then
+                                                let d = sqrt dSq
                                                 let uu, uv =
                                                     if d < 1e-5 then
                                                         let ang = float ((ia * 17 + ib * 31) % 360) * (Math.PI / 180.)
@@ -198,52 +224,57 @@ module Layered3D =
                         | StratumAxis.Y -> Point3.create (c3.X + uCoord[ni]) (c3.Y + planePos) (c3.Z + vCoord[ni])
                         | StratumAxis.Z -> Point3.create (c3.X + uCoord[ni]) (c3.Y + vCoord[ni]) (c3.Z + planePos)
 
-                    let nodeBoxes = Array.zeroCreate<Bounds3> n
+                    let nodeBoxes = if hasGroups then Array.zeroCreate<Bounds3> n else [||]
                     let centers = Array.init n toPoint3
-                    let posNodes =
-                        [ for i in 0 .. n - 1 do
-                            let nd = nodes[i]
-                            let box = Kernels3D.nodeBox centers[i] nd.Size.Width nd.Size.Height nd.DepthSize
-                            let rad = 0.5 * sqrt (nd.Size.Width * nd.Size.Width + nd.Size.Height * nd.Size.Height + nd.DepthSize * nd.DepthSize)
-                            nodeBoxes[i] <- box
-                            yield
-                                { Id = nd.Id
-                                  Kind = nd.Kind
-                                  Center = centers[i]
-                                  Bounds = box
-                                  Radius = rad
-                                  ScaleFactor = 1.
-                                  ParentGroup = nd.ParentGroup
-                                  Layer = Some strata[i] } ]
+                    let mutable posNodes = []
+                    for i = n - 1 downto 0 do
+                        let nd = nodes[i]
+                        let box = Kernels3D.nodeBox centers[i] nd.Size.Width nd.Size.Height nd.DepthSize
+                        let rad = 0.5 * sqrt (nd.Size.Width * nd.Size.Width + nd.Size.Height * nd.Size.Height + nd.DepthSize * nd.DepthSize)
+                        if hasGroups then nodeBoxes[i] <- box
+                        posNodes <-
+                            { Id = nd.Id
+                              Kind = nd.Kind
+                              Center = centers[i]
+                              Bounds = box
+                              Radius = rad
+                              ScaleFactor = 1.
+                              ParentGroup = nd.ParentGroup
+                              Layer = Some strata[i] } :: posNodes
 
-                    let groups = Kernels3D.computeGroups3D resolved nodeBoxes
-                    // Route inter-stratum 3D associations with clean vertical/axial riser waypoints!
-                    let routed =
-                        [ for a in assocs do
-                            let u, v = nodeIdx[a.Source.NodeId], nodeIdx[a.Target.NodeId]
-                            let cu, cv = centers[u], centers[v]
-                            let pts =
-                                if u = v then
-                                    let r = planeRad[u]
-                                    [| cu; Point3.create (cu.X + r * 1.4) cu.Y (cu.Z + r * 1.4); cu |]
-                                elif strata[u] = strata[v] then
-                                    [| cu; cv |]
-                                else
-                                    match config.Axis with
-                                    | StratumAxis.Y ->
-                                        let midY = (cu.Y + cv.Y) * 0.5
-                                        [| cu; Point3.create cu.X midY cu.Z; Point3.create cv.X midY cv.Z; cv |]
-                                    | StratumAxis.Z ->
-                                        let midZ = (cu.Z + cv.Z) * 0.5
-                                        [| cu; Point3.create cu.X cu.Y midZ; Point3.create cv.X cv.Y midZ; cv |]
-                            yield
-                                { Id = a.Id
-                                  Source = a.Source
-                                  Target = a.Target
-                                  Kind = a.Kind
-                                  IsBackbone = not (revAssocSet.Contains a.Id)
-                                  Points = Point3Chain.ofOwnedArray pts
-                                  Waypoints = Array.toList pts } ]
+                    let groups = if hasGroups then Kernels3D.computeGroups3D resolved nodeBoxes else []
+                    let mutable routed = []
+                    for e = m - 1 downto 0 do
+                        let a = assocs[e]
+                        let u, v = assocSrc[e], assocDst[e]
+                        let cu, cv = centers[u], centers[v]
+                        let pts, wps =
+                            if u = v then
+                                let r = planeRad[u]
+                                let lp = Point3.create (cu.X + r * 1.4) cu.Y (cu.Z + r * 1.4)
+                                [| cu; lp; cu |], [ cu; lp; cu ]
+                            elif strata[u] = strata[v] then
+                                [| cu; cv |], [ cu; cv ]
+                            else
+                                match config.Axis with
+                                | StratumAxis.Y ->
+                                    let midY = (cu.Y + cv.Y) * 0.5
+                                    let p1 = Point3.create cu.X midY cu.Z
+                                    let p2 = Point3.create cv.X midY cv.Z
+                                    [| cu; p1; p2; cv |], [ cu; p1; p2; cv ]
+                                | StratumAxis.Z ->
+                                    let midZ = (cu.Z + cv.Z) * 0.5
+                                    let p1 = Point3.create cu.X cu.Y midZ
+                                    let p2 = Point3.create cv.X cv.Y midZ
+                                    [| cu; p1; p2; cv |], [ cu; p1; p2; cv ]
+                        routed <-
+                            { Id = a.Id
+                              Source = a.Source
+                              Target = a.Target
+                              Kind = a.Kind
+                              IsBackbone = not (revAssocSet.Contains a.Id)
+                              Points = Point3Chain.ofOwnedArray pts
+                              Waypoints = wps } :: routed
 
                     Ok
                         { Bounds = Kernels3D.computeBounds3D config.Bounds posNodes groups routed

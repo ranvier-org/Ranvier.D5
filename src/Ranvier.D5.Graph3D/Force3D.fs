@@ -59,16 +59,15 @@ module Force3D =
             Error [ InvalidObservation "Force3D requires positive ScalingRatio, nonnegative Gravity/Theta and 1..1000 Iterations." ]
         else
             let resolved = DiagramGraph.resolveCollapsed graph
-            let nodes = DiagramGraph.nodes resolved |> List.toArray
-            let assocs = DiagramGraph.associations resolved |> List.toArray
-            let groups = DiagramGraph.groups resolved |> List.toArray
+            let eff = DiagramGraph.effective resolved
+            let nodes = eff.Nodes
+            let assocs = eff.Associations
+            let groups = eff.Groups
             let n = nodes.Length
             if n = 0 then
                 Ok { Bounds = config.Bounds; Nodes = []; Groups = Kernels3D.computeGroups3D resolved [||]; Associations = [] }
             else
-                let nodeIdx = Dictionary<string, int>(StringComparer.Ordinal)
-                for i = 0 to n - 1 do nodeIdx.Add(nodes[i].Id, i)
-
+                let nodeIdx = eff.ReversedIdMap
                 let center = Bounds3.center config.Bounds
                 let cx0, cy0, cz0 = center.X, center.Y, center.Z
 
@@ -95,33 +94,34 @@ module Force3D =
                     xs[i] <- cx0 + shell * ringR * cos theta
                     ys[i] <- cy0 + shell * yUnit
                     zs[i] <- cz0 + shell * ringR * sin theta
-                    nodes[i].Pinned |> Option.iter (fun p ->
-                        xs[i] <- p.X; ys[i] <- p.Y)
+                    match nodes[i].Pinned with
+                    | Some p -> xs[i] <- p.X; ys[i] <- p.Y
+                    | None -> ()
 
-                // Deduplicated undirected weighted edge arrays for fast inner relaxation
-                let edgeList = ResizeArray<struct(int * int * float)>()
+                let mAll = assocs.Length
+                let assocSrc = Array.zeroCreate<int> mAll
+                let assocDst = Array.zeroCreate<int> mAll
+                let edgeList = ResizeArray<struct(int * int * float)>(mAll)
                 let degMass = Array.copy masses
-                for a in assocs do
+                for e = 0 to mAll - 1 do
+                    let a = assocs[e]
                     let u = nodeIdx[a.Source.NodeId]
                     let v = nodeIdx[a.Target.NodeId]
+                    assocSrc[e] <- u
+                    assocDst[e] <- v
                     if u <> v then
                         edgeList.Add(struct(u, v, a.Weight))
                         degMass[u] <- degMass[u] + a.Weight
                         degMass[v] <- degMass[v] + a.Weight
                 let edges = edgeList.ToArray()
 
-                // Group membership index lists for 3D compound group cohesion & sibling separation
+                let nodeIndices = Array.init n id
+                // Group membership index lists for 3D compound group cohesion in O(V * depth + G)
                 let gMembers =
-                    groups
-                    |> Array.map (fun g ->
-                        [| for ni = 0 to n - 1 do
-                            let mutable cur = nodes[ni].ParentGroup
-                            let mutable inside = false
-                            while cur.IsSome && not inside do
-                                if cur.Value = g.Id then inside <- true
-                                else
-                                    cur <- groups |> Array.tryFind (fun og -> og.Id = cur.Value) |> Option.bind (fun og -> og.ParentGroup)
-                            if inside then yield ni |])
+                    if groups.Length = 0 then [||]
+                    else
+                        let gWithDepth = Array.init groups.Length (fun gi -> groups[gi], eff.GroupDepth[gi])
+                        GraphKernels.subGroupMemberLists eff nodeIndices gWithDepth
 
                 let fx = Array.zeroCreate<float> n
                 let fy = Array.zeroCreate<float> n
@@ -129,8 +129,13 @@ module Force3D =
                 let prevFx = Array.zeroCreate<float> n
                 let prevFy = Array.zeroCreate<float> n
                 let prevFz = Array.zeroCreate<float> n
-                let pts = Array.zeroCreate<Point3> n
+                let swArr = Array.zeroCreate<float> n
+                let octWs = if n > 36 && config.Theta > 0. || config.PreventOverlap then Octree.createWorkspace n else Unchecked.defaultof<_>
+                let unitMass = if config.PreventOverlap && n > 1 then Array.create n 1. else [||]
                 let kr = config.ScalingRatio * config.ScalingRatio * 4.5
+                let thetaSq = config.Theta * config.Theta
+                let isFR = (config.Model = EnergyModel.FruchtermanReingold)
+                let preventOv = config.PreventOverlap
 
                 for step = 0 to config.Iterations - 1 do
                     token.ThrowIfCancellationRequested()
@@ -138,120 +143,176 @@ module Force3D =
                     Array.fill fy 0 n 0.
                     Array.fill fz 0 n 0.
 
-                    // 1. 3D Repulsion via Octree Barnes-Hut (or exact for small graphs)
+                    // 1. 3D Repulsion via zero-alloc arena Octree Barnes-Hut (Rocq: flat_cell_children_contiguous_slice_exact & forceatlas2_rational_repulsion_and_linear_forces_cancel_sqrt)
                     if n <= 36 || config.Theta = 0. then
                         for i = 0 to n - 1 do
                             for j = i + 1 to n - 1 do
                                 let dx = xs[i] - xs[j]
                                 let dy = ys[i] - ys[j]
                                 let dz = zs[i] - zs[j]
-                                let rawD = sqrt (dx * dx + dy * dy + dz * dz)
-                                let ux, uy, uz, d =
-                                    if rawD < 1e-4 then
-                                        let a1 = float ((i * 29 + j * 13 + step) % 360) * (Math.PI / 180.)
-                                        cos a1, sin a1, 0., 1.
-                                    else
-                                        let eff =
-                                            if config.PreventOverlap then max 0.5 (rawD - radii[i] - radii[j])
-                                            else max 1. rawD
-                                        dx / rawD, dy / rawD, dz / rawD, eff
-                                let mag =
-                                    match config.Model with
-                                    | EnergyModel.FruchtermanReingold -> (kr * masses[i] * masses[j]) / (d * d)
-                                    | _ ->
-                                        if config.PreventOverlap && rawD < radii[i] + radii[j] then
-                                            kr * degMass[i] * degMass[j] * 4. / max 0.5 rawD
-                                        else kr * degMass[i] * degMass[j] / d
-                                fx[i] <- fx[i] + ux * mag; fy[i] <- fy[i] + uy * mag; fz[i] <- fz[i] + uz * mag
-                                fx[j] <- fx[j] - ux * mag; fy[j] <- fy[j] - uy * mag; fz[j] <- fz[j] - uz * mag
+                                let dSq = dx * dx + dy * dy + dz * dz
+                                if dSq < 1e-8 then
+                                    let a1 = float ((i * 29 + j * 13 + step) % 360) * (Math.PI / 180.)
+                                    let mag = if isFR then kr * masses[i] * masses[j] else kr * degMass[i] * degMass[j]
+                                    let rx, ry = cos a1 * mag, sin a1 * mag
+                                    fx[i] <- fx[i] + rx; fy[i] <- fy[i] + ry
+                                    fx[j] <- fx[j] - rx; fy[j] <- fy[j] - ry
+                                elif not isFR && not preventOv && dSq >= 1. then
+                                    let s = (kr * degMass[i] * degMass[j]) / dSq
+                                    fx[i] <- fx[i] + dx * s; fy[i] <- fy[i] + dy * s; fz[i] <- fz[i] + dz * s
+                                    fx[j] <- fx[j] - dx * s; fy[j] <- fy[j] - dy * s; fz[j] <- fz[j] - dz * s
+                                else
+                                    let rawD = sqrt dSq
+                                    let effD =
+                                        if preventOv then max 0.5 (rawD - radii[i] - radii[j])
+                                        else max 1. rawD
+                                    let s =
+                                        if isFR then (kr * masses[i] * masses[j]) / (effD * effD * rawD)
+                                        elif preventOv && rawD < radii[i] + radii[j] then (kr * degMass[i] * degMass[j] * 4.) / (max 0.5 rawD * rawD)
+                                        else (kr * degMass[i] * degMass[j]) / (effD * rawD)
+                                    fx[i] <- fx[i] + dx * s; fy[i] <- fy[i] + dy * s; fz[i] <- fz[i] + dz * s
+                                    fx[j] <- fx[j] - dx * s; fy[j] <- fy[j] - dy * s; fz[j] <- fz[j] - dz * s
                     else
-                        for i = 0 to n - 1 do pts[i] <- Point3.create xs[i] ys[i] zs[i]
-                        let oct = Octree.buildWithCancellation token (fun i -> pts[i]) (fun i -> degMass[i]) (seq { 0 .. n - 1 })
-                        Octree.visitIndexed n (fun i cell ->
-                            let pi = pts[i]
+                        Octree.rebuildInPlace octWs token xs ys zs degMass n false
+                        let octNodes = octWs.Nodes
+                        let perm = octWs.Perm
+                        let stack = octWs.Stack
+                        for i = 0 to n - 1 do
+                            let pix, piy, piz = xs[i], ys[i], zs[i]
                             let mi = degMass[i]
-                            let dx = pi.X - cell.Center.X
-                            let dy = pi.Y - cell.Center.Y
-                            let dz = pi.Z - cell.Center.Z
-                            let d = sqrt (dx * dx + dy * dy + dz * dz)
-                            let e = cell.Extent
-                            let sz = max (Bounds3.sizeX e) (max (Bounds3.sizeY e) (Bounds3.sizeZ e))
-                            let contains = Bounds3.contains pi e
-                            if not contains && d > 1e-4 && sz < config.Theta * d then
-                                let mag =
-                                    match config.Model with
-                                    | EnergyModel.FruchtermanReingold -> (kr * mi * cell.Mass) / (d * d)
-                                    | _ -> kr * mi * cell.Mass / d
-                                fx[i] <- fx[i] + (dx / d) * mag
-                                fy[i] <- fy[i] + (dy / d) * mag
-                                fz[i] <- fz[i] + (dz / d) * mag
-                                false
-                            elif not cell.Items.IsEmpty then
-                                for item in cell.Items do
-                                    let j = item.Value
-                                    if j <> i then
-                                        let idx = pi.X - item.Position.X
-                                        let idy = pi.Y - item.Position.Y
-                                        let idz = pi.Z - item.Position.Z
-                                        let rawD = sqrt (idx * idx + idy * idy + idz * idz)
-                                        let ux, uy, uz, effD =
-                                            if rawD < 1e-4 then
+                            let ri = radii[i]
+                            let mutable accX, accY, accZ = 0., 0., 0.
+                            stack[0] <- 0
+                            let mutable sp = 1
+                            while sp > 0 do
+                                sp <- sp - 1
+                                let nd = octNodes[stack[sp]]
+                                let dx = pix - nd.Cx
+                                let dy = piy - nd.Cy
+                                let dz = piz - nd.Cz
+                                let dSq = dx * dx + dy * dy + dz * dz
+                                let sz = max (nd.MaxX - nd.MinX) (max (nd.MaxY - nd.MinY) (nd.MaxZ - nd.MinZ))
+                                let contains =
+                                    pix >= nd.MinX && pix <= nd.MaxX
+                                    && piy >= nd.MinY && piy <= nd.MaxY
+                                    && piz >= nd.MinZ && piz <= nd.MaxZ
+                                if not contains && dSq > 1e-8 && sz * sz < thetaSq * dSq then
+                                    if not isFR then
+                                        let s = (kr * mi * nd.Mass) / dSq
+                                        accX <- accX + dx * s
+                                        accY <- accY + dy * s
+                                        accZ <- accZ + dz * s
+                                    else
+                                        let d = sqrt dSq
+                                        let s = (kr * mi * nd.Mass) / (dSq * d)
+                                        accX <- accX + dx * s
+                                        accY <- accY + dy * s
+                                        accZ <- accZ + dz * s
+                                elif nd.ItemCount > 0 then
+                                    for k = nd.ItemStart to nd.ItemStart + nd.ItemCount - 1 do
+                                        let j = perm[k]
+                                        if j <> i then
+                                            let idx = pix - xs[j]
+                                            let idy = piy - ys[j]
+                                            let idz = piz - zs[j]
+                                            let dSqLeaf = idx * idx + idy * idy + idz * idz
+                                            let mj = degMass[j]
+                                            if dSqLeaf < 1e-8 then
                                                 let a1 = float ((i * 29 + j * 13 + step) % 360) * (Math.PI / 180.)
-                                                cos a1, sin a1, 0., 1.
+                                                let mag = kr * mi * mj
+                                                accX <- accX + cos a1 * mag
+                                                accY <- accY + sin a1 * mag
+                                            elif not isFR && not preventOv && dSqLeaf >= 1. then
+                                                let s = (kr * mi * mj) / dSqLeaf
+                                                accX <- accX + idx * s
+                                                accY <- accY + idy * s
+                                                accZ <- accZ + idz * s
                                             else
-                                                let eff =
-                                                    if config.PreventOverlap then max 0.5 (rawD - radii[i] - radii[j])
+                                                let rawD = sqrt dSqLeaf
+                                                let effD =
+                                                    if preventOv then max 0.5 (rawD - ri - radii[j])
                                                     else max 1. rawD
-                                                idx / rawD, idy / rawD, idz / rawD, eff
-                                        let mag =
-                                            match config.Model with
-                                            | EnergyModel.FruchtermanReingold -> (kr * mi * item.Mass) / (effD * effD)
-                                            | _ -> kr * mi * item.Mass / effD
-                                        fx[i] <- fx[i] + ux * mag
-                                        fy[i] <- fy[i] + uy * mag
-                                        fz[i] <- fz[i] + uz * mag
-                                false
-                            else true) oct
+                                                let s =
+                                                    if isFR then (kr * mi * mj) / (effD * effD * rawD)
+                                                    else (kr * mi * mj) / (effD * rawD)
+                                                accX <- accX + idx * s
+                                                accY <- accY + idy * s
+                                                accZ <- accZ + idz * s
+                                elif nd.ChildCount > 0 then
+                                    for c = nd.FirstChild + nd.ChildCount - 1 downto nd.FirstChild do
+                                        stack[sp] <- c
+                                        sp <- sp + 1
+                            fx[i] <- fx[i] + accX
+                            fy[i] <- fy[i] + accY
+                            fz[i] <- fz[i] + accZ
 
-                    // 2. 3D Edge attraction
-                    for e = 0 to edges.Length - 1 do
-                        let struct(u, v, w) = edges[e]
-                        let dx = xs[v] - xs[u]
-                        let dy = ys[v] - ys[u]
-                        let dz = zs[v] - zs[u]
-                        let d = sqrt (dx * dx + dy * dy + dz * dz)
-                        if d > 1e-6 then
-                            let ux, uy, uz = dx / d, dy / d, dz / d
-                            let att =
-                                match config.Model with
-                                | EnergyModel.ForceAtlas2 -> w * d
-                                | EnergyModel.LinLog -> w * log (1. + d / max 1. config.ScalingRatio) * config.ScalingRatio
-                                | EnergyModel.FruchtermanReingold -> w * (d * d) / max 1. (config.ScalingRatio * 3.)
-                            fx[u] <- fx[u] + ux * att; fy[u] <- fy[u] + uy * att; fz[u] <- fz[u] + uz * att
-                            fx[v] <- fx[v] - ux * att; fy[v] <- fy[v] - uy * att; fz[v] <- fz[v] - uz * att
+                    // 2. 3D Edge attraction (sqrt-free in ForceAtlas2: (dx / d) * (w * d) = dx * w)
+                    match config.Model with
+                    | EnergyModel.ForceAtlas2 ->
+                        for e = 0 to edges.Length - 1 do
+                            let struct(u, v, w) = edges[e]
+                            let dx = xs[v] - xs[u]
+                            let dy = ys[v] - ys[u]
+                            let dz = zs[v] - zs[u]
+                            if dx * dx + dy * dy + dz * dz > 1e-12 then
+                                let ax, ay, az = dx * w, dy * w, dz * w
+                                fx[u] <- fx[u] + ax; fy[u] <- fy[u] + ay; fz[u] <- fz[u] + az
+                                fx[v] <- fx[v] - ax; fy[v] <- fy[v] - ay; fz[v] <- fz[v] - az
+                    | EnergyModel.LinLog ->
+                        let sr = max 1. config.ScalingRatio
+                        let invSr = 1. / sr
+                        for e = 0 to edges.Length - 1 do
+                            let struct(u, v, w) = edges[e]
+                            let dx = xs[v] - xs[u]
+                            let dy = ys[v] - ys[u]
+                            let dz = zs[v] - zs[u]
+                            let dSq = dx * dx + dy * dy + dz * dz
+                            if dSq > 1e-12 then
+                                let d = sqrt dSq
+                                let s = (w * log (1. + d * invSr) * config.ScalingRatio) / d
+                                fx[u] <- fx[u] + dx * s; fy[u] <- fy[u] + dy * s; fz[u] <- fz[u] + dz * s
+                                fx[v] <- fx[v] - dx * s; fy[v] <- fy[v] - dy * s; fz[v] <- fz[v] - dz * s
+                    | EnergyModel.FruchtermanReingold ->
+                        let invSr3 = 1. / max 1. (config.ScalingRatio * 3.)
+                        for e = 0 to edges.Length - 1 do
+                            let struct(u, v, w) = edges[e]
+                            let dx = xs[v] - xs[u]
+                            let dy = ys[v] - ys[u]
+                            let dz = zs[v] - zs[u]
+                            let dSq = dx * dx + dy * dy + dz * dz
+                            if dSq > 1e-12 then
+                                let d = sqrt dSq
+                                let s = w * d * invSr3
+                                fx[u] <- fx[u] + dx * s; fy[u] <- fy[u] + dy * s; fz[u] <- fz[u] + dz * s
+                                fx[v] <- fx[v] - dx * s; fy[v] <- fy[v] - dy * s; fz[v] <- fz[v] - dz * s
 
-                    // 3. Central 3D gravity + Compound 3D group cohesion
-                    for i = 0 to n - 1 do
-                        let dx, dy, dz = cx0 - xs[i], cy0 - ys[i], cz0 - zs[i]
-                        let d = sqrt (dx * dx + dy * dy + dz * dz)
-                        if d > 1e-6 then
-                            let gf = config.Gravity * degMass[i] * d
-                            fx[i] <- fx[i] + (dx / d) * gf
-                            fy[i] <- fy[i] + (dy / d) * gf
-                            fz[i] <- fz[i] + (dz / d) * gf
+                    // 3. Central 3D gravity (sqrt-free) + Compound 3D group cohesion
+                    let grav = config.Gravity
+                    if grav > 0. then
+                        for i = 0 to n - 1 do
+                            let dx, dy, dz = cx0 - xs[i], cy0 - ys[i], cz0 - zs[i]
+                            if dx * dx + dy * dy + dz * dz > 1e-12 then
+                                let gScale = grav * degMass[i]
+                                fx[i] <- fx[i] + dx * gScale
+                                fy[i] <- fy[i] + dy * gScale
+                                fz[i] <- fz[i] + dz * gScale
 
                     if groups.Length > 0 && config.CompoundGravity > 0. then
                         for gi = 0 to groups.Length - 1 do
                             let mems = gMembers[gi]
                             if mems.Length > 1 then
                                 let mutable sx, sy, sz = 0., 0., 0.
-                                for ni in mems do
+                                for k = 0 to mems.Length - 1 do
+                                    let ni = mems[k]
                                     sx <- sx + xs[ni]; sy <- sy + ys[ni]; sz <- sz + zs[ni]
-                                let mx, my, mz = sx / float mems.Length, sy / float mems.Length, sz / float mems.Length
-                                for ni in mems do
-                                    fx[ni] <- fx[ni] + (mx - xs[ni]) * config.CompoundGravity * degMass[ni]
-                                    fy[ni] <- fy[ni] + (my - ys[ni]) * config.CompoundGravity * degMass[ni]
-                                    fz[ni] <- fz[ni] + (mz - zs[ni]) * config.CompoundGravity * degMass[ni]
+                                let invM = 1. / float mems.Length
+                                let mx, my, mz = sx * invM, sy * invM, sz * invM
+                                for k = 0 to mems.Length - 1 do
+                                    let ni = mems[k]
+                                    let cg = config.CompoundGravity * degMass[ni]
+                                    fx[ni] <- fx[ni] + (mx - xs[ni]) * cg
+                                    fy[ni] <- fy[ni] + (my - ys[ni]) * cg
+                                    fz[ni] <- fz[ni] + (mz - zs[ni]) * cg
 
                     // 4. Adaptive ForceAtlas2 3D swing/traction velocity step
                     let mutable totalSwing = 0.
@@ -259,7 +320,9 @@ module Force3D =
                     for i = 0 to n - 1 do
                         let swx, swy, swz = fx[i] - prevFx[i], fy[i] - prevFy[i], fz[i] - prevFz[i]
                         let trx, try_, trz = fx[i] + prevFx[i], fy[i] + prevFy[i], fz[i] + prevFz[i]
-                        totalSwing <- totalSwing + degMass[i] * sqrt (swx * swx + swy * swy + swz * swz)
+                        let sw = sqrt (swx * swx + swy * swy + swz * swz)
+                        swArr[i] <- sw
+                        totalSwing <- totalSwing + degMass[i] * sw
                         totalTraction <- totalTraction + degMass[i] * 0.5 * sqrt (trx * trx + try_ * try_ + trz * trz)
 
                     let cooling = 1. - 0.65 * (float step / float config.Iterations)
@@ -269,90 +332,109 @@ module Force3D =
                     let maxMove = config.ScalingRatio * 4. * cooling + 2.
 
                     for i = 0 to n - 1 do
-                        let swx, swy, swz = fx[i] - prevFx[i], fy[i] - prevFy[i], fz[i] - prevFz[i]
-                        let sw = sqrt (swx * swx + swy * swy + swz * swz)
-                        let fMag = sqrt (fx[i] * fx[i] + fy[i] * fy[i] + fz[i] * fz[i])
-                        if fMag > 1e-9 then
-                            let nodeSpeed = globalSpeed / (1. + globalSpeed * sqrt sw)
+                        let fxi, fyi, fzi = fx[i], fy[i], fz[i]
+                        let fMagSq = fxi * fxi + fyi * fyi + fzi * fzi
+                        if fMagSq > 1e-18 then
+                            let fMag = sqrt fMagSq
+                            let nodeSpeed = globalSpeed / (1. + globalSpeed * sqrt swArr[i])
                             let disp = min maxMove (fMag * nodeSpeed)
+                            let scale = disp / fMag
                             match nodes[i].Pinned with
                             | Some p ->
                                 xs[i] <- p.X; ys[i] <- p.Y
-                                zs[i] <- zs[i] + (fz[i] / fMag) * disp
+                                zs[i] <- zs[i] + fzi * scale
                             | None ->
-                                xs[i] <- xs[i] + (fx[i] / fMag) * disp
-                                ys[i] <- ys[i] + (fy[i] / fMag) * disp
-                                zs[i] <- zs[i] + (fz[i] / fMag) * disp
-                        prevFx[i] <- fx[i]; prevFy[i] <- fy[i]; prevFz[i] <- fz[i]
+                                xs[i] <- xs[i] + fxi * scale
+                                ys[i] <- ys[i] + fyi * scale
+                                zs[i] <- zs[i] + fzi * scale
+                        prevFx[i] <- fxi; prevFy[i] <- fyi; prevFz[i] <- fzi
 
-                // Final 3D sphere overlap resolution pass via Octree
-                if config.PreventOverlap && n > 1 then
-                    let maxRad = Array.max radii
+                // Final 3D sphere overlap resolution pass via zero-alloc arena Octree
+                if preventOv && n > 1 then
+                    let mutable maxRad = radii[0]
+                    for i = 1 to n - 1 do if radii[i] > maxRad then maxRad <- radii[i]
                     for _ = 0 to 1 do
-                        for i = 0 to n - 1 do pts[i] <- Point3.create xs[i] ys[i] zs[i]
-                        let oct = Octree.buildWithCancellation token (fun i -> pts[i]) (fun _ -> 1.) (seq { 0 .. n - 1 })
-                        Octree.visitIndexed n (fun i cell ->
-                            let pi = pts[i]
-                            let e = cell.Extent
-                            let nearX = max (Bounds3.minX e) (min (Bounds3.maxX e) pi.X)
-                            let nearY = max (Bounds3.minY e) (min (Bounds3.maxY e) pi.Y)
-                            let nearZ = max (Bounds3.minZ e) (min (Bounds3.maxZ e) pi.Z)
-                            let distToBox = Point3.distance pi (Point3.create nearX nearY nearZ)
-                            if distToBox > radii[i] + maxRad then false
-                            else
-                                for item in cell.Items do
-                                    let j = item.Value
-                                    if j > i then
-                                        let dx = xs[j] - xs[i]
-                                        let dy = ys[j] - ys[i]
-                                        let dz = zs[j] - zs[i]
-                                        let d = sqrt (dx * dx + dy * dy + dz * dz)
-                                        let overlap = radii[i] + radii[j] + 4. - d
-                                        if overlap > 0. then
-                                            let ux, uy, uz = if d < 1e-6 then 1., 0., 0. else dx / d, dy / d, dz / d
-                                            let shift = overlap * 0.5
-                                            xs[i] <- xs[i] - ux * shift; ys[i] <- ys[i] - uy * shift; zs[i] <- zs[i] - uz * shift
-                                            xs[j] <- xs[j] + ux * shift; ys[j] <- ys[j] + uy * shift; zs[j] <- zs[j] + uz * shift
-                                true) oct
+                        Octree.rebuildInPlace octWs token xs ys zs unitMass n false
+                        let octNodes = octWs.Nodes
+                        let perm = octWs.Perm
+                        let stack = octWs.Stack
+                        for i = 0 to n - 1 do
+                            let pix, piy, piz = xs[i], ys[i], zs[i]
+                            let rLim = radii[i] + maxRad + 4.
+                            let rLimSq = rLim * rLim
+                            stack[0] <- 0
+                            let mutable sp = 1
+                            while sp > 0 do
+                                sp <- sp - 1
+                                let nd = octNodes[stack[sp]]
+                                let dxB = max nd.MinX (min nd.MaxX pix) - pix
+                                let dyB = max nd.MinY (min nd.MaxY piy) - piy
+                                let dzB = max nd.MinZ (min nd.MaxZ piz) - piz
+                                if dxB * dxB + dyB * dyB + dzB * dzB <= rLimSq then
+                                    if nd.ItemCount > 0 then
+                                        for k = nd.ItemStart to nd.ItemStart + nd.ItemCount - 1 do
+                                            let j = perm[k]
+                                            if j > i then
+                                                let dx = xs[j] - xs[i]
+                                                let dy = ys[j] - ys[i]
+                                                let dz = zs[j] - zs[i]
+                                                let req = radii[i] + radii[j] + 4.
+                                                let dSq = dx * dx + dy * dy + dz * dz
+                                                if dSq < req * req then
+                                                    let d = sqrt dSq
+                                                    let overlap = req - d
+                                                    if overlap > 0. then
+                                                        let ux, uy, uz = if d < 1e-6 then 1., 0., 0. else dx / d, dy / d, dz / d
+                                                        let shift = overlap * 0.5
+                                                        xs[i] <- xs[i] - ux * shift; ys[i] <- ys[i] - uy * shift; zs[i] <- zs[i] - uz * shift
+                                                        xs[j] <- xs[j] + ux * shift; ys[j] <- ys[j] + uy * shift; zs[j] <- zs[j] + uz * shift
+                                    elif nd.ChildCount > 0 then
+                                        for c = nd.FirstChild + nd.ChildCount - 1 downto nd.FirstChild do
+                                            stack[sp] <- c
+                                            sp <- sp + 1
 
-                let nodeBoxes = Array.zeroCreate<Bounds3> n
-                let posNodes =
-                    [ for i in 0 .. n - 1 do
-                        let nd = nodes[i]
-                        let c = Point3.create xs[i] ys[i] zs[i]
-                        let box = Kernels3D.nodeBox c nd.Size.Width nd.Size.Height nd.DepthSize
-                        nodeBoxes[i] <- box
-                        yield
-                            { Id = nd.Id
-                              Kind = nd.Kind
-                              Center = c
-                              Bounds = box
-                              Radius = radii[i]
-                              ScaleFactor = 1.
-                              ParentGroup = nd.ParentGroup
-                              Layer = None } ]
+                let hasGroups = groups.Length > 0
+                let nodeBoxes = if hasGroups then Array.zeroCreate<Bounds3> n else [||]
+                let centers = Array.zeroCreate<Point3> n
+                let mutable posNodes = []
+                for i = n - 1 downto 0 do
+                    let nd = nodes[i]
+                    let c = Point3.create xs[i] ys[i] zs[i]
+                    centers[i] <- c
+                    let box = Kernels3D.nodeBox c nd.Size.Width nd.Size.Height nd.DepthSize
+                    if hasGroups then nodeBoxes[i] <- box
+                    posNodes <-
+                        { Id = nd.Id
+                          Kind = nd.Kind
+                          Center = c
+                          Bounds = box
+                          Radius = radii[i]
+                          ScaleFactor = 1.
+                          ParentGroup = nd.ParentGroup
+                          Layer = None } :: posNodes
 
-                let posArr = List.toArray posNodes
-                let posGroups = Kernels3D.computeGroups3D resolved nodeBoxes
-                let routed =
-                    [ for a in assocs do
-                        let u = nodeIdx[a.Source.NodeId]
-                        let v = nodeIdx[a.Target.NodeId]
-                        let pts =
-                            if u = v then
-                                let c = posArr[u].Center
-                                let r = posArr[u].Radius
-                                [| c; Point3.create (c.X + r * 1.4) (c.Y - r * 1.4) (c.Z + r * 0.6); c |]
-                            else
-                                [| posArr[u].Center; posArr[v].Center |]
-                        yield
-                            { Id = a.Id
-                              Source = a.Source
-                              Target = a.Target
-                              Kind = a.Kind
-                              IsBackbone = true
-                              Points = Point3Chain.ofOwnedArray pts
-                              Waypoints = Array.toList pts } ]
+                let posGroups = if hasGroups then Kernels3D.computeGroups3D resolved nodeBoxes else []
+                let mutable routed = []
+                for e = mAll - 1 downto 0 do
+                    let a = assocs[e]
+                    let u, v = assocSrc[e], assocDst[e]
+                    let ptsArr, wps =
+                        if u = v then
+                            let c = centers[u]
+                            let r = radii[u]
+                            let lp = Point3.create (c.X + r * 1.4) (c.Y - r * 1.4) (c.Z + r * 0.6)
+                            [| c; lp; c |], [ c; lp; c ]
+                        else
+                            let cu, cv = centers[u], centers[v]
+                            [| cu; cv |], [ cu; cv ]
+                    routed <-
+                        { Id = a.Id
+                          Source = a.Source
+                          Target = a.Target
+                          Kind = a.Kind
+                          IsBackbone = true
+                          Points = Point3Chain.ofOwnedArray ptsArr
+                          Waypoints = wps } :: routed
 
                 Ok
                     { Bounds = Kernels3D.computeBounds3D config.Bounds posNodes posGroups routed

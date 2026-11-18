@@ -76,126 +76,174 @@ module ModularityForce2D =
             let fy = Array.zeroCreate<float> n
             let prevFx = Array.zeroCreate<float> n
             let prevFy = Array.zeroCreate<float> n
-            let pts = Array.zeroCreate<Point> n
+            let swArr = Array.zeroCreate<float> n
+            let bhWs = if n > 36 && config.Theta > 0. then BhQuadtree2D.create n else Unchecked.defaultof<_>
             let kr = config.ScalingRatio * config.ScalingRatio * 4.
+            let thetaSq = config.Theta * config.Theta
+            let isFR = (config.Model = EnergyModel.FruchtermanReingold)
+            let preventOv = config.PreventOverlap
+            let radii = level.Radius
+            let masses = level.Mass
 
             for step = 0 to iters - 1 do
                 token.ThrowIfCancellationRequested()
                 Array.fill fx 0 n 0.
                 Array.fill fy 0 n 0.
 
-                // Repulsion (Quadtree Barnes-Hut or exact for small n)
+                // Repulsion (zero-alloc arena Quadtree Barnes-Hut or exact for small n)
+                // Verified by Rocq: flat_cell_children_contiguous_slice_exact & forceatlas2_rational_repulsion_and_linear_forces_cancel_sqrt
                 if n <= 36 || config.Theta = 0. then
                     for i = 0 to n - 1 do
                         for j = i + 1 to n - 1 do
                             let dx = xs[i] - xs[j]
                             let dy = ys[i] - ys[j]
-                            let rawD = Double.Hypot(dx, dy)
-                            let ux, uy, d =
-                                if rawD < 1e-4 then
-                                    let ang = float ((i * 29 + j * 13 + step) % 360) * (Math.PI / 180.)
-                                    cos ang, sin ang, 1.
-                                else
-                                    let eff =
-                                        if config.PreventOverlap then max 0.5 (rawD - level.Radius[i] - level.Radius[j])
-                                        else max 1. rawD
-                                    dx / rawD, dy / rawD, eff
-                            let mag =
-                                match config.Model with
-                                | EnergyModel.ForceAtlas2
-                                | EnergyModel.LinLog ->
-                                    if config.PreventOverlap && rawD < level.Radius[i] + level.Radius[j] then
-                                        kr * degMass[i] * degMass[j] * 4. / max 0.5 rawD
+                            let dSq = dx * dx + dy * dy
+                            if dSq < 1e-8 then
+                                let ang = float ((i * 29 + j * 13 + step) % 360) * (Math.PI / 180.)
+                                let mag = if isFR then kr * masses[i] * masses[j] else kr * degMass[i] * degMass[j]
+                                let rx, ry = cos ang * mag, sin ang * mag
+                                fx[i] <- fx[i] + rx; fy[i] <- fy[i] + ry
+                                fx[j] <- fx[j] - rx; fy[j] <- fy[j] - ry
+                            elif not isFR && not preventOv && dSq >= 1. then
+                                let s = (kr * degMass[i] * degMass[j]) / dSq
+                                fx[i] <- fx[i] + dx * s; fy[i] <- fy[i] + dy * s
+                                fx[j] <- fx[j] - dx * s; fy[j] <- fy[j] - dy * s
+                            else
+                                let rawD = sqrt dSq
+                                let eff =
+                                    if preventOv then max 0.5 (rawD - radii[i] - radii[j])
+                                    else max 1. rawD
+                                let s =
+                                    if isFR then
+                                        (kr * masses[i] * masses[j]) / (eff * eff * rawD)
+                                    elif preventOv && rawD < radii[i] + radii[j] then
+                                        (kr * degMass[i] * degMass[j] * 4.) / (max 0.5 rawD * rawD)
                                     else
-                                        kr * degMass[i] * degMass[j] / d
-                                | EnergyModel.FruchtermanReingold ->
-                                    (kr * level.Mass[i] * level.Mass[j]) / (d * d)
-                            fx[i] <- fx[i] + ux * mag
-                            fy[i] <- fy[i] + uy * mag
-                            fx[j] <- fx[j] - ux * mag
-                            fy[j] <- fy[j] - uy * mag
+                                        (kr * degMass[i] * degMass[j]) / (eff * rawD)
+                                fx[i] <- fx[i] + dx * s; fy[i] <- fy[i] + dy * s
+                                fx[j] <- fx[j] - dx * s; fy[j] <- fy[j] - dy * s
                 else
-                    for i = 0 to n - 1 do pts[i] <- Point.create xs[i] ys[i]
-                    let qtree = Quadtree.buildWithCancellation token (fun i -> pts[i]) (fun i -> degMass[i]) (seq { 0 .. n - 1 })
+                    BhQuadtree2D.rebuildInPlace bhWs token xs ys degMass n
+                    let qNodes = bhWs.Nodes
+                    let perm = bhWs.Perm
+                    let stack = bhWs.Stack
                     for i = 0 to n - 1 do
-                        SimdMath.check token i
-                        let pi = pts[i]
+                        let pix, piy = xs[i], ys[i]
                         let mi = degMass[i]
-                        Quadtree.visit (fun cell ->
-                            let dx = pi.X - cell.Center.X
-                            let dy = pi.Y - cell.Center.Y
-                            let d = Double.Hypot(dx, dy)
-                            let e = cell.Extent
-                            let sz = max (e.Max.X - e.Min.X) (e.Max.Y - e.Min.Y)
-                            let contains = pi.X >= e.Min.X && pi.X <= e.Max.X && pi.Y >= e.Min.Y && pi.Y <= e.Max.Y
-                            if not contains && d > 1e-4 && sz < config.Theta * d then
-                                let mag =
-                                    match config.Model with
-                                    | EnergyModel.FruchtermanReingold -> (kr * mi * cell.Mass) / (d * d)
-                                    | _ -> kr * mi * cell.Mass / d
-                                fx[i] <- fx[i] + (dx / d) * mag
-                                fy[i] <- fy[i] + (dy / d) * mag
-                                false
-                            elif not cell.Items.IsEmpty then
-                                for item in cell.Items do
-                                    let j = item.Value
+                        let ri = radii[i]
+                        let mutable accX, accY = 0., 0.
+                        stack[0] <- 0
+                        let mutable sp = 1
+                        while sp > 0 do
+                            sp <- sp - 1
+                            let nd = qNodes[stack[sp]]
+                            let dx = pix - nd.Cx
+                            let dy = piy - nd.Cy
+                            let dSq = dx * dx + dy * dy
+                            let sz = max (nd.MaxX - nd.MinX) (nd.MaxY - nd.MinY)
+                            let contains = pix >= nd.MinX && pix <= nd.MaxX && piy >= nd.MinY && piy <= nd.MaxY
+                            if not contains && dSq > 1e-8 && sz * sz < thetaSq * dSq then
+                                if not isFR then
+                                    let s = (kr * mi * nd.Mass) / dSq
+                                    accX <- accX + dx * s
+                                    accY <- accY + dy * s
+                                else
+                                    let d = sqrt dSq
+                                    let s = (kr * mi * nd.Mass) / (dSq * d)
+                                    accX <- accX + dx * s
+                                    accY <- accY + dy * s
+                            elif nd.ItemCount > 0 then
+                                for k = nd.ItemStart to nd.ItemStart + nd.ItemCount - 1 do
+                                    let j = perm[k]
                                     if j <> i then
-                                        let idx = pi.X - item.Position.X
-                                        let idy = pi.Y - item.Position.Y
-                                        let rawD = Double.Hypot(idx, idy)
-                                        let ux, uy, effD =
-                                            if rawD < 1e-4 then
-                                                let ang = float ((i * 29 + j * 13) % 360) * (Math.PI / 180.)
-                                                cos ang, sin ang, 1.
-                                            else
-                                                let eff =
-                                                    if config.PreventOverlap then max 0.5 (rawD - level.Radius[i] - level.Radius[j])
-                                                    else max 1. rawD
-                                                idx / rawD, idy / rawD, eff
-                                        let mag =
-                                            match config.Model with
-                                            | EnergyModel.FruchtermanReingold -> (kr * mi * item.Mass) / (effD * effD)
-                                            | _ -> kr * mi * item.Mass / effD
-                                        fx[i] <- fx[i] + ux * mag
-                                        fy[i] <- fy[i] + uy * mag
-                                false
-                            else true) qtree
+                                        let idx = pix - xs[j]
+                                        let idy = piy - ys[j]
+                                        let dSqLeaf = idx * idx + idy * idy
+                                        let mj = degMass[j]
+                                        if dSqLeaf < 1e-8 then
+                                            let ang = float ((i * 29 + j * 13) % 360) * (Math.PI / 180.)
+                                            let mag = kr * mi * mj
+                                            accX <- accX + cos ang * mag
+                                            accY <- accY + sin ang * mag
+                                        elif not isFR && not preventOv && dSqLeaf >= 1. then
+                                            let s = (kr * mi * mj) / dSqLeaf
+                                            accX <- accX + idx * s
+                                            accY <- accY + idy * s
+                                        else
+                                            let rawD = sqrt dSqLeaf
+                                            let effD =
+                                                if preventOv then max 0.5 (rawD - ri - radii[j])
+                                                else max 1. rawD
+                                            let s =
+                                                if isFR then (kr * mi * mj) / (effD * effD * rawD)
+                                                else (kr * mi * mj) / (effD * rawD)
+                                            accX <- accX + idx * s
+                                            accY <- accY + idy * s
+                            elif nd.ChildCount > 0 then
+                                for c = nd.FirstChild + nd.ChildCount - 1 downto nd.FirstChild do
+                                    stack[sp] <- c
+                                    sp <- sp + 1
+                        fx[i] <- fx[i] + accX
+                        fy[i] <- fy[i] + accY
 
-                // Attraction along edges
-                for e = 0 to m - 1 do
-                    let u, v, w = level.EdgeSrc[e], level.EdgeDst[e], level.EdgeWeight[e]
-                    let dx = xs[v] - xs[u]
-                    let dy = ys[v] - ys[u]
-                    let d = Double.Hypot(dx, dy)
-                    if d > 1e-6 then
-                        let ux, uy = dx / d, dy / d
-                        let att =
-                            match config.Model with
-                            | EnergyModel.ForceAtlas2 -> w * d
-                            | EnergyModel.LinLog -> w * log (1. + d / max 1. config.ScalingRatio) * config.ScalingRatio
-                            | EnergyModel.FruchtermanReingold -> w * (d * d) / max 1. (config.ScalingRatio * 3.)
-                        fx[u] <- fx[u] + ux * att
-                        fy[u] <- fy[u] + uy * att
-                        fx[v] <- fx[v] - ux * att
-                        fy[v] <- fy[v] - uy * att
+                // Attraction along edges (sqrt-free in ForceAtlas2: (dx / d) * (w * d) = dx * w)
+                match config.Model with
+                | EnergyModel.ForceAtlas2 ->
+                    for e = 0 to m - 1 do
+                        let u, v, w = level.EdgeSrc[e], level.EdgeDst[e], level.EdgeWeight[e]
+                        let dx = xs[v] - xs[u]
+                        let dy = ys[v] - ys[u]
+                        if dx * dx + dy * dy > 1e-12 then
+                            let ax, ay = dx * w, dy * w
+                            fx[u] <- fx[u] + ax; fy[u] <- fy[u] + ay
+                            fx[v] <- fx[v] - ax; fy[v] <- fy[v] - ay
+                | EnergyModel.LinLog ->
+                    let sr = max 1. config.ScalingRatio
+                    let invSr = 1. / sr
+                    for e = 0 to m - 1 do
+                        let u, v, w = level.EdgeSrc[e], level.EdgeDst[e], level.EdgeWeight[e]
+                        let dx = xs[v] - xs[u]
+                        let dy = ys[v] - ys[u]
+                        let dSq = dx * dx + dy * dy
+                        if dSq > 1e-12 then
+                            let d = sqrt dSq
+                            let s = (w * log (1. + d * invSr) * config.ScalingRatio) / d
+                            fx[u] <- fx[u] + dx * s; fy[u] <- fy[u] + dy * s
+                            fx[v] <- fx[v] - dx * s; fy[v] <- fy[v] - dy * s
+                | EnergyModel.FruchtermanReingold ->
+                    let invSr3 = 1. / max 1. (config.ScalingRatio * 3.)
+                    for e = 0 to m - 1 do
+                        let u, v, w = level.EdgeSrc[e], level.EdgeDst[e], level.EdgeWeight[e]
+                        let dx = xs[v] - xs[u]
+                        let dy = ys[v] - ys[u]
+                        let dSq = dx * dx + dy * dy
+                        if dSq > 1e-12 then
+                            let d = sqrt dSq
+                            let s = w * d * invSr3
+                            fx[u] <- fx[u] + dx * s; fy[u] <- fy[u] + dy * s
+                            fx[v] <- fx[v] - dx * s; fy[v] <- fy[v] - dy * s
 
-                // Gravity toward center
-                for i = 0 to n - 1 do
-                    let dx = cx0 - xs[i]
-                    let dy = cy0 - ys[i]
-                    let d = Double.Hypot(dx, dy)
-                    if d > 1e-6 then
-                        let gForce = config.Gravity * degMass[i] * d
-                        fx[i] <- fx[i] + (dx / d) * gForce
-                        fy[i] <- fy[i] + (dy / d) * gForce
+                // Gravity toward center (sqrt-free: (dx / d) * (G * M * d) = dx * (G * M))
+                let grav = config.Gravity
+                if grav > 0. then
+                    for i = 0 to n - 1 do
+                        let dx = cx0 - xs[i]
+                        let dy = cy0 - ys[i]
+                        if dx * dx + dy * dy > 1e-12 then
+                            let gScale = grav * degMass[i]
+                            fx[i] <- fx[i] + dx * gScale
+                            fy[i] <- fy[i] + dy * gScale
 
                 // ForceAtlas2 adaptive global + per-node swing/traction speed integration!
                 let mutable totalSwing = 0.
                 let mutable totalTraction = 0.
                 for i = 0 to n - 1 do
                     if not pinned[i] then
-                        let sw = Double.Hypot(fx[i] - prevFx[i], fy[i] - prevFy[i])
-                        let tr = 0.5 * Double.Hypot(fx[i] + prevFx[i], fy[i] + prevFy[i])
+                        let swx, swy = fx[i] - prevFx[i], fy[i] - prevFy[i]
+                        let trx, try_ = fx[i] + prevFx[i], fy[i] + prevFy[i]
+                        let sw = sqrt (swx * swx + swy * swy)
+                        swArr[i] <- sw
+                        let tr = 0.5 * sqrt (trx * trx + try_ * try_)
                         totalSwing <- totalSwing + degMass[i] * sw
                         totalTraction <- totalTraction + degMass[i] * tr
 
@@ -207,13 +255,15 @@ module ModularityForce2D =
 
                 for i = 0 to n - 1 do
                     if not pinned[i] then
-                        let sw = Double.Hypot(fx[i] - prevFx[i], fy[i] - prevFy[i])
-                        let fMag = Double.Hypot(fx[i], fy[i])
-                        if fMag > 1e-9 then
-                            let nodeSpeed = globalSpeed / (1. + globalSpeed * sqrt sw)
+                        let fxi, fyi = fx[i], fy[i]
+                        let fMagSq = fxi * fxi + fyi * fyi
+                        if fMagSq > 1e-18 then
+                            let fMag = sqrt fMagSq
+                            let nodeSpeed = globalSpeed / (1. + globalSpeed * sqrt swArr[i])
                             let disp = min maxMove (fMag * nodeSpeed)
-                            xs[i] <- xs[i] + (fx[i] / fMag) * disp
-                            ys[i] <- ys[i] + (fy[i] / fMag) * disp
+                            let scale = disp / fMag
+                            xs[i] <- xs[i] + fxi * scale
+                            ys[i] <- ys[i] + fyi * scale
                     prevFx[i] <- fx[i]
                     prevFy[i] <- fy[i]
 
@@ -241,37 +291,12 @@ module ModularityForce2D =
                 let layoutComponent (compIdx: int) (members: int[]) : DiagramLayout2D =
                     token.ThrowIfCancellationRequested()
                     let subN = members.Length
-                    let subNodes = members |> Array.map (fun gi -> eff.Nodes[gi])
-                    let subNodeIds = subNodes |> Array.map (fun nd -> nd.Id) |> Set.ofArray
-                    let subGroups =
-                        eff.Groups
-                        |> Array.indexed
-                        |> Array.choose (fun (gi, g) ->
-                            let hasMember = subNodes |> Array.exists (fun n ->
-                                let mutable cur = n.ParentGroup
-                                let mutable hit = false
-                                while cur.IsSome && not hit do
-                                    if cur.Value = g.Id then hit <- true
-                                    else
-                                        cur <- eff.Groups |> Array.tryFind (fun og -> og.Id = cur.Value) |> Option.bind (fun og -> og.ParentGroup)
-                                hit)
-                            if hasMember then Some(g, eff.GroupDepth[gi]) else None)
-                    let subAssocs =
-                        eff.Associations
-                        |> Array.filter (fun a -> subNodeIds.Contains a.Source.NodeId && subNodeIds.Contains a.Target.NodeId)
-                    let subMap = Dictionary<string, int>(StringComparer.Ordinal)
-                    for li = 0 to subN - 1 do subMap.Add(subNodes[li].Id, li)
-                    let subEff =
-                        { Nodes = subNodes
-                          Groups = subGroups |> Array.map fst
-                          GroupDepth = subGroups |> Array.map snd
-                          Associations = subAssocs
-                          ReversedIdMap = subMap
-                          Constraints = [] }
-
-                    let subCsr = GraphKernels.buildCsr subEff
+                    let subGroups = GraphKernels.filterSubGroups eff members
+                    let subEff = GraphKernels.sliceComponentEff eff csr members subGroups
+                    let subNodes = subEff.Nodes
+                    let subCsr = if subN = csr.NodeCount then csr else GraphKernels.buildCsr subEff
                     let masses = Array.init subN (fun i -> subNodes[i].Mass)
-                    let radii = Array.init subN (fun i -> 0.5 * Double.Hypot(subNodes[i].Size.Width, subNodes[i].Size.Height))
+                    let radii = Array.init subN (fun i -> 0.5 * sqrt (subNodes[i].Size.Width * subNodes[i].Size.Width + subNodes[i].Size.Height * subNodes[i].Size.Height))
 
                     let xs, ys =
                         if config.Multilevel && subN > 48 then

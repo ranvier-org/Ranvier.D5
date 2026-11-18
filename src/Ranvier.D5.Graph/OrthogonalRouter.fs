@@ -130,19 +130,55 @@ module OrthogonalRouter =
                 best <- i
         best
 
-    /// <summary>Routes between two stub points avoiding inflated obstacles using local Hanan-grid A* search.</summary>
+    let private dxStep = [| 1; 0; -1; 0 |]
+    let private dyStep = [| 0; 1; 0; -1 |]
+
+    type private AStarWorkspace =
+        { mutable GScore: float[]
+          mutable Parent: int[]
+          mutable Stamp: int[]
+          mutable CurStamp: int
+          RawXs: ResizeArray<float>
+          RawYs: ResizeArray<float>
+          RevPts: ResizeArray<Point>
+#if FABLE_COMPILER
+          Pq: PriorityQueue<int, float>
+#else
+          Pq: System.Collections.Generic.PriorityQueue<int, float>
+#endif
+        }
+
+    let private createWorkspace () =
+        let initCap = 4096
+        { GScore = Array.zeroCreate<float> initCap
+          Parent = Array.zeroCreate<int> initCap
+          Stamp = Array.zeroCreate<int> initCap
+          CurStamp = 0
+          RawXs = ResizeArray<float>(112)
+          RawYs = ResizeArray<float>(112)
+          RevPts = ResizeArray<Point>(32)
+#if FABLE_COMPILER
+          Pq = PriorityQueue<int, float>()
+#else
+          Pq = System.Collections.Generic.PriorityQueue<int, float>(256)
+#endif
+        }
+
+    /// <summary>Routes between two stub points avoiding inflated obstacles using local Hanan-grid A* search with pooled stamp-cleared state arrays.</summary>
     let private aStarOrthogonal
+        (ws: AStarWorkspace)
         (stubA: Point)
         (dirA: int)
         (stubB: Point)
         (bendPenalty: float)
-        (obstacles: struct(float * float * float * float)[])
+        (obstacles: ResizeArray<struct(float * float * float * float)>)
         : Point[] =
+        let obsCount = obstacles.Count
         // Fast path when corridor has zero obstacles or direct 1-bend / 2-bend orthogonal link is completely clear:
         let clearSeg x0 y0 x1 y1 =
             let mutable ok = true
             let mutable k = 0
-            while ok && k < obstacles.Length do
+            while ok && k < obsCount do
                 let struct(rx0, ry0, rx1, ry1) = obstacles[k]
                 if segmentHitsRect x0 y0 x1 y1 rx0 ry0 rx1 ry1 then ok <- false
                 k <- k + 1
@@ -163,11 +199,13 @@ module OrthogonalRouter =
         elif clearSeg stubA.X stubA.Y stubA.X stubB.Y && clearSeg stubA.X stubB.Y stubB.X stubB.Y then
             [| stubA; Point.create stubA.X stubB.Y; stubB |]
         else
-            let rawXs = ResizeArray<float>(obstacles.Length * 2 + 6)
-            let rawYs = ResizeArray<float>(obstacles.Length * 2 + 6)
+            let rawXs = ws.RawXs
+            let rawYs = ws.RawYs
+            rawXs.Clear()
+            rawYs.Clear()
             rawXs.Add stubA.X; rawXs.Add stubB.X; rawXs.Add midX
             rawYs.Add stubA.Y; rawYs.Add stubB.Y; rawYs.Add midY
-            let limitObs = min obstacles.Length 48
+            let limitObs = min obsCount 48
             for k = 0 to limitObs - 1 do
                 let struct(rx0, ry0, rx1, ry1) = obstacles[k]
                 rawXs.Add rx0; rawXs.Add rx1
@@ -181,58 +219,82 @@ module OrthogonalRouter =
 
             // State = ((y * nx + x) * 4 + dir), dir: 0=E, 1=S, 2=W, 3=N
             let stateCount = nx * ny * 4
-            let gScore = Array.create stateCount infinity
-            let parent = Array.create stateCount -1
+            if ws.GScore.Length < stateCount then
+                let cap = max stateCount (ws.GScore.Length * 2)
+                ws.GScore <- Array.zeroCreate<float> cap
+                ws.Parent <- Array.zeroCreate<int> cap
+                ws.Stamp <- Array.zeroCreate<int> cap
+                ws.CurStamp <- 0
+
+            ws.CurStamp <- ws.CurStamp + 1
+            if ws.CurStamp = Int32.MaxValue then
+                Array.fill ws.Stamp 0 ws.Stamp.Length 0
+                ws.CurStamp <- 1
+            let stamp = ws.CurStamp
+            let gScore = ws.GScore
+            let parent = ws.Parent
+            let stampArr = ws.Stamp
 #if FABLE_COMPILER
             let pq = PriorityQueue<int, float>()
 #else
-            let pq = System.Collections.Generic.PriorityQueue<int, float>()
+            let pq = ws.Pq
+            pq.Clear()
 #endif
-            let heuristic xi yi = abs (xs[tx] - xs[xi]) + abs (ys[ty] - ys[yi])
+
+            let txX = xs[tx]
+            let tyY = ys[ty]
+            let inline heuristic xi yi = abs (txX - xs[xi]) + abs (tyY - ys[yi])
             for d = 0 to 3 do
                 let s0 = (sy * nx + sx) * 4 + d
                 let initBend = if d = dirA then 0. else bendPenalty * 0.5
+                stampArr[s0] <- stamp
                 gScore[s0] <- initBend
+                parent[s0] <- -1
                 pq.Enqueue(s0, initBend + heuristic sx sy)
 
-            let dxStep = [| 1; 0; -1; 0 |]
-            let dyStep = [| 0; 1; 0; -1 |]
+            // Precompute elementary grid-edge blocked flags (nx * ny horizontal + nx * ny vertical) lazily on first probe via stamp!
             let mutable goalState = -1
 
             while pq.Count > 0 && goalState < 0 do
                 let cur = pq.Dequeue()
-                let curG = gScore[cur]
-                let d = cur &&& 3
-                let cell = cur >>> 2
-                let xi = cell % nx
-                let yi = cell / nx
-                if xi = tx && yi = ty then
-                    goalState <- cur
-                else
-                    for nd = 0 to 3 do
-                        // Disallow immediate 180-degree reversal
-                        if ((nd + 2) &&& 3) <> d then
-                            let nxi = xi + dxStep[nd]
-                            let nyi = yi + dyStep[nd]
-                            if nxi >= 0 && nxi < nx && nyi >= 0 && nyi < ny then
-                                let x0, y0 = xs[xi], ys[yi]
-                                let x1, y1 = xs[nxi], ys[nyi]
-                                let stepLen = abs (x1 - x0) + abs (y1 - y0)
-                                let blocked = not (clearSeg x0 y0 x1 y1)
-                                // Heavy penalty if forced through inflated margin, allowing escape when port sits inside margin
-                                let obsCost = if blocked then 5000. + stepLen * 20. else 0.
-                                let bendCost = if nd = d then 0. else bendPenalty
-                                let tentative = curG + stepLen + bendCost + obsCost
-                                let nextState = (nyi * nx + nxi) * 4 + nd
-                                if tentative < gScore[nextState] - 1e-9 then
-                                    gScore[nextState] <- tentative
-                                    parent[nextState] <- cur
-                                    pq.Enqueue(nextState, tentative + heuristic nxi nyi)
+                if stampArr[cur] = stamp then
+                    let curG = gScore[cur]
+                    let d = cur &&& 3
+                    let cell = cur >>> 2
+                    let xi = cell % nx
+                    let yi = cell / nx
+                    if xi = tx && yi = ty then
+                        goalState <- cur
+                    else
+                        let x0, y0 = xs[xi], ys[yi]
+                        for nd = 0 to 3 do
+                            // Disallow immediate 180-degree reversal
+                            if ((nd + 2) &&& 3) <> d then
+                                let nxi = xi + dxStep[nd]
+                                let nyi = yi + dyStep[nd]
+                                if nxi >= 0 && nxi < nx && nyi >= 0 && nyi < ny then
+                                    let nextState = (nyi * nx + nxi) * 4 + nd
+                                    let x1, y1 = xs[nxi], ys[nyi]
+                                    let stepLen = abs (x1 - x0) + abs (y1 - y0)
+                                    let bendCost = if nd = d then 0. else bendPenalty
+                                    // Check optimistic bound before scanning obstacles!
+                                    let minTentative = curG + stepLen + bendCost
+                                    let prevG = if stampArr[nextState] = stamp then gScore[nextState] else infinity
+                                    if minTentative < prevG - 1e-9 then
+                                        let blocked = not (clearSeg x0 y0 x1 y1)
+                                        let obsCost = if blocked then 5000. + stepLen * 20. else 0.
+                                        let tentative = minTentative + obsCost
+                                        if tentative < prevG - 1e-9 then
+                                            stampArr[nextState] <- stamp
+                                            gScore[nextState] <- tentative
+                                            parent[nextState] <- cur
+                                            pq.Enqueue(nextState, tentative + heuristic nxi nyi)
 
             if goalState < 0 then
                 [| stubA; Point.create stubB.X stubA.Y; stubB |]
             else
-                let revPts = ResizeArray<Point>()
+                let revPts = ws.RevPts
+                revPts.Clear()
                 let mutable st = goalState
                 while st >= 0 do
                     let cell = st >>> 2
@@ -240,11 +302,14 @@ module OrthogonalRouter =
                     let yi = cell / nx
                     revPts.Add(Point.create xs[xi] ys[yi])
                     st <- parent[st]
-                revPts.Reverse()
-                if revPts.Count > 0 then
-                    revPts[0] <- stubA
-                    revPts[revPts.Count - 1] <- stubB
-                revPts.ToArray()
+                let cnt = revPts.Count
+                let out = Array.zeroCreate<Point> cnt
+                for i = 0 to cnt - 1 do
+                    out[i] <- revPts[cnt - 1 - i]
+                if cnt > 0 then
+                    out[0] <- stubA
+                    out[cnt - 1] <- stubB
+                out
 
     /// <summary>Routes all associations in <c>eff</c> over <c>positionedNodes</c>, resolving auto-ports, avoiding obstacles and nudging parallel channels.</summary>
     let internal routeOverNodes
@@ -394,6 +459,10 @@ module OrthogonalRouter =
                 | PortSide.North -> 3
                 | PortSide.Auto -> 0
 
+            let ws = createWorkspace ()
+            let localObs = ResizeArray<struct(float * float * float * float)>(min n 64)
+            let fullBuf = ResizeArray<Point>(16)
+
             for e = 0 to m - 1 do
                 SimdMath.check token e
                 let a = eff.Associations[e]
@@ -415,10 +484,13 @@ module OrthogonalRouter =
                         |> Option.defaultValue (Point.create x1 (y0 + min 14. (Bounds.height b * 0.35)))
                     let topY = y0 - stubLen - float (e % 3) * 6.
                     let rightX = x1 + stubLen + float (e % 3) * 6.
-                    rawChains[e] <-
-                        simplifyOrthogonal (
-                            ResizeArray [ pStart; Point.create pStart.X topY; Point.create rightX topY; Point.create rightX pEnd.Y; pEnd ]
-                        )
+                    fullBuf.Clear()
+                    fullBuf.Add pStart
+                    fullBuf.Add(Point.create pStart.X topY)
+                    fullBuf.Add(Point.create rightX topY)
+                    fullBuf.Add(Point.create rightX pEnd.Y)
+                    fullBuf.Add pEnd
+                    rawChains[e] <- simplifyOrthogonal fullBuf
                 else
                     let pStart, pEnd = srcAnchors[e], dstAnchors[e]
                     let nxS, nyS = sideNormal srcSides[e]
@@ -431,27 +503,26 @@ module OrthogonalRouter =
                     let cMinY = min stubA.Y stubB.Y - 64.
                     let cMaxY = max stubA.Y stubB.Y + 64.
 
-                    let localObs = ResizeArray<struct(float * float * float * float)>()
+                    localObs.Clear()
                     for ni = 0 to n - 1 do
                         let struct(ox0, oy0, ox1, oy1) = allObstacles[ni]
                         if ox1 >= cMinX && ox0 <= cMaxX && oy1 >= cMinY && oy0 <= cMaxY then
-                            // For source/target nodes themselves, shrink inflation slightly so stubs right outside boundary stay free
                             if ni = ui || ni = vi then
                                 let b = updatedNodes[ni].Bounds
                                 localObs.Add(struct(Bounds.x b - 2., Bounds.y b - 2., Bounds.x b + Bounds.width b + 2., Bounds.y b + Bounds.height b + 2.))
                             else
                                 localObs.Add(allObstacles[ni])
 
-                    let midRoute = aStarOrthogonal stubA (sideDir srcSides[e]) stubB config.BendPenalty (localObs.ToArray())
-                    let full = ResizeArray<Point>(midRoute.Length + 2)
-                    full.Add pStart
-                    for pt in midRoute do full.Add pt
-                    full.Add pEnd
-                    rawChains[e] <- simplifyOrthogonal full
+                    let midRoute = aStarOrthogonal ws stubA (sideDir srcSides[e]) stubB config.BendPenalty localObs
+                    fullBuf.Clear()
+                    fullBuf.Add pStart
+                    for k = 0 to midRoute.Length - 1 do fullBuf.Add midRoute[k]
+                    fullBuf.Add pEnd
+                    rawChains[e] <- simplifyOrthogonal fullBuf
 
+            let nudged = Array.zeroCreate<bool> m
             // Parallel channel nudging for overlapping interior collinear segments across distinct associations
             if spacing > 0. && m > 1 then
-                // Collect interior movable segments (indices 1 .. len-3 so endpoint port anchors stay exact!)
                 let hBuckets = Dictionary<int, ResizeArray<struct(int * int * float * float)>>()
                 let vBuckets = Dictionary<int, ResizeArray<struct(int * int * float * float)>>()
                 for e = 0 to m - 1 do
@@ -477,58 +548,79 @@ module OrthogonalRouter =
                 for kv in hBuckets do
                     let segs = kv.Value
                     if segs.Count > 1 then
-                        // Nudge overlapping segments symmetrically in Y
                         let active = ResizeArray<struct(int * int * float * float)>()
-                        for item in segs do
+                        for k = 0 to segs.Count - 1 do
+                            let item = segs[k]
                             let struct(_, _, lo, hi) = item
-                            let overlaps = active |> Seq.exists (fun (struct(_, _, olo, ohi)) -> max lo olo < min hi ohi - 1e-3)
-                            if overlaps || active.Count = 0 then active.Add item
+                            let mutable overlaps = active.Count = 0
+                            let mutable ai = 0
+                            while not overlaps && ai < active.Count do
+                                let struct(_, _, olo, ohi) = active[ai]
+                                if max lo olo < min hi ohi - 1e-3 then overlaps <- true
+                                ai <- ai + 1
+                            if overlaps then active.Add item
                         if active.Count > 1 then
                             for rank = 0 to active.Count - 1 do
                                 let struct(e, s, _, _) = active[rank]
                                 let delta = (float rank - float (active.Count - 1) * 0.5) * spacing
                                 if abs delta > 1e-6 then
-                                    let pts = Array.copy rawChains[e]
+                                    let pts = if nudged[e] then rawChains[e] else Array.copy rawChains[e]
                                     pts[s] <- Point.create pts[s].X (pts[s].Y + delta)
                                     pts[s + 1] <- Point.create pts[s + 1].X (pts[s + 1].Y + delta)
                                     rawChains[e] <- pts
+                                    nudged[e] <- true
 
                 for kv in vBuckets do
                     let segs = kv.Value
                     if segs.Count > 1 then
                         let active = ResizeArray<struct(int * int * float * float)>()
-                        for item in segs do
+                        for k = 0 to segs.Count - 1 do
+                            let item = segs[k]
                             let struct(_, _, lo, hi) = item
-                            let overlaps = active |> Seq.exists (fun (struct(_, _, olo, ohi)) -> max lo olo < min hi ohi - 1e-3)
-                            if overlaps || active.Count = 0 then active.Add item
+                            let mutable overlaps = active.Count = 0
+                            let mutable ai = 0
+                            while not overlaps && ai < active.Count do
+                                let struct(_, _, olo, ohi) = active[ai]
+                                if max lo olo < min hi ohi - 1e-3 then overlaps <- true
+                                ai <- ai + 1
+                            if overlaps then active.Add item
                         if active.Count > 1 then
                             for rank = 0 to active.Count - 1 do
                                 let struct(e, s, _, _) = active[rank]
                                 let delta = (float rank - float (active.Count - 1) * 0.5) * spacing
                                 if abs delta > 1e-6 then
-                                    let pts = Array.copy rawChains[e]
+                                    let pts = if nudged[e] then rawChains[e] else Array.copy rawChains[e]
                                     pts[s] <- Point.create (pts[s].X + delta) pts[s].Y
                                     pts[s + 1] <- Point.create (pts[s + 1].X + delta) pts[s + 1].Y
                                     rawChains[e] <- pts
+                                    nudged[e] <- true
 
-            let routed =
-                [ for e = 0 to m - 1 do
-                    let a = eff.Associations[e]
-                    let pts = simplifyOrthogonal (ResizeArray(rawChains[e]))
-                    let path = buildPathWithCorners config.CornerRadius pts
-                    let rev = reversedFlags |> Option.map (fun f -> f[e]) |> Option.defaultValue false
-                    let sLbl, mLbl, tLbl = GraphKernels.placeLabelsOnWaypoints a pts
-                    yield
-                        { Id = a.Id
-                          Source = a.Source
-                          Target = a.Target
-                          Kind = a.Kind
-                          Waypoints = Array.toList pts
-                          Path = path
-                          ReversedInCycle = rev
-                          SourceLabel = sLbl
-                          CenterLabel = mLbl
-                          TargetLabel = tLbl } ]
+            let mutable routed = []
+            for e = m - 1 downto 0 do
+                let a = eff.Associations[e]
+                let pts =
+                    if nudged[e] then
+                        fullBuf.Clear()
+                        let rc = rawChains[e]
+                        for k = 0 to rc.Length - 1 do fullBuf.Add rc[k]
+                        simplifyOrthogonal fullBuf
+                    else rawChains[e]
+                let path = buildPathWithCorners config.CornerRadius pts
+                let rev = match reversedFlags with Some f -> f[e] | None -> false
+                let sLbl, mLbl, tLbl = GraphKernels.placeLabelsOnWaypoints a pts
+                let mutable wpList = []
+                for k = pts.Length - 1 downto 0 do wpList <- pts[k] :: wpList
+                routed <-
+                    { Id = a.Id
+                      Source = a.Source
+                      Target = a.Target
+                      Kind = a.Kind
+                      Waypoints = wpList
+                      Path = path
+                      ReversedInCycle = rev
+                      SourceLabel = sLbl
+                      CenterLabel = mLbl
+                      TargetLabel = tLbl } :: routed
 
             updatedNodes, routed
 

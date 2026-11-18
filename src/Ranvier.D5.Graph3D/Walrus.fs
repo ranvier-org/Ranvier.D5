@@ -132,11 +132,11 @@ module Walrus =
             Error [ InvalidObservation "Walrus requires positive SphereRadius/BaseLinkLength, ConeHalfAngle in [0.2, 1.45] and 2..64 arc segments." ]
         else
             let resolved = DiagramGraph.resolveCollapsed graph
-            let nodes = DiagramGraph.nodes resolved |> List.toArray
-            let assocs = DiagramGraph.associations resolved |> List.toArray
+            let eff = DiagramGraph.effective resolved
+            let nodes = eff.Nodes
+            let assocs = eff.Associations
             let n = nodes.Length
-            let nodeIdx = Dictionary<string, int>(StringComparer.Ordinal)
-            for i = 0 to n - 1 do nodeIdx.Add(nodes[i].Id, i)
+            let nodeIdx = eff.ReversedIdMap
 
             let h3CompatConfig =
                 { H3Config.defaultValue with
@@ -151,136 +151,186 @@ module Walrus =
                       Nodes = [||]
                       NodeIndex = nodeIdx
                       Associations = [||]
+                      AssocSrc = [||]
+                      AssocDst = [||]
                       IsBackbone = [||]
                       Depths = [||]
                       BaseRadius = [||]
                       BaseX = [||]; BaseY = [||]; BaseZ = [||]; BaseW = [||]
                       ViewTransform = HyperbolicTransform.identity }
             else
+                let csr = GraphKernels.buildCsr eff
                 let forestResult =
                     match config.Backbone with
                     | WalrusTreeSource.ExplicitAssociations ids ->
                         validateExplicitForest nodes nodeIdx assocs ids config.RootId
+                        |> Result.map (fun (rArr, cArr, dArr, edgeSet) ->
+                            let treeFlags = Array.init assocs.Length (fun e -> edgeSet.Contains assocs[e].Id)
+                            rArr, cArr, dArr, treeFlags)
                     | WalrusTreeSource.Automatic strategy ->
-                        let f = SpanningTree.extract strategy config.RootId resolved
-                        let rArr = f.Roots |> List.map (fun id -> nodeIdx[id]) |> List.toArray
-                        let cArr = Array.init n (fun i ->
-                            f.ChildrenOf
-                            |> Map.tryFind nodes[i].Id
-                            |> Option.defaultValue []
-                            |> List.map (fun cid -> nodeIdx[cid])
-                            |> List.toArray)
-                        let dArr = Array.init n (fun i -> f.DepthOf |> Map.tryFind nodes[i].Id |> Option.defaultValue 0)
-                        Ok(rArr, cArr, dArr, f.TreeAssociationIds)
+                        let rArr, _, cArr, dArr, treeFlags =
+                            SpanningTree.extractIndexed strategy config.RootId eff csr
+                        Ok(rArr, cArr, dArr, treeFlags)
 
                 match forestResult with
                 | Error errs -> Error errs
-                | Ok(rootIndices, children, depths, treeEdgeSet) ->
-                    // Compute subtree weight (1 + descendant count, log-dampened for balanced solid-angle allocation as in Walrus)
-                    let postorder = ResizeArray<int>(n)
-                    let stack = Stack<struct(int * bool)>()
-                    for r = rootIndices.Length - 1 downto 0 do stack.Push(struct(rootIndices[r], false))
-                    while stack.Count > 0 do
-                        let struct(u, expanded) = stack.Pop()
-                        if expanded then postorder.Add u
+                | Ok(rootIndices, children, depths, isTreeAssoc) ->
+                    // Compute subtree weight (1 + descendant count) via flat postorder stack
+                    let postorder = Array.zeroCreate<int> n
+                    let mutable postLen = 0
+                    let postStack = Array.zeroCreate<int> (max 1 (n * 2))
+                    let mutable sp = 0
+                    for r = rootIndices.Length - 1 downto 0 do
+                        postStack[sp] <- rootIndices[r]
+                        sp <- sp + 1
+                    while sp > 0 do
+                        sp <- sp - 1
+                        let raw = postStack[sp]
+                        if raw < 0 then
+                            postorder[postLen] <- ~~~raw
+                            postLen <- postLen + 1
                         else
-                            stack.Push(struct(u, true))
+                            let u = raw
+                            postStack[sp] <- ~~~u
+                            sp <- sp + 1
                             let ch = children[u]
-                            for k = ch.Length - 1 downto 0 do stack.Push(struct(ch[k], false))
+                            for k = ch.Length - 1 downto 0 do
+                                postStack[sp] <- ch[k]
+                                sp <- sp + 1
 
                     let subtreeSize = Array.create n 1
-                    for idx = 0 to postorder.Count - 1 do
+                    for idx = 0 to postLen - 1 do
                         let u = postorder[idx]
+                        let ch = children[u]
                         let mutable s = 1
-                        for c in children[u] do s <- s + subtreeSize[c]
+                        for k = 0 to ch.Length - 1 do s <- s + subtreeSize[ch[k]]
                         subtreeSize[u] <- s
 
-                    let solidWeight u = 1. + log (float subtreeSize[u]) * 1.5
+                    let logSubtree = Array.init n (fun u -> log (float subtreeSize[u]))
+                    let solidWeight u = 1. + logSubtree[u] * 1.5
 
                     let baseX = Array.zeroCreate<float> n
                     let baseY = Array.zeroCreate<float> n
                     let baseZ = Array.zeroCreate<float> n
                     let baseW = Array.create n 1.
+                    let zUnit = Point3.create 0. 0. 1.
+
+                    let qNodes = Array.zeroCreate<int> n
+                    let qFrames = Array.zeroCreate<HyperbolicTransform> n
+                    let mutable qHead = 0
+                    let mutable qTail = 0
+                    let goldenAngle = Math.PI * (3. - sqrt 5.)
 
                     // Walrus cone distribution: distribute `kids` across spherical cap [0, capAngle] weighted by `solidWeight`
-                    // using cumulative solid-angle z-mapping on Fibonacci golden spiral!
                     let placeConeChildren (parentFrame: HyperbolicTransform) (capAngle: float) (kids: int[]) =
-                        if kids.Length = 0 then [||]
-                        elif kids.Length = 1 && capAngle < Math.PI * 0.8 then
+                        let kLen = kids.Length
+                        if kLen = 0 then ()
+                        elif kLen = 1 && capAngle < Math.PI * 0.8 then
                             let c = kids[0]
-                            let len = config.BaseLinkLength * (1. + 0.15 * log (float subtreeSize[c]))
+                            let len = config.BaseLinkLength * (1. + 0.15 * logSubtree[c])
                             let localPt = Hyperbolic3D.fromSpherical len 0. 0.
-                            let cFrame =
-                                HyperbolicTransform.boostFromOrigin localPt
-                                |> HyperbolicTransform.thenApply parentFrame
-                                |> HyperbolicTransform.orthonormalize
-                            let wPt = HyperbolicTransform.apply cFrame Hyperbolic3D.origin
+                            let wPt = HyperbolicTransform.apply parentFrame localPt
                             baseX[c] <- wPt.X; baseY[c] <- wPt.Y; baseZ[c] <- wPt.Z; baseW[c] <- wPt.W
-                            [| struct(c, cFrame) |]
+                            if children[c].Length > 0 then
+                                let cFrame =
+                                    HyperbolicTransform.boostFromOrigin localPt
+                                    |> HyperbolicTransform.thenApply parentFrame
+                                    |> HyperbolicTransform.orthonormalize
+                                qNodes[qTail] <- c
+                                qFrames[qTail] <- cFrame
+                                qTail <- qTail + 1
                         else
-                            let ordered = Array.copy kids
-                            Array.Sort(ordered, Comparer<int>.Create(fun a b ->
-                                let c = compare subtreeSize[b] subtreeSize[a]
-                                if c <> 0 then c else compare a b))
+                            let ordered =
+                                if kLen <= 16 then
+                                    let cp = Array.copy kids
+                                    for a = 1 to kLen - 1 do
+                                        let kv = cp[a]
+                                        let ks = subtreeSize[kv]
+                                        let mutable b = a - 1
+                                        while b >= 0 && (subtreeSize[cp[b]] < ks || (subtreeSize[cp[b]] = ks && cp[b] > kv)) do
+                                            cp[b + 1] <- cp[b]
+                                            b <- b - 1
+                                        cp[b + 1] <- kv
+                                    cp
+                                else
+                                    let cp = Array.copy kids
+                                    Array.Sort(cp, Comparer<int>.Create(fun a b ->
+                                        let c = compare subtreeSize[b] subtreeSize[a]
+                                        if c <> 0 then c else compare a b))
+                                    cp
 
-                            let totalW = ordered |> Array.sumBy solidWeight
-                            let cosMin = cos capAngle // cap covers z in [cosMin, 1.0]
-                            let goldenAngle = Math.PI * (3. - sqrt 5.)
-                            // Scale link length slightly when branching factor is large so sibling cones never collide in H^3!
-                            let branchScale = 1. + 0.22 * log (float (max 1 ordered.Length))
+                            let mutable totalW = 0.
+                            for k = 0 to kLen - 1 do totalW <- totalW + solidWeight ordered[k]
+                            let invTotalW = 1. / max 1e-9 totalW
+                            let cosMin = cos capAngle
+                            let branchScale = 1. + 0.22 * log (float kLen)
                             let mutable cumW = 0.
-                            let out = Array.zeroCreate<struct(int * HyperbolicTransform)> ordered.Length
 
-                            for k = 0 to ordered.Length - 1 do
+                            for k = 0 to kLen - 1 do
                                 let c = ordered[k]
                                 let w = solidWeight c
-                                let frac = (cumW + 0.5 * w) / max 1e-9 totalW
+                                let frac = (cumW + 0.5 * w) * invTotalW
                                 cumW <- cumW + w
-                                // Uniform solid-angle mapping on spherical cap: cos(phi) = 1 - frac * (1 - cosMin)
                                 let cosPhi = max -0.9999 (min 0.9999 (1. - frac * (1. - cosMin)))
                                 let phi = acos cosPhi
                                 let theta = float k * goldenAngle
-                                let stepLen = min 8. (config.BaseLinkLength * branchScale * (1. + 0.12 * log (float subtreeSize[c])))
+                                let stepLen = min 8. (config.BaseLinkLength * branchScale * (1. + 0.12 * logSubtree[c]))
                                 let localPt = Hyperbolic3D.fromSpherical stepLen phi theta
-                                let sp = sin phi
-                                let dir = Point3.create (sp * cos theta) (sp * sin theta) cosPhi
-                                let orient = Quaternion.fromUnitVectors (Point3.create 0. 0. 1.) dir
-                                let cFrame =
-                                    HyperbolicTransform.ofRotation orient
-                                    |> HyperbolicTransform.thenApply (HyperbolicTransform.boostFromOrigin localPt)
-                                    |> HyperbolicTransform.thenApply parentFrame
-                                    |> HyperbolicTransform.orthonormalize
-                                let wPt = HyperbolicTransform.apply cFrame Hyperbolic3D.origin
-                                baseX[c] <- wPt.X; baseY[c] <- wPt.Y; baseZ[c] <- wPt.Z; baseW[c] <- wPt.W
-                                out[k] <- struct(c, cFrame)
-                            out
+                                if children[c].Length > 0 then
+                                    let spPhi = sqrt (max 0. (1. - cosPhi * cosPhi))
+                                    let dir = Point3.create (spPhi * cos theta) (spPhi * sin theta) cosPhi
+                                    let orient = Quaternion.fromUnitVectors zUnit dir
+                                    let cFrame =
+                                        HyperbolicTransform.ofRotation orient
+                                        |> HyperbolicTransform.thenApply (HyperbolicTransform.boostFromOrigin localPt)
+                                        |> HyperbolicTransform.thenApply parentFrame
+                                        |> HyperbolicTransform.orthonormalize
+                                    let wPt = HyperbolicTransform.apply cFrame Hyperbolic3D.origin
+                                    baseX[c] <- wPt.X; baseY[c] <- wPt.Y; baseZ[c] <- wPt.Z; baseW[c] <- wPt.W
+                                    qNodes[qTail] <- c
+                                    qFrames[qTail] <- cFrame
+                                    qTail <- qTail + 1
+                                else
+                                    // Leaf shortcut: cFrame * origin == parentFrame * localPt!
+                                    let wPt = HyperbolicTransform.apply parentFrame localPt
+                                    baseX[c] <- wPt.X; baseY[c] <- wPt.Y; baseZ[c] <- wPt.Z; baseW[c] <- wPt.W
 
-                    let q = Queue<struct(int * HyperbolicTransform)>()
                     if rootIndices.Length = 1 then
                         let r0 = rootIndices[0]
                         baseX[r0] <- 0.; baseY[r0] <- 0.; baseZ[r0] <- 0.; baseW[r0] <- 1.
-                        for item in placeConeChildren HyperbolicTransform.identity (Math.PI * 0.95) children[r0] do
-                            q.Enqueue item
+                        placeConeChildren HyperbolicTransform.identity (Math.PI * 0.95) children[r0]
                     else
-                        for item in placeConeChildren HyperbolicTransform.identity (Math.PI * 0.95) rootIndices do
-                            q.Enqueue item
+                        placeConeChildren HyperbolicTransform.identity (Math.PI * 0.95) rootIndices
 
-                    let mutable visited = 0
-                    while q.Count > 0 do
-                        Kernels3D.check token visited
-                        visited <- visited + 1
-                        let struct(u, uFrame) = q.Dequeue()
-                        if children[u].Length > 0 then
-                            for item in placeConeChildren uFrame config.ConeHalfAngle children[u] do
-                                q.Enqueue item
+                    while qHead < qTail do
+                        Kernels3D.check token qHead
+                        let u = qNodes[qHead]
+                        let uFrame = qFrames[qHead]
+                        qHead <- qHead + 1
+                        placeConeChildren uFrame config.ConeHalfAngle children[u]
 
-                    let visibleAssocs =
-                        if config.IncludeCrossLinks then assocs
-                        else assocs |> Array.filter (fun a -> treeEdgeSet.Contains a.Id)
-                    let isBackbone = visibleAssocs |> Array.map (fun a -> treeEdgeSet.Contains a.Id)
+                    let visibleAssocs, visSrc, visDst, isBackbone =
+                        if config.IncludeCrossLinks then
+                            assocs, csr.Src, csr.Dst, isTreeAssoc
+                        else
+                            let mutable cnt = 0
+                            for e = 0 to assocs.Length - 1 do if isTreeAssoc[e] then cnt <- cnt + 1
+                            let va = Array.zeroCreate<Association> cnt
+                            let vs = Array.zeroCreate<int> cnt
+                            let vd = Array.zeroCreate<int> cnt
+                            let vb = Array.create cnt true
+                            let mutable w = 0
+                            for e = 0 to assocs.Length - 1 do
+                                if isTreeAssoc[e] then
+                                    va[w] <- assocs[e]
+                                    vs[w] <- csr.Src[e]
+                                    vd[w] <- csr.Dst[e]
+                                    w <- w + 1
+                            va, vs, vd, vb
+
                     let baseRadii =
                         Array.init n (fun i ->
-                            let importance = 1. + 0.35 * log (float subtreeSize[i])
+                            let importance = 1. + 0.35 * logSubtree[i]
                             max 3.5 (min 18. (5.5 * importance)))
 
                     Ok
@@ -289,6 +339,8 @@ module Walrus =
                           Nodes = nodes
                           NodeIndex = nodeIdx
                           Associations = visibleAssocs
+                          AssocSrc = visSrc
+                          AssocDst = visDst
                           IsBackbone = isBackbone
                           Depths = depths
                           BaseRadius = baseRadii
