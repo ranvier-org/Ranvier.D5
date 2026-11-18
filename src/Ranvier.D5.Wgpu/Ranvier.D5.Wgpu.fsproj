@@ -10,6 +10,8 @@
     <Compile Include="Contracts3D.fs" />
     <Compile Include="Scale3D.fs" />
     <Compile Include="Axis3D.fs" />
+    <Compile Include="Channels3D.fs" />
+    <Compile Include="ColorShader.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />

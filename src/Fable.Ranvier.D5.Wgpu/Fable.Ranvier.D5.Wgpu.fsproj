@@ -17,6 +17,12 @@
     <Compile Include="../Ranvier.D5.Wgpu/Axis3D.fs">
       <Link>./Axis3D.fs</Link>
     </Compile>
+    <Compile Include="../Ranvier.D5.Wgpu/Channels3D.fs">
+      <Link>./Channels3D.fs</Link>
+    </Compile>
+    <Compile Include="../Ranvier.D5.Wgpu/ColorShader.fs">
+      <Link>./ColorShader.fs</Link>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <Content Include="Fable.Ranvier.D5.Wgpu.fsproj" PackagePath="fable/" />

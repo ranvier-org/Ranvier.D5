@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="ScaleAxisTests.fs" />
+    <Compile Include="ChannelTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
