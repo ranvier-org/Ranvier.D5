@@ -28,9 +28,25 @@ module ViolinSpec =
          MaxGroups=1000;MaxSamples=1000000;MaxVertices=1000000;MaxWork=100000000L}
 
 module internal DistributionSummary =
-    let ofValues values =
-        let extent=Data.extent values
-        {Count=List.length values;Minimum=Option.map fst extent;Maximum=Option.map snd extent;Mean=Data.mean values;Median=Data.quantile 0.5 values}
+    let ofArray (arr:float array) =
+        if arr.Length = 0 then
+            {Count=0;Minimum=None;Maximum=None;Mean=None;Median=None}
+        else
+            let extent = Data.extent arr
+            {Count=arr.Length;Minimum=Option.map fst extent;Maximum=Option.map snd extent;Mean=Data.mean arr;Median=Data.quantile 0.5 arr}
+
+    let ofValues (values:float list) =
+        match values with
+        | [] -> {Count=0;Minimum=None;Maximum=None;Mean=None;Median=None}
+        | first::rest ->
+            let mutable lo = first
+            let mutable hi = first
+            let mutable n = 1
+            for v in rest do
+                if v < lo then lo <- v
+                if v > hi then hi <- v
+                n <- n + 1
+            {Count=n;Minimum=Some lo;Maximum=Some hi;Mean=Data.mean values;Median=Data.quantile 0.5 values}
 
 /// <summary>Kernel density violin charts.</summary>
 [<RequireQualifiedAccess>]

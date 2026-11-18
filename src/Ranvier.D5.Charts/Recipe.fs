@@ -4,7 +4,18 @@ open System
 open Ranvier.D5
 
 module internal Recipe =
-    let key parts=parts |> List.map (fun (part:string) -> string part.Length+":"+part) |> String.concat ""
+    let inline key1 (a:string) = string a.Length + ":" + a
+    let inline key2 (a:string) (b:string) =
+        String.Concat(string a.Length, ":", a, string b.Length, ":", b)
+    let inline key3 (a:string) (b:string) (c:string) =
+        String.Concat [| string a.Length; ":"; a; string b.Length; ":"; b; string c.Length; ":"; c |]
+    let key parts =
+        match parts with
+        | [] -> ""
+        | [a] -> key1 a
+        | [a; b] -> key2 a b
+        | [a; b; c] -> key3 a b c
+        | _ -> parts |> List.map (fun (part:string) -> string part.Length+":"+part) |> String.concat ""
     let number value=Format.number Globalization.CultureInfo.InvariantCulture 3 value
     let unwrap = function Ok value -> value | Error errors -> raise(ArgumentException(sprintf "%A" errors))
     let run frame key data build =

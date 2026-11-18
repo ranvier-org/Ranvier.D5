@@ -48,13 +48,19 @@ module HitTest =
         | [] -> false
         | polygon::rest -> containsPolygon point polygon || containsAny point rest
     /// <summary>True when the target has no clip or its clip bounds contain the point.</summary>
-    let visibleAt (point:Point) target = target.Clip |> Option.forall (Bounds.contains point)
+    let visibleAt (point:Point) target =
+        match target.Clip with
+        | None -> true
+        | Some clip -> Bounds.contains point clip
     /// <summary>True when the point lies inside the geometry; disc and sector boundaries are inclusive and an empty sector sweep never hits.</summary>
     let contains (point:Point) geometry =
             match geometry with
             | HitRegion(included,excluded,_) -> containsAny point included && not (containsAny point excluded)
             | HitBounds bounds -> Bounds.contains point bounds
-            | HitPoint(center,radius) -> Double.Hypot(point.X-center.X,point.Y-center.Y)<=radius
+            | HitPoint(center,radius) ->
+                let dx=point.X-center.X
+                let dy=point.Y-center.Y
+                dx*dx+dy*dy<=radius*radius && Double.Hypot(dx,dy)<=radius
             | HitSector(center,inner,outer,start,finish) ->
                 let radius=Double.Hypot(point.X-center.X,point.Y-center.Y)
                 let tau=2.*System.Math.PI
@@ -65,4 +71,18 @@ module HitTest =
                 sweep>0. && outer>inner && radius>=inner && radius<=outer && (sweep>=tau || position<=sweep)
     /// <summary>Returns every hit target of the output that is visible at and contains the point, in output order.</summary>
     let at (point:Point) output =
-        output.HitTargets |> List.filter (fun target -> visibleAt point target && contains point target.Geometry)
+        let mutable cur=output.HitTargets
+        let mutable hitsRev=[]
+        while not cur.IsEmpty do
+            let target=cur.Head
+            let inClip =
+                match target.Clip with
+                | None -> true
+                | Some clip -> Bounds.contains point clip
+            if inClip && contains point target.Geometry then
+                hitsRev<-target::hitsRev
+            cur<-cur.Tail
+        match hitsRev with
+        | [] -> []
+        | [single] -> [single]
+        | _ -> List.rev hitsRev

@@ -377,3 +377,78 @@ Proof.
     - apply Nat.eqb_neq in Hne. rewrite Hne. apply IH. }
   apply Hgen.
 Qed.
+
+(** ** 5. Batch D5 refinements: `O(1)` tracked `Lasso` count & decimation invariant, and settled `KeyedTransition` fast path *)
+
+Fixpoint decimate_lasso_idx (idx : nat) (pts : list Z) : list Z :=
+  match pts with
+  | [] => []
+  | [last_pt] => [last_pt]
+  | p :: rest =>
+    if Nat.even idx then p :: decimate_lasso_idx (S idx) rest
+    else decimate_lasso_idx (S idx) rest
+  end.
+
+Lemma decimate_lasso_idx_len :
+  forall (pts : list Z) (idx : nat),
+    length (decimate_lasso_idx idx pts) =
+    match pts with
+    | [] => 0%nat
+    | [_] => 1%nat
+    | _ =>
+      if Nat.even idx then S (Nat.div2 (length pts))
+      else S (Nat.div2 (pred (length pts)))
+    end.
+Proof.
+  induction pts as [|p rest IH]; intros idx; simpl.
+  - reflexivity.
+  - destruct rest as [|q rest']; simpl.
+    + destruct (Nat.even idx); reflexivity.
+    + pose proof (IH (S idx)) as Hsub.
+      rewrite Nat.even_succ in Hsub.
+      unfold Nat.odd in Hsub.
+      destruct (Nat.even idx) eqn:Hev; simpl in *.
+      * rewrite Hsub. destruct rest'; simpl; reflexivity.
+      * rewrite Hsub. destruct rest'; simpl; reflexivity.
+Qed.
+
+(**md
+**Tracked `O(1)` `Lasso` count (`S (len / 2)` after even-index + tail decimation) matches exact list length without walking the list (`Gesture`).**
+
+When `pts` has length `len >= 2`, keeping all even indices `0, 2, ...` plus the final initial-press anchor `len - 1` (`decimate_lasso_idx 0 pts`) produces a list of exact length `1 + len / 2`, allowing `GestureState` to maintain its vertex count in `O(1)` across `Down`, `Move`, and decimation instead of `O(N)` `List.length` + `List.indexed` traversals.
+
+- [p0:] newest vertex at head of reversed lasso list.
+- [p1:] second vertex in reversed lasso list.
+- [rest:] remaining lasso vertices ending at the initial `Down` point.
+*)
+Theorem lasso_decimate_exact_count_and_head (p0 p1 : Z) (rest : list Z) :
+  let pts := p0 :: p1 :: rest in
+  let decimated := decimate_lasso_idx 0%nat pts in
+  hd 0 decimated = p0 /\
+  length decimated = S (Nat.div2 (length pts)).
+Proof.
+  cbv zeta.
+  split.
+  - simpl. reflexivity.
+  - rewrite decimate_lasso_idx_len. simpl. reflexivity.
+Qed.
+
+(**md
+**Settled `KeyedTransition` segments (`duration = 0` or `now - started >= duration`) evaluate directly to `target` without interpolation (`KeyedTransition`).**
+
+Whenever a non-exiting transition segment has `duration <= 0` or `now - started >= duration`, `sample_step now s` is identically `seg_target s`, justifying a settled-state flag on `KeyedTransitionState` that returns cached `SceneNode`s in `O(1)` per mark without per-frame style, matrix, or path-command interpolation.
+
+- [now:] sample timestamp.
+- [s:] transition segment with `seg_duration s <= 0` or `seg_duration s <= now - seg_started s`.
+*)
+Theorem settled_keyed_transition_fast_path_eq (now : Z) (s : lin_segment) :
+  (seg_duration s <= 0 \/ seg_duration s <= now - seg_started s) ->
+  sample_step now s = seg_target s.
+Proof.
+  intros Hset. unfold sample_step.
+  destruct Hset as [Hd | Hge].
+  - apply Z.leb_le in Hd. rewrite Hd; simpl; reflexivity.
+  - assert (Hg : Z.geb (now - seg_started s) (seg_duration s) = true)
+      by (rewrite Z.geb_leb; apply Z.leb_le; lia).
+    rewrite Hg, orb_true_r; reflexivity.
+Qed.

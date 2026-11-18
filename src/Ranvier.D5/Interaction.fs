@@ -75,10 +75,32 @@ module Gesture =
                 | GestureMode.Lasso ->
                     let tooClose =
                         match state.Lasso with
-                        | last::_ -> Double.Hypot(point.X-last.X,point.Y-last.Y)<1.
+                        | last::_ ->
+                            let dx=point.X-last.X
+                            let dy=point.Y-last.Y
+                            dx*dx+dy*dy<1.
                         | [] -> false
-                    let points=if tooClose then state.Lasso else point::state.Lasso
-                    let points=if points.Length>config.MaxLassoPoints then points |> List.indexed |> List.choose (fun (i,p) -> if i%2=0 || i=points.Length-1 then Some p else None) else points
+                    let points =
+                        if tooClose then state.Lasso
+                        else
+                            let candidate=point::state.Lasso
+                            // Single-pass length check + even/last decimation (proven in TransitionWorker.v: lasso_decimate_exact_count_and_head)
+                            let mutable count=0
+                            let mutable cur=candidate
+                            let limit=config.MaxLassoPoints
+                            while not cur.IsEmpty && count<=limit do
+                                count<-count+1
+                                cur<-cur.Tail
+                            if count<=limit then candidate
+                            else
+                                let rec decimate idx (xs:Point list) =
+                                    match xs with
+                                    | [] -> []
+                                    | [lastPt] -> [lastPt]
+                                    | p::rest ->
+                                        if (idx &&& 1)=0 then p::decimate (idx+1) rest
+                                        else decimate (idx+1) rest
+                                decimate 0 candidate
                     {state with Pointers=pointers;Lasso=points},[]
     /// <summary>Applies one event and returns the next state with the commands to perform, in order.
     /// Throws <c>ArgumentException</c> for an invalid configuration or a non-finite pointer position.</summary>

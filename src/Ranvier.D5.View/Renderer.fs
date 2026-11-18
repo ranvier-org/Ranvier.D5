@@ -15,8 +15,26 @@ module Renderer =
     type private RenderMark = { Mark:Mark; Namespace:string }
     type private RenderNode = { Node:SceneNode; Namespace:string }
     type private Appearance = { Fill:string option; Stroke:string option; StrokeWidth:string option; Opacity:string option; FillOpacity:string option; StrokeOpacity:string option; FontSize:string option; Family:string option; Weight:string option; Anchor:string option; Baseline:string option }
-    type private RenderRow = { Read:unit -> RenderMark; Appearance:unit -> Appearance; Transform:unit -> string option }
+    type private RenderRow = { Read:unit -> RenderMark; Appearance:unit -> Appearance; Transform:unit -> string option; PathD:unit -> string }
     let private definitionId prefix (key:string) = prefix + (key |> Seq.map(fun code -> (int code).ToString("X4",CultureInfo.InvariantCulture)) |> String.concat "")
+
+    let private mapListToArray (f:'T -> 'U) (xs:'T list) : 'U array =
+        match xs with
+        | [] -> [||]
+        | _ ->
+            let mutable count=0
+            let mutable cur=xs
+            while not cur.IsEmpty do
+                count<-count+1
+                cur<-cur.Tail
+            let arr=Array.zeroCreate<'U> count
+            let mutable idx=0
+            cur<-xs
+            while not cur.IsEmpty do
+                arr[idx]<-f cur.Head
+                idx<-idx+1
+                cur<-cur.Tail
+            arr
 
     let private markEvents = ["click"; "pointerdown"; "pointermove"; "pointerup"; "pointercancel"; "wheel"; "keydown"]
 
@@ -48,28 +66,50 @@ module Renderer =
         Component.define (fun _ (read: unit -> RenderMark) ->
             let mutable cached=ValueNone
             let mutable cachedTransform=ValueNone
+            let mutable cachedPath:Path=Path.empty
+            let mutable cachedD=""
+            let mutable hasPathCache=false
             let transform () =
                 let current=Mark.transform(read().Mark)
                 match cachedTransform with
-                | ValueSome struct(previous,value) when previous=current -> value
+                | ValueSome struct(previous,value) when Object.ReferenceEquals(previous,current) || previous=current -> value
                 | _ ->
                     let value=Some(Transform.toSvg current)
                     cachedTransform<-ValueSome struct(current,value)
                     value
+            let pathD () =
+                match Mark.geometry (read().Mark) with
+                | PathGeometry path ->
+                    if hasPathCache && Object.ReferenceEquals(cachedPath, path) then cachedD
+                    else
+                        let d=Path.toSvg path
+                        cachedPath<-path
+                        cachedD<-d
+                        hasPathCache<-true
+                        d
+                | _ -> ""
             let appearance () =
                 let item=read()
                 let value=
                     match cached with
-                    | ValueSome struct(mark,scope,value) when scope=item.Namespace && Mark.style mark=Mark.style item.Mark && Mark.textStyle mark=Mark.textStyle item.Mark && Mark.fillDefinition mark=Mark.fillDefinition item.Mark -> value
+                    | ValueSome struct(mark,scope,value)
+                        when Object.ReferenceEquals(mark, item.Mark) && scope=item.Namespace -> value
+                    | ValueSome struct(mark,scope,value)
+                        when scope=item.Namespace &&
+                             (Object.ReferenceEquals(Mark.style mark, Mark.style item.Mark) || Mark.style mark=Mark.style item.Mark) &&
+                             (Object.ReferenceEquals(Mark.textStyle mark, Mark.textStyle item.Mark) || Mark.textStyle mark=Mark.textStyle item.Mark) &&
+                             Mark.fillDefinition mark=Mark.fillDefinition item.Mark -> value
                     | _ ->
                         let style,text=Mark.style item.Mark,Mark.textStyle item.Mark
                         let fill=(Mark.fillDefinition item.Mark).IsSome
-                        let hasFill=fill || not(String.Equals(Paint.toCss style.Fill,"none",StringComparison.OrdinalIgnoreCase))
-                        let hasStroke=style.StrokeWidth>0. && not(String.Equals(Paint.toCss style.Stroke,"none",StringComparison.OrdinalIgnoreCase))
+                        let fillCss=Paint.toCss style.Fill
+                        let strokeCss=Paint.toCss style.Stroke
+                        let hasFill=fill || not(String.Equals(fillCss,"none",StringComparison.OrdinalIgnoreCase))
+                        let hasStroke=style.StrokeWidth>0. && not(String.Equals(strokeCss,"none",StringComparison.OrdinalIgnoreCase))
                         let alpha=number style.Opacity
                         // Keep option wrappers with cached serialization instead of allocating one per attribute read.
-                        {Fill=Some(Mark.fillDefinition item.Mark |> Option.map(fun key -> "url(#"+definitionId item.Namespace key+")") |> Option.defaultWith(fun () -> Paint.toCss style.Fill))
-                         Stroke=Some(Paint.toCss style.Stroke);StrokeWidth=Some(number style.StrokeWidth)
+                        {Fill=Some(match Mark.fillDefinition item.Mark with Some key -> "url(#"+definitionId item.Namespace key+")" | None -> fillCss)
+                         Stroke=Some strokeCss;StrokeWidth=Some(number style.StrokeWidth)
                          Opacity=Some(if hasFill && hasStroke then alpha else "1")
                          FillOpacity=Some(if hasFill && not hasStroke then alpha else "1")
                          StrokeOpacity=Some(if hasStroke && not hasFill then alpha else "1")
@@ -77,7 +117,7 @@ module Renderer =
                          Family=Some text.Family;Weight=Some(string text.Weight);Anchor=Some text.Anchor;Baseline=Some text.Baseline}
                 cached<-ValueSome struct(item.Mark,item.Namespace,value)
                 value
-            {Read=read;Appearance=appearance;Transform=transform}) (fun t ->
+            {Read=read;Appearance=appearance;Transform=transform;PathD=pathD}) (fun t ->
             let attribute name read = t.Attrs.attribute(name, fun (row:RenderRow) -> Some(read (row.Read()).Mark))
             let appearance name read = t.Attrs.attribute(name,fun (row:RenderRow) -> read(row.Appearance()))
             let path =
@@ -86,7 +126,7 @@ module Renderer =
                         appearance "opacity" (fun style -> style.Opacity)
                         appearance "fill-opacity" (fun style -> style.FillOpacity)
                         appearance "stroke-opacity" (fun style -> style.StrokeOpacity)
-                        attribute "d" (fun mark -> match Mark.geometry mark with PathGeometry path -> Path.toSvg path | _ -> "")
+                        t.Attrs.attribute("d", fun (row:RenderRow) -> Some(row.PathD()))
                         attribute "display" (fun mark -> match Mark.geometry mark with PathGeometry _ -> "inline" | _ -> "none")
                     |]
                     [||]
@@ -187,19 +227,19 @@ module Renderer =
                     [|t.each (fun item -> SceneNode.key item.Node) (fun read ->
                         let item=read()
                         match item.Node with
-                        | Group(_,children) -> children |> List.map (fun child -> {item with Node=child}) |> List.toArray
+                        | Group(_,children) -> mapListToArray (fun child -> {item with Node=child}) children
                         | _ -> [||]) node|])
         groupDefinition <- Some group
         let flat =
             Component.define (fun _ (read:unit -> string * Scene) -> read) (fun t ->
                 t.each (fun item -> Mark.key item.Mark) (fun read ->
                     let ns,scene=read()
-                    Scene.marks scene |> List.map (fun mark -> {Mark=mark;Namespace=ns}) |> List.toArray) row)
+                    mapListToArray (fun mark -> {Mark=mark;Namespace=ns}) (Scene.marks scene)) row)
         let composed =
             Component.define (fun _ (read:unit -> string * Scene) -> read) (fun t ->
                 t.each (fun item -> SceneNode.key item.Node) (fun read ->
                     let ns,scene=read()
-                    Scene.nodes scene |> List.map (fun n -> {Node=n;Namespace=ns}) |> List.toArray) node)
+                    mapListToArray (fun n -> {Node=n;Namespace=ns}) (Scene.nodes scene)) node)
         Component.define (fun _ (read:unit -> Scene) -> "d5-"+Guid.NewGuid().ToString("N")+"-",read) (fun t ->
             svg<string * (unit -> Scene)>(
                 [|t.Attrs.attribute("role","img")
@@ -215,7 +255,7 @@ module Renderer =
                   | None -> ()|]
             ).Run
                 [|t.element (HtmlTag "defs") [||]
-                    [|t.each (snd >> SceneDefinition.key) (fun (ns,read) -> Scene.definitions(read()) |> List.map (fun d -> ns,d) |> List.toArray) definitionRow|]
+                    [|t.each (snd >> SceneDefinition.key) (fun (ns,read) -> mapListToArray (fun d -> ns,d) (Scene.definitions(read()))) definitionRow|]
                   t.matchWith (fun (ns,read) -> ns,read()) (fun ((_,scene) as value) ->
                     if Scene.isComposed scene
                     then t.arm composed value else t.arm flat value)|])

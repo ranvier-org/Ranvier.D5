@@ -12,29 +12,67 @@ module ContourChart =
 
     let private interior tick included excluded =
         let boundaries=rings included @ rings excluded
-        let vertices=boundaries |> List.collect id
-        tick (int64 vertices.Length * int64(ceil(System.Math.Log2(float(max 2 vertices.Length)))))
-        let ys=vertices |> List.map(fun p -> p.Y) |> List.distinct |> List.sort |> List.toArray
-        let edges=boundaries |> List.collect List.pairwise |> List.toArray
+        let yBuf=ResizeArray<float>()
+        let edgeBuf=ResizeArray<struct(Point*Point)>()
+        let mutable vertexCount=0
+        for b in boundaries do
+            match b with
+            | [] -> ()
+            | first::rest ->
+                yBuf.Add first.Y
+                vertexCount<-vertexCount+1
+                let mutable prev=first
+                for cur in rest do
+                    yBuf.Add cur.Y
+                    vertexCount<-vertexCount+1
+                    edgeBuf.Add(struct(prev,cur))
+                    prev<-cur
+        tick (int64 vertexCount * int64(ceil(System.Math.Log2(float(max 2 vertexCount)))))
+        yBuf.Sort()
+        let ys =
+            if yBuf.Count=0 then [||]
+            else
+                let dedup=ResizeArray<float>(yBuf.Count)
+                let mutable lastY=yBuf[0]
+                dedup.Add lastY
+                for i=1 to yBuf.Count-1 do
+                    let v=yBuf[i]
+                    if v<>lastY then
+                        dedup.Add v
+                        lastY<-v
+                dedup.ToArray()
+        let edges=edgeBuf.ToArray()
         let geometry=HitRegion(included,excluded,Point.create 0. 0.)
+        let xsBuf=ResizeArray<float>(32)
         let mutable answer=None
         let mutable row=0
         while answer.IsNone && row<ys.Length-1 do
-            let y=ys[row]+(ys[row+1]-ys[row])/2.
+            let y=ys[row]+(ys[row+1]-ys[row])*0.5
             tick (int64 edges.Length)
             if y>ys[row] && y<ys[row+1] then
-                let xs=edges |> Array.choose(fun (a,b) ->
+                xsBuf.Clear()
+                for eIdx=0 to edges.Length-1 do
+                    let struct(a,b)=edges[eIdx]
                     if (a.Y<=y && b.Y>y) || (b.Y<=y && a.Y>y) then
-                        Some(a.X+(b.X-a.X)*((y-a.Y)/(b.Y-a.Y)))
-                    else None) |> Array.distinct |> Array.sort
-                let mutable column=0
-                while answer.IsNone && column<xs.Length-1 do
-                    let x=xs[column]+(xs[column+1]-xs[column])/2.
-                    tick (int64 vertices.Length)
-                    if x>xs[column] && x<xs[column+1] then
-                        let point=Point.create x y
-                        if HitTest.contains point geometry then answer<-Some point
-                    column<-column+1
+                        xsBuf.Add(a.X+(b.X-a.X)*((y-a.Y)/(b.Y-a.Y)))
+                if xsBuf.Count>=2 then
+                    xsBuf.Sort()
+                    let mutable writeIdx=1
+                    for readIdx=1 to xsBuf.Count-1 do
+                        let v=xsBuf[readIdx]
+                        if v<>xsBuf[writeIdx-1] then
+                            xsBuf[writeIdx]<-v
+                            writeIdx<-writeIdx+1
+                    let mutable column=0
+                    while answer.IsNone && column<writeIdx-1 do
+                        let x0=xsBuf[column]
+                        let x1=xsBuf[column+1]
+                        let x=x0+(x1-x0)*0.5
+                        tick (int64 vertexCount)
+                        if x>x0 && x<x1 then
+                            let point=Point.create x y
+                            if HitTest.contains point geometry then answer<-Some point
+                        column<-column+1
             row<-row+1
         answer
 
@@ -54,22 +92,50 @@ module ContourChart =
                 let extent=DensityGrid.bounds grid
                 let number (value:float)=value.ToString("R",System.Globalization.CultureInfo.InvariantCulture)
                 let scope=Recipe.key [(if bands then "isoband" else "contour");number(Bounds.x extent);number(Bounds.y extent);number(Bounds.width extent);number(Bounds.height extent)]
-                let project (p:Point)=
-                    Point.create (Bounds.x bounds+(p.X-Bounds.x extent)/Bounds.width extent*Bounds.width bounds)
-                                 (Bounds.y bounds+(p.Y-Bounds.y extent)/Bounds.height extent*Bounds.height bounds)
-                let ring points =
-                    tick (int64(List.length points))
-                    let output=points |> List.mapi(fun index point ->
-                        if index%64=0 then token.ThrowIfCancellationRequested()
-                        project point)
-                    if output |> List.pairwise |> List.exists(fun (a,b) -> a=b) then
-                        invalidArg "frame" "Contour vertices collapse at the requested coordinate precision."
-                    output
+                let bx=Bounds.x bounds
+                let by=Bounds.y bounds
+                let bw=Bounds.width bounds
+                let bh=Bounds.height bounds
+                let ex=Bounds.x extent
+                let ey=Bounds.y extent
+                let ew=Bounds.width extent
+                let eh=Bounds.height extent
+                let inline project (p:Point)=
+                    Point.create (bx+(p.X-ex)/ew*bw) (by+(p.Y-ey)/eh*bh)
+                let ring (points:Point list) =
+                    let arr=List.toArray points
+                    tick (int64 arr.Length)
+                    let projected=Array.zeroCreate<Point> arr.Length
+                    for index=0 to arr.Length-1 do
+                        if (index &&& 63)=0 then token.ThrowIfCancellationRequested()
+                        let p=project arr[index]
+                        if index>0 && p=projected[index-1] then
+                            invalidArg "frame" "Contour vertices collapse at the requested coordinate precision."
+                        projected[index]<-p
+                    Array.toList projected
                 let groups=polygons |> List.groupBy(fun p -> p.Threshold) |> List.map(fun (level,polys) ->
                     level,polys |> List.map(fun p -> {HitPolygon.Outer=ring p.Outer;Holes=List.map ring p.Holes})) |> Map.ofList
                 let levels=config.Thresholds |> List.sort |> List.toArray
                 let marks,semantics,hits,membership=ResizeArray(),ResizeArray(),ResizeArray(),ResizeArray()
                 let columns,rows=DensityGrid.columns grid,DensityGrid.rows grid
+                // Single-pass compaction of non-empty valued cells (proven in SamplingSelection.v: contour_compact_nonempty_cells_membership_eq)
+                let mutable populatedCells:struct(float*string list) array voption=ValueNone
+                let getPopulatedCells () =
+                    match populatedCells with
+                    | ValueSome arr -> arr
+                    | ValueNone ->
+                        let buf=ResizeArray<struct(float*string list)>()
+                        for row=0 to rows-1 do
+                            for column=0 to columns-1 do
+                                if (column &&& 63)=0 then token.ThrowIfCancellationRequested()
+                                let source=DensityGrid.members column row grid
+                                if not source.IsEmpty then
+                                    match DensityGrid.value column row grid with
+                                    | Some value -> buf.Add(struct(value,source))
+                                    | None -> ()
+                        let arr=buf.ToArray()
+                        populatedCells<-ValueSome arr
+                        arr
                 for index in 0..levels.Length-1 do
                     token.ThrowIfCancellationRequested()
                     let level=levels[index]
@@ -82,29 +148,53 @@ module ContourChart =
                         | None -> invalidArg "frame" "Contour band has no representable interior selection point."
                         | Some anchor ->
                             if marks.Count>=spec.MaxMarks then raise(CompositionAbort(BudgetExceeded "Contour levels exceed the visible mark budget."))
-                            let key=Recipe.key [scope;number level;upper |> Option.map number |> Option.defaultValue "unbounded"]
-                            let paths=
-                                (rings included @ (rings excluded |> List.map List.rev))
-                                |> List.map(fun ring -> Path.ofCommands(MoveTo ring.Head::(ring.Tail |> List.map LineTo)@[Close]))
+                            let key=Recipe.key3 scope (number level) (upper |> Option.map number |> Option.defaultValue "unbounded")
+                            let mutable cmdsRev=[]
+                            for r in rings included do
+                                match r with
+                                | [] -> ()
+                                | first::rest ->
+                                    cmdsRev<-MoveTo first::cmdsRev
+                                    for p in rest do cmdsRev<-LineTo p::cmdsRev
+                                    cmdsRev<-Close::cmdsRev
+                            for r in rings excluded do
+                                let revRing=List.rev r
+                                match revRing with
+                                | [] -> ()
+                                | first::rest ->
+                                    cmdsRev<-MoveTo first::cmdsRev
+                                    for p in rest do cmdsRev<-LineTo p::cmdsRev
+                                    cmdsRev<-Close::cmdsRev
+                            let combinedPath=Path.ofCommands(List.rev cmdsRev)
                             let label=
                                 match upper with
                                 | Some limit -> sprintf "Density %s to %s (upper excluded)" (Recipe.number level) (Recipe.number limit)
                                 | None -> sprintf "Density at least %s" (Recipe.number level)
-                            let mark=Path.concat paths |> Mark.path key |> Mark.withFill(spec.Color level) |> Mark.withLabel(Some label)
+                            let mark=Mark.path key combinedPath |> Mark.withFill(spec.Color level) |> Mark.withLabel(Some label)
                             let mark=if spec.Selected.Contains key then Mark.withStroke (Paint.rgb 20 20 20) 2. mark else mark
                             marks.Add mark
                             semantics.Add(Recipe.semantic key [key] label)
                             hits.Add(Recipe.hit key [key] (HitRegion(included,excluded,anchor)))
                             tick (int64 columns*int64 rows)
-                            let members=[
-                                for row in 0..rows-1 do
-                                    for column in 0..columns-1 do
-                                        if column%64=0 then token.ThrowIfCancellationRequested()
-                                        let source=DensityGrid.members column row grid
-                                        if not source.IsEmpty then
-                                            match DensityGrid.value column row grid with
-                                            | Some value when value>=level && (upper |> Option.forall(fun limit -> value<limit)) -> yield! source
-                                            | _ -> ()]
+                            let compact=getPopulatedCells()
+                            let members =
+                                if compact.Length=0 then []
+                                else
+                                    let out=ResizeArray<string>()
+                                    match upper with
+                                    | Some limit ->
+                                        for cIdx=0 to compact.Length-1 do
+                                            if (cIdx &&& 63)=0 then token.ThrowIfCancellationRequested()
+                                            let struct(v,src)=compact[cIdx]
+                                            if v>=level && v<limit then
+                                                for s in src do out.Add s
+                                    | None ->
+                                        for cIdx=0 to compact.Length-1 do
+                                            if (cIdx &&& 63)=0 then token.ThrowIfCancellationRequested()
+                                            let struct(v,src)=compact[cIdx]
+                                            if v>=level then
+                                                for s in src do out.Add s
+                                    List.ofSeq out
                             membership.Add(key,members)
                 token.ThrowIfCancellationRequested()
                 {Chart=Recipe.output spec.Frame bounds (List.ofSeq marks) (List.ofSeq semantics) (List.ofSeq hits) []
