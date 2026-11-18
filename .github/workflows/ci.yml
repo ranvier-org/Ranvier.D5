@@ -44,11 +44,13 @@ jobs:
           Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
           EOF
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -q
-          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends xvfb xauth dbus-x11 fonts-dejavu-core libgl1-mesa-dri libglib2.0-0t64 libharfbuzz0b libharfbuzz-icu0 libicu74 libjpeg-turbo8 libepoxy0 libgcrypt20 libsoup-3.0-0 libtasn1-6 libxkbcommon0 libxml2 libpng16-16t64 libsqlite3-0 libwebp7 libwebpdemux2 libwebpmux3 libatomic1 libfreetype6 libfontconfig1 libwoff1 libdrm2 libegl1 libgles2
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends xvfb xauth dbus-x11 fonts-dejavu-core libgl1-mesa-dri libglib2.0-0t64 libharfbuzz0b libharfbuzz-icu0 libicu74 libjpeg-turbo8 libepoxy0 libgcrypt20 libsoup-3.0-0 libtasn1-6 libxkbcommon0 libxml2 libpng16-16t64 libsqlite3-0 libwebp7 libwebpdemux2 libwebpmux3 libatomic1 libfreetype6 libfontconfig1 libwoff1 libdrm2 libegl1 libgles2 mesa-vulkan-drivers libvulkan1
       - name: Performance comparison contracts
         run: python -m unittest discover -s tools -p test_benchmark_comparison.py
       - name: Core contracts
-        run: dotnet run --project tests/Ranvier.D5.Tests -c Release -p:RanvierTrace=${{ matrix.traced }}
+        run: |
+          dotnet run --project tests/Ranvier.D5.Tests -c Release -p:RanvierTrace=${{ matrix.traced }}
+          dotnet run --project tests/Ranvier.D5.Wgpu.Tests -c Release -p:RanvierTrace=${{ matrix.traced }}
       - name: Native contracts and performance
         shell: bash
         run: |
@@ -56,7 +58,10 @@ jobs:
           prefix=()
           if [[ "$RUNNER_OS" == Linux ]]; then prefix=(xvfb-run -a); fi
           "${prefix[@]}" dotnet run --project tests/Ranvier.D5.Native.Tests -c Release -p:RanvierTrace=${{ matrix.traced }}
+          "${prefix[@]}" dotnet run --project tests/Ranvier.D5.Wgpu.Native.Tests -c Release -p:RanvierTrace=${{ matrix.traced }}
           "${prefix[@]}" dotnet run --project benchmarks/Ranvier.D5.Benchmarks -c Release -p:RanvierTrace=${{ matrix.traced }} -- artifacts/benchmarks.json
+          "${prefix[@]}" dotnet run --project benchmarks/Ranvier.D5.Wgpu.Benchmarks -c Release -p:RanvierTrace=${{ matrix.traced }} -- artifacts/wgpu-benchmarks.json
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Wgpu.WaveDemo -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture artifacts/wgpu-wave.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-geographic-kernels artifacts/geographic-kernels.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-projections artifacts/projections.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-advanced artifacts/advanced.bmp
@@ -114,6 +119,9 @@ jobs:
           dotnet pack src/Ranvier.D5.Geo -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
           dotnet pack src/Ranvier.D5.Graph -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
           dotnet pack src/Ranvier.D5.Graph3D -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+          dotnet pack src/Ranvier.D5.Wgpu -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+          dotnet pack src/Fable.Ranvier.D5.Wgpu -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+          dotnet pack src/Ranvier.D5.Wgpu.Sdl -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
       - name: Consume packed View and core
         shell: bash
         run: |
@@ -121,7 +129,7 @@ jobs:
           if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
           mkdir -p artifacts/consumer
           cat > artifacts/consumer/Consumer.fsproj <<EOF
-          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Graph$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Graph3D$suffix" Version="[0.1.1]" /></ItemGroup></Project>
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Graph$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Graph3D$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Wgpu$suffix" Version="[0.1.1]" /><PackageReference Include="Ranvier.D5.Wgpu.Sdl$suffix" Version="[0.1.1]" /></ItemGroup></Project>
           EOF
           cat > artifacts/consumer/Program.fs <<'EOF'
           open Ranvier
@@ -207,6 +215,16 @@ jobs:
           if h3.Nodes.Length <> 2 then failwith "Packed H3 layout failed"
           let walrus = Ranvier.D5.Graph3D.Walrus.layout { Ranvier.D5.Graph3D.WalrusConfig.defaultValue with RootId = Some "n1" } diagram |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           if walrus.Nodes.Length <> 2 then failwith "Packed Walrus layout failed"
+          let scale3d = Ranvier.D5.Wgpu.Scale3D.cartesian (-2., 2.) (-2., 2.) (-1., 1.)
+          let world3d = Ranvier.D5.Wgpu.Scale3D.map scale3d (Point3.create 2. 2. 1.)
+          if abs (world3d.X - 1.0f) > 1e-4f then failwith "Packed Scale3D failed"
+          let ramp3d = Ranvier.D5.Wgpu.ColorRamp.turbo (-1., 1.)
+          if (Ranvier.D5.Wgpu.ColorRamp.tryMap ramp3d 0.25).IsNone then failwith "Packed ColorRamp failed"
+          let surfGrid = Ranvier.D5.Wgpu.SurfaceGrid.fromFunction 6 6 (-2., 2.) (-2., 2.) (fun x y -> 0.5 * sin x * cos y) ValueNone |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          let surfSpec : Ranvier.D5.Wgpu.SurfaceSpec = { Scale = scale3d; Color = ramp3d; Shading = Ranvier.D5.Wgpu.ShadingMode.Unlit; Opacity = 1.0f; Wireframe = ValueNone; PickId = 1u }
+          let surfMesh = Ranvier.D5.Wgpu.Surface3D.build surfSpec surfGrid
+          if (Ranvier.D5.Wgpu.SurfaceMesh.vertices surfMesh).Length <> 36 || (Ranvier.D5.Wgpu.SurfaceMesh.indices surfMesh).Length <> 150 then failwith "Packed Surface3D failed"
+          if typeof<Ranvier.D5.Wgpu.Sdl.PlotPass3D>.Name <> "PlotPass3D" then failwith "Packed Ranvier.D5.Wgpu.Sdl failed"
           graph.Dispose()
           EOF
           cat > artifacts/consumer/NuGet.Config <<'EOF'
@@ -222,9 +240,77 @@ jobs:
           dotnet fickl src/Ranvier.D5.Geo -o artifacts/fable/geo
           dotnet fickl src/Ranvier.D5.Graph -o artifacts/fable/graph
           dotnet fickl src/Ranvier.D5.Graph3D -o artifacts/fable/graph3d
+          dotnet fickl src/Fable.Ranvier.D5.Wgpu -o artifacts/fable/d5-wgpu
           dotnet fickl tests/Ranvier.D5.Fickl.Tests -o artifacts/fable/tests
           printf '{"type":"module"}\n' > artifacts/fable/tests/package.json
           node artifacts/fable/tests/Program.js
+          mkdir -p artifacts/fable-consumer
+          cat > artifacts/fable-consumer/FableConsumer.fsproj <<'EOF'
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net10.0</TargetFramework>
+              <OutputType>Exe</OutputType>
+            </PropertyGroup>
+            <ItemGroup>
+              <Compile Include="Program.fs" />
+              <PackageReference Include="Fable.Ranvier.D5.Wgpu" Version="[0.1.1]" />
+            </ItemGroup>
+          </Project>
+          EOF
+          cat > artifacts/fable-consumer/Program.fs <<'EOF'
+          open System
+          open Ranvier.D5
+          open Ranvier.D5.Wgpu
+          open Ranvier.Wgpu
+
+          let scale = Scale3D.cartesian (-2.0, 2.0) (-2.0, 2.0) (-1.0, 1.0)
+          let world = Scale3D.map scale (Point3.create 2.0 2.0 1.0)
+          if abs (world.X - 1.0f) > 1e-4f then failwithf "Scale3D JS failed: %A" world
+          let back = Scale3D.invert scale world
+          if abs (back.Z - 1.0) > 1e-4 then failwithf "Scale3D.invert JS failed: %A" back
+          let ramp = ColorRamp.turbo (-1.0, 1.0)
+          let c = ColorRamp.tryMap ramp 0.25 |> ValueOption.get
+          if c.A <= 0.0f then failwith "ColorRamp JS failed"
+          let grid =
+              SurfaceGrid.fromFunction 6 6 (-2.0, 2.0) (-2.0, 2.0) (fun x y -> 0.5 * sin x * cos y) ValueNone
+              |> Result.defaultWith (fun e -> failwithf "%A" e)
+          let spec : SurfaceSpec =
+              {
+                  Scale = scale
+                  Color = ramp
+                  Shading = ShadingMode.Lit (0.3f, 0.0f)
+                  Opacity = 1.0f
+                  Wireframe = ValueNone
+                  PickId = 1u
+              }
+          let mesh = Surface3D.build spec grid
+          if (SurfaceMesh.vertices mesh).Length <> 36 || (SurfaceMesh.indices mesh).Length <> 150 then
+              failwith "Surface3D JS failed"
+          printfn "Packed Fable.Ranvier.D5.Wgpu JS smoke passed: %d vertices, %d indices" (SurfaceMesh.vertices mesh).Length (SurfaceMesh.indices mesh).Length
+          EOF
+          cat > artifacts/fable-consumer/NuGet.Config <<'EOF'
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="local" value="../packages" />
+              <add key="nuget" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+            <packageSourceMapping>
+              <packageSource key="local">
+                <package pattern="Ranvier.D5" />
+                <package pattern="Ranvier.D5.*" />
+                <package pattern="Fable.Ranvier.D5.*" />
+              </packageSource>
+              <packageSource key="nuget">
+                <package pattern="*" />
+              </packageSource>
+            </packageSourceMapping>
+          </configuration>
+          EOF
+          NUGET_PACKAGES="$PWD/artifacts/fable-consumer-cache" dotnet restore artifacts/fable-consumer/FableConsumer.fsproj --configfile artifacts/fable-consumer/NuGet.Config
+          NUGET_PACKAGES="$PWD/artifacts/fable-consumer-cache" dotnet fickl artifacts/fable-consumer/FableConsumer.fsproj -o artifacts/fable/packed-consumer --noPackageCache
+          printf '{"type":"module"}\n' > artifacts/fable/packed-consumer/package.json
+          node artifacts/fable/packed-consumer/Program.js
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Ranvier.D5/Ranvier.D5.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.View/Ranvier.D5.View.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.Wgpu/Ranvier.D5.Wgpu.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.Wgpu.Sdl/Ranvier.D5.Wgpu.Sdl.fsproj" />
+  </ItemGroup>
+</Project>

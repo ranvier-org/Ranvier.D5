@@ -1,0 +1,519 @@
+namespace Ranvier.D5.Wgpu.Sdl
+
+open System
+open System.Numerics
+open Ranvier
+open Ranvier.D5
+open Ranvier.D5.View
+open Ranvier.D5.Wgpu
+open Ranvier.Dom
+open Ranvier.View
+open Ranvier.View.Dsl
+open Ranvier.View.Representation
+open Ranvier.View.WebCore.Sdl
+open Ranvier.Wgpu
+open Ranvier.Wgpu.Sdl
+
+/// <summary>Immutable 3D frame description specifying axis framing, clear/lighting/section state, GPU batches, and 2D SVG overlay marks.</summary>
+type PlotPass3D =
+    {
+        /// <summary>3D axis scale, tick/grid configuration, theme, and margins.</summary>
+        AxisSpec: Axis3DSpec
+        /// <summary>Viewport clear color.</summary>
+        ClearColor: RgbaColor
+        /// <summary>Optional directional studio lighting rig.</summary>
+        Lighting: LightingRig voption
+        /// <summary>Optional world-space clipping plane.</summary>
+        SectionPlane: SectionPlane voption
+        /// <summary>Additional hardware-instanced mesh batches rendered alongside axis wall panels.</summary>
+        ExtraBatches: ReadOnlyMemory<InstanceBatch>
+        /// <summary>Additional 3D hairline batches rendered alongside axis lines and hover spikes.</summary>
+        ExtraLines: ReadOnlyMemory<LineBatch>
+        /// <summary>Additional camera-facing SDF disc batches.</summary>
+        ExtraDiscs: ReadOnlyMemory<DiscBatch>
+        /// <summary>Additional 2D SVG overlay marks rendered over the axis label overlay.</summary>
+        ExtraOverlayMarks: Mark list
+    }
+
+/// <summary>Viewport size, editable camera, and optional GPU pick callbacks for <c>PlotView3D</c>.</summary>
+type PlotViewConfig3D =
+    {
+        /// <summary>Logical viewport width in CSS pixels.</summary>
+        Width: int
+        /// <summary>Logical viewport height in CSS pixels.</summary>
+        Height: int
+        /// <summary>Reactive editable 3D camera updated by pointer orbit/pan, wheel zoom, and keyboard navigation.</summary>
+        Camera: Editable<PlotCamera3D>
+        /// <summary>Optional callback invoked with the resolved <c>PickHit</c> (or <c>ValueNone</c>) while hovering over the plot.</summary>
+        OnHoverHit: (PickHit voption -> unit) option
+        /// <summary>Optional callback invoked with the resolved <c>PickHit</c> (or <c>ValueNone</c>) on primary click without drag.</summary>
+        OnClickHit: (PickHit voption -> unit) option
+    }
+
+type private PlotViewProps3D =
+    {
+        Window: Window
+        Context: WgpuContext
+        Config: PlotViewConfig3D
+        ReadScene: unit -> PlotPass3D
+    }
+
+[<Sealed>]
+type private PlotViewInstance3D
+    (
+        window: Window,
+        context: WgpuContext,
+        config: PlotViewConfig3D,
+        readScene: unit -> PlotPass3D
+    ) =
+    let containerRef: NodeRef<HTMLDivElement> = NodeRef.create ()
+    let emptyOverlay = Scene.create (float config.Width) (float config.Height) "PlotView3D" []
+    let overlaySig = Api.createSignal emptyOverlay
+
+    let boxMesh = context.UploadMesh (Primitives.unitBox ())
+    let panelBatch = context.CreateBatch (boxMesh, BlendMode.AlphaBlend, false)
+    let axisLineBatch = context.CreateLineBatch ()
+    let spikeLineBatch = context.CreateLineBatch ()
+
+    let mutable disposed = false
+    let mutable dirty = true
+    let mutable rafId: int option = None
+    let mutable surfaceOpt: WgpuSdlSurface option = None
+    let mutable latestCam: Camera3D option = None
+    let mutable latestPass: PlotPass3D option = None
+    let mutable latestFrame: AxisFrame3D option = None
+    let mutable hasHoverSpikes = false
+    let mutable lastHoverHit: PickHit voption = ValueNone
+
+    let mutable dragging = false
+    let mutable dragMoved = false
+    let mutable dragPan = false
+    let mutable activePointerId = -1
+    let mutable lastClientX = 0.0
+    let mutable lastClientY = 0.0
+    let mutable downClientX = 0.0
+    let mutable downClientY = 0.0
+
+    let mutable cachedExtraBatches: InstanceBatch array = [||]
+    let mutable mergedBatches: InstanceBatch array = [| panelBatch |]
+    let mutable cachedExtraLines: LineBatch array = [||]
+    let mutable mergedLines: LineBatch array = [| axisLineBatch; spikeLineBatch |]
+
+    let syncMergedBatches (extra: ReadOnlyMemory<InstanceBatch>) =
+        let span = extra.Span
+        let mutable same = span.Length = cachedExtraBatches.Length
+
+        if same then
+            let mutable i = 0
+
+            while same && i < span.Length do
+                if not (Object.ReferenceEquals (span[i], cachedExtraBatches[i])) then
+                    same <- false
+
+                i <- i + 1
+
+        if not same then
+            let nextExtra = Array.zeroCreate<InstanceBatch> span.Length
+            let nextMerged = Array.zeroCreate<InstanceBatch> (1 + span.Length)
+            nextMerged[0] <- panelBatch
+
+            for i = 0 to span.Length - 1 do
+                let b = span[i]
+                nextExtra[i] <- b
+                nextMerged[1 + i] <- b
+
+            cachedExtraBatches <- nextExtra
+            mergedBatches <- nextMerged
+
+    let syncMergedLines (extra: ReadOnlyMemory<LineBatch>) =
+        let span = extra.Span
+        let mutable same = span.Length = cachedExtraLines.Length
+
+        if same then
+            let mutable i = 0
+
+            while same && i < span.Length do
+                if not (Object.ReferenceEquals (span[i], cachedExtraLines[i])) then
+                    same <- false
+
+                i <- i + 1
+
+        if not same then
+            let nextExtra = Array.zeroCreate<LineBatch> span.Length
+            let nextMerged = Array.zeroCreate<LineBatch> (2 + span.Length)
+            nextMerged[0] <- axisLineBatch
+            nextMerged[1] <- spikeLineBatch
+
+            for i = 0 to span.Length - 1 do
+                let l = span[i]
+                nextExtra[i] <- l
+                nextMerged[2 + i] <- l
+
+            cachedExtraLines <- nextExtra
+            mergedLines <- nextMerged
+
+    let buildScenePass (cam: Camera3D) (pass: PlotPass3D) (includeAxis: bool) =
+        let basePass =
+            ScenePass.create cam
+            |> ScenePass.withClear pass.ClearColor
+            |> ScenePass.withDiscMemory pass.ExtraDiscs
+
+        let withLight =
+            match pass.Lighting with
+            | ValueSome light -> ScenePass.withLighting light basePass
+            | ValueNone -> basePass
+
+        let withSec =
+            match pass.SectionPlane with
+            | ValueSome sec -> ScenePass.withSection sec withLight
+            | ValueNone -> withLight
+
+        if includeAxis then
+            syncMergedBatches pass.ExtraBatches
+            syncMergedLines pass.ExtraLines
+
+            withSec
+            |> ScenePass.withBatches mergedBatches
+            |> ScenePass.withLines mergedLines
+        else
+            withSec |> ScenePass.withBatchMemory pass.ExtraBatches
+
+    let renderNow () =
+        if not disposed then
+            match surfaceOpt, latestCam, latestPass, latestFrame with
+            | Some surface, Some cam, Some pass, Some _ when not surface.IsDisposed ->
+                dirty <- false
+                let scenePass = buildScenePass cam pass true
+                WgpuSdlSurface.render surface scenePass |> ignore
+            | _ -> ()
+
+    let rec scheduleFrame () =
+        if not disposed && dirty && rafId.IsNone && surfaceOpt.IsSome then
+            let id =
+                window.Host.RequestAnimationFrame (fun _ ->
+                    rafId <- None
+
+                    if not disposed && dirty then
+                        renderNow ())
+
+            rafId <- Some id
+
+    let cancelFrame () =
+        match rafId with
+        | Some id ->
+            rafId <- None
+            window.Host.CancelAnimationFrame id
+        | None -> ()
+
+    let updateSpikes (hit: PickHit voption) =
+        match hit, latestPass, latestFrame with
+        | ValueSome h, Some pass, Some frame when h.PickId <> 0u ->
+            let tc = pass.AxisSpec.Theme.TickColor
+            let spikeColor = RgbaColor (tc.R, tc.G, tc.B, 0.95f)
+            let spikes = Probe3D.hoverSpikes pass.AxisSpec.Scale frame spikeColor h.WorldPosition
+            spikeLineBatch.UpdateVertices spikes.Span
+            hasHoverSpikes <- true
+            dirty <- true
+            scheduleFrame ()
+        | _ ->
+            if hasHoverSpikes then
+                spikeLineBatch.Resize 0
+                hasHoverSpikes <- false
+                dirty <- true
+                scheduleFrame ()
+
+    let viewportCssSize () =
+        match containerRef.Current with
+        | Some el ->
+            let rect = el.getBoundingClientRect ()
+            let w = if rect.width > 0.0 then rect.width else float config.Width
+            let h = if rect.height > 0.0 then rect.height else float config.Height
+            struct (rect.x, rect.y, w, h)
+        | None -> struct (0.0, 0.0, float config.Width, float config.Height)
+
+    let pickAtClient (clientX: float) (clientY: float) : PickHit voption =
+        if disposed || context.IsDisposed then
+            ValueNone
+        else
+            match latestCam, latestPass with
+            | Some cam, Some pass ->
+                let struct (rx, ry, rw, rh) = viewportCssSize ()
+                let nx = Math.Clamp ((clientX - rx) / rw, 0.0, 1.0)
+                let ny = Math.Clamp ((clientY - ry) / rh, 0.0, 1.0)
+                let px = Math.Clamp (int (Math.Round (nx * float context.Width)), 0, max 0 (context.Width - 1))
+                let py = Math.Clamp (int (Math.Round (ny * float context.Height)), 0, max 0 (context.Height - 1))
+                let pickPass = buildScenePass cam pass false
+                WgpuContext.pick px py context pickPass
+            | _ -> ValueNone
+
+    let releaseCapture (pointerId: int) =
+        match containerRef.Current with
+        | Some el when pointerId >= 0 ->
+            if el.hasPointerCapture pointerId then
+                el.releasePointerCapture pointerId
+        | _ -> ()
+
+    let cleanupResources () =
+        if not disposed then
+            disposed <- true
+            dirty <- false
+            cancelFrame ()
+            surfaceOpt <- None
+            spikeLineBatch.Dispose ()
+            axisLineBatch.Dispose ()
+            panelBatch.Dispose ()
+            boxMesh.Dispose ()
+
+    do
+        Api.onCleanup cleanupResources
+
+        Api.createEffect (fun () ->
+            if not disposed then
+                let plotCam = config.Camera.Value
+                let pass = readScene ()
+                let gpuCam = PlotCamera3D.toCamera3D pass.AxisSpec.Scale plotCam
+                let frame = Axis3D.build pass.AxisSpec config.Width config.Height gpuCam
+                panelBatch.UpdateInstances ((Axis3D.panelInstances frame).Span)
+                axisLineBatch.UpdateVertices ((Axis3D.lineVertices frame).Span)
+
+                let baseOverlay = Axis3D.overlayScene (float config.Width) (float config.Height) frame
+
+                let overlay =
+                    if List.isEmpty pass.ExtraOverlayMarks then
+                        baseOverlay
+                    else
+                        Scene.create
+                            (float config.Width)
+                            (float config.Height)
+                            (Scene.title baseOverlay)
+                            (Scene.marks baseOverlay @ pass.ExtraOverlayMarks)
+
+                overlaySig.Value <- overlay
+                latestCam <- Some gpuCam
+                latestPass <- Some pass
+                latestFrame <- Some frame
+                dirty <- true
+                scheduleFrame ())
+
+    member _.ContainerRef = containerRef
+    member _.ReadOverlay = fun () -> overlaySig.Value
+    member _.ContainerStyle =
+        $"position:relative;width:{config.Width}px;height:{config.Height}px;overflow:hidden;outline:none;user-select:none;"
+    member _.CanvasWidthAttr = string config.Width
+    member _.CanvasHeightAttr = string config.Height
+
+    member _.AttachCanvas(el: HTMLCanvasElement) : unit -> unit =
+        let lease =
+            WgpuSdlSurface.lend
+                window
+                context
+                (fun surface ->
+                    if not disposed then
+                        surfaceOpt <- Some surface
+                        dirty <- true
+                        scheduleFrame ()
+
+                    { new IDisposable with
+                        member _.Dispose() = cleanupResources () })
+                el
+
+        fun () -> lease.Dispose ()
+
+    member _.OnPointerDown(ev: PointerEvent) =
+        if not disposed then
+            dragging <- true
+            dragMoved <- false
+            dragPan <- ev.button = 1s || ev.button = 2s || ev.shiftKey
+            activePointerId <- ev.pointerId
+            lastClientX <- ev.clientX
+            lastClientY <- ev.clientY
+            downClientX <- ev.clientX
+            downClientY <- ev.clientY
+
+            match containerRef.Current with
+            | Some el ->
+                try
+                    el.setPointerCapture ev.pointerId
+                with _ ->
+                    ()
+            | None -> ()
+
+    member _.OnPointerMove(ev: PointerEvent) =
+        if not disposed then
+            if dragging && ev.pointerId = activePointerId then
+                let dx = float32 (ev.clientX - lastClientX)
+                let dy = float32 (ev.clientY - lastClientY)
+                lastClientX <- ev.clientX
+                lastClientY <- ev.clientY
+
+                if abs (ev.clientX - downClientX) > 2.0 || abs (ev.clientY - downClientY) > 2.0 then
+                    dragMoved <- true
+
+                if dx <> 0.0f || dy <> 0.0f then
+                    if dragPan then
+                        let struct (_, _, rw, rh) = viewportCssSize ()
+                        let fitR =
+                            match latestPass with
+                            | Some p -> Scale3D.fitRadius p.AxisSpec.Scale
+                            | None -> 1.0f
+
+                        let ndx = dx / float32 (max 1.0 rw)
+                        let ndy = dy / float32 (max 1.0 rh)
+                        config.Camera.Value <- PlotCamera3D.panBy fitR AxisLock3D.Free ndx ndy config.Camera.Value
+                    else
+                        config.Camera.Value <- PlotCamera3D.orbitBy dx dy config.Camera.Value
+            elif not dragging then
+                let hit = pickAtClient ev.clientX ev.clientY
+
+                if hit.IsSome || lastHoverHit.IsSome then
+                    lastHoverHit <- hit
+                    updateSpikes hit
+                    config.OnHoverHit |> Option.iter (fun cb -> cb hit)
+
+    member _.OnPointerUp(ev: PointerEvent) =
+        if not disposed && dragging && ev.pointerId = activePointerId then
+            releaseCapture ev.pointerId
+            let wasClick = not dragMoved && ev.button = 0s
+            dragging <- false
+            dragPan <- false
+            activePointerId <- -1
+
+            if wasClick then
+                let hit = pickAtClient ev.clientX ev.clientY
+                lastHoverHit <- hit
+                updateSpikes hit
+                config.OnClickHit |> Option.iter (fun cb -> cb hit)
+
+    member _.OnPointerCancel(ev: PointerEvent) =
+        if not disposed && dragging && ev.pointerId = activePointerId then
+            releaseCapture ev.pointerId
+            dragging <- false
+            dragMoved <- false
+            dragPan <- false
+            activePointerId <- -1
+
+    member _.OnWheel(ev: WheelEvent) =
+        if not disposed then
+            ev.preventDefault ()
+
+            if abs ev.deltaY > 1e-6 then
+                let rawFactor = MathF.Exp (-float32 ev.deltaY * 0.0015f)
+                let factor = Math.Clamp (rawFactor, 0.25f, 4.0f)
+                config.Camera.Value <- PlotCamera3D.zoomBy factor config.Camera.Value
+
+    member _.OnKeyDown(ev: KeyboardEvent) =
+        if not disposed then
+            let cam = config.Camera.Value
+
+            match ev.key with
+            | "r" | "R" | "Home" ->
+                ev.preventDefault ()
+                config.Camera.Reset ()
+            | "p" | "P" ->
+                ev.preventDefault ()
+                let nextP = if cam.Perspectiveness > 0.5f then 0.0f else 1.0f
+                config.Camera.Value <- { cam with Perspectiveness = nextP }
+            | "m" | "M" ->
+                ev.preventDefault ()
+
+                let nextMode =
+                    match cam.Mode with
+                    | OrbitMode3D.Turntable -> OrbitMode3D.Arcball
+                    | OrbitMode3D.Arcball -> OrbitMode3D.Turntable
+
+                config.Camera.Value <- { cam with Mode = nextMode }
+            | "ArrowLeft" ->
+                ev.preventDefault ()
+                config.Camera.Value <- PlotCamera3D.orbitBy -12.0f 0.0f cam
+            | "ArrowRight" ->
+                ev.preventDefault ()
+                config.Camera.Value <- PlotCamera3D.orbitBy 12.0f 0.0f cam
+            | "ArrowUp" ->
+                ev.preventDefault ()
+                config.Camera.Value <- PlotCamera3D.orbitBy 0.0f -12.0f cam
+            | "ArrowDown" ->
+                ev.preventDefault ()
+                config.Camera.Value <- PlotCamera3D.orbitBy 0.0f 12.0f cam
+            | "+" | "=" ->
+                ev.preventDefault ()
+                config.Camera.Value <- PlotCamera3D.zoomBy 1.15f cam
+            | "-" | "_" ->
+                ev.preventDefault ()
+                config.Camera.Value <- PlotCamera3D.zoomBy (1.0f / 1.15f) cam
+            | _ -> ()
+
+/// <summary>Declarative <c>Ranvier.View.Dsl</c> host binding a WebGPU 3D surface and pointer-transparent SVG axis overlay inside an SDL window.</summary>
+[<RequireQualifiedAccess>]
+module PlotView3D =
+    let private plotComponent: Component<PlotViewProps3D> =
+        Component.template
+            (fun _ (props: PlotViewProps3D) ->
+                PlotViewInstance3D (props.Window, props.Context, props.Config, props.ReadScene))
+            (div<PlotViewInstance3D>(
+                [|
+                    div.style (fun (inst: PlotViewInstance3D) -> inst.ContainerStyle)
+                    div.props.tabIndex 0
+                    div.ref (fun (inst: PlotViewInstance3D) -> inst.ContainerRef)
+                    div.onPointerdown (fun (inst: PlotViewInstance3D) ev -> inst.OnPointerDown ev)
+                    div.onPointermove (fun (inst: PlotViewInstance3D) ev -> inst.OnPointerMove ev)
+                    div.onPointerup (fun (inst: PlotViewInstance3D) ev -> inst.OnPointerUp ev)
+                    div.onPointercancel (fun (inst: PlotViewInstance3D) ev -> inst.OnPointerCancel ev)
+                    div.onWheel (fun (inst: PlotViewInstance3D) ev -> inst.OnWheel ev)
+                    div.onKeydown (fun (inst: PlotViewInstance3D) ev -> inst.OnKeyDown ev)
+                |]
+            )
+                .Run
+                [|
+                    canvas<PlotViewInstance3D>(
+                        [|
+                            canvas.style "position:absolute;inset:0;width:100%;height:100%;display:block;"
+                            canvas.attribute ("width", (fun (inst: PlotViewInstance3D) -> Some inst.CanvasWidthAttr))
+                            canvas.attribute ("height", (fun (inst: PlotViewInstance3D) -> Some inst.CanvasHeightAttr))
+                            canvas.lend (fun (inst: PlotViewInstance3D) el -> inst.AttachCanvas el)
+                        |]
+                    )
+                        .Run [||]
+                    div<PlotViewInstance3D>(
+                        [|
+                            div.style "position:absolute;inset:0;pointer-events:none;"
+                        |]
+                    )
+                        .Run [| view (fun (inst: PlotViewInstance3D) -> Component.render Renderer.passive inst.ReadOverlay) |]
+                |])
+
+    /// <summary>
+    /// Creates a <c>Ranvier.View.Dsl</c> interactive 3D plot view bound to <c>window</c> and <c>context</c>,
+    /// rendering <c>readScene ()</c> on dirty frames alongside a pointer-transparent <c>Renderer.passive</c> SVG axis overlay.
+    /// </summary>
+    let create
+        (window: Window)
+        (context: WgpuContext)
+        (config: PlotViewConfig3D)
+        (readScene: unit -> PlotPass3D)
+        : Program.View =
+        if isNull (box window) then
+            nullArg (nameof window)
+
+        if isNull (box context) then
+            nullArg (nameof context)
+
+        if isNull (box config.Camera) then
+            nullArg "config.Camera"
+
+        if isNull (box readScene) then
+            nullArg (nameof readScene)
+
+        if config.Width <= 0 then
+            raise (ArgumentOutOfRangeException ("config.Width", "Viewport width must be positive."))
+
+        if config.Height <= 0 then
+            raise (ArgumentOutOfRangeException ("config.Height", "Viewport height must be positive."))
+
+        Component.render
+            plotComponent
+            {
+                Window = window
+                Context = context
+                Config = config
+                ReadScene = readScene
+            }

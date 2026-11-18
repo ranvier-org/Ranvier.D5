@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Ranvier.D5.Wgpu.Sdl$(RanvierPackageSuffix)</PackageId>
+    <Description>Native SDL3 + WebGPU interactive 3D plot host view for Ranvier.D5.Wgpu over Ranvier.Wgpu.Sdl and Ranvier.View.WebCore.Sdl.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="PlotView3D.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Ranvier.D5.Wgpu/Ranvier.D5.Wgpu.fsproj" />
+    <ProjectReference Include="../Ranvier.D5.View/Ranvier.D5.View.fsproj" />
+    <PackageReference Include="Ranvier.Wgpu.Sdl$(RanvierPackageSuffix)" Version="$(RanvierWgpuSdlVersion)" />
+    <PackageReference Include="Ranvier.View.WebCore.Sdl$(RanvierPackageSuffix)" Version="$(RanvierViewWebCoreSdlVersion)" />
+    <PackageReference Update="FSharp.Core" Version="10.0.100" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>
