@@ -355,6 +355,22 @@ let reactive3DTests =
                 Expect.floatClose { absolute = 1e-5; relative = 0.0 } (float (arcCam.Arcball.Length ())) 1.0 "Arcball quaternion stays normalized"
 
                 let scale = Scale3D.cartesian (0.0, 2.0) (0.0, 2.0) (0.0, 2.0)
+
+                // Screen-direction parity between Turntable and Arcball for horizontal and vertical drags
+                let turnZero = { defCam with Mode = OrbitMode3D.Turntable; AzimuthRad = 0.0f; ElevationRad = 0.0f }
+                let arcZero = { defCam with Mode = OrbitMode3D.Arcball; Arcball = Quaternion.Identity }
+                let frontPt = Vector3 (0.0f, 0.0f, 0.5f)
+                let scrTurnHoriz = Camera3D.projectToScreen 100 100 (PlotCamera3D.toCamera3D scale (PlotCamera3D.orbitBy 40.0f 0.0f turnZero)) frontPt |> ValueOption.get
+                let scrArcHoriz = Camera3D.projectToScreen 100 100 (PlotCamera3D.toCamera3D scale (PlotCamera3D.orbitBy 40.0f 0.0f arcZero)) frontPt |> ValueOption.get
+                Expect.isGreaterThan scrTurnHoriz.X 50.0f "Turntable +dx shifts front point right on screen"
+                Expect.isGreaterThan scrArcHoriz.X 50.0f "Arcball +dx shifts front point right on screen"
+                Expect.floatClose { absolute = 1e-3; relative = 0.0 } (float scrArcHoriz.X) (float scrTurnHoriz.X) "Arcball horizontal drag matches Turntable screen X"
+
+                let scrTurnVert = Camera3D.projectToScreen 100 100 (PlotCamera3D.toCamera3D scale (PlotCamera3D.orbitBy 0.0f 40.0f turnZero)) frontPt |> ValueOption.get
+                let scrArcVert = Camera3D.projectToScreen 100 100 (PlotCamera3D.toCamera3D scale (PlotCamera3D.orbitBy 0.0f 40.0f arcZero)) frontPt |> ValueOption.get
+                Expect.isGreaterThan scrTurnVert.Y 50.0f "Turntable +dy shifts front point down on screen"
+                Expect.isGreaterThan scrArcVert.Y 50.0f "Arcball +dy shifts front point down on screen"
+                Expect.floatClose { absolute = 1e-3; relative = 0.0 } (float scrArcVert.Y) (float scrTurnVert.Y) "Arcball vertical drag matches Turntable screen Y"
                 let panX = PlotCamera3D.panBy (Scale3D.fitRadius scale) AxisLock3D.LockX 0.25f 0.25f defCam
                 Expect.equal panX.PanOffset.Y 0.0f "LockX keeps Y unchanged"
                 Expect.equal panX.PanOffset.Z 0.0f "LockX keeps Z unchanged"

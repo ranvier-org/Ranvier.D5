@@ -148,7 +148,7 @@ module PlotCamera3D =
         | OrbitMode3D.Arcball ->
             let q0 = normalizeQuat camera.Arcball
             let yawQ = Quaternion.CreateFromAxisAngle (Vector3.UnitY, -deltaPixelsX * OrbitSensitivityRadPerPx)
-            let pitchQ = Quaternion.CreateFromAxisAngle (Vector3.UnitX, deltaPixelsY * OrbitSensitivityRadPerPx)
+            let pitchQ = Quaternion.CreateFromAxisAngle (Vector3.UnitX, -deltaPixelsY * OrbitSensitivityRadPerPx)
             let qNext = normalizeQuat (q0 * yawQ * pitchQ)
             { camera with Arcball = qNext }
 
