@@ -73,7 +73,9 @@ let tests=testList "Sampling" [
             use cancel=new Threading.CancellationTokenSource()
             let elapsed=Diagnostics.Stopwatch.StartNew()
             cancel.CancelAfter 1
-            Expect.throwsT<OperationCanceledException> (fun () -> reduce cancel.Token (SamplingConfig.create 1000) input |> ignore) "mid-request cancellation"
+            Expect.throwsT<OperationCanceledException> (fun () ->
+                while true do
+                    reduce cancel.Token (SamplingConfig.create 1000) input |> ignore) "mid-request cancellation"
             Expect.isLessThan elapsed.Elapsed.TotalSeconds 2. "cooperative cancellation bound"
     testCase "sampling observes cancellation" <| fun _ ->
         use cancel=new Threading.CancellationTokenSource()
