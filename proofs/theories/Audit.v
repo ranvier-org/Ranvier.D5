@@ -12,6 +12,10 @@ Print Assumptions naive_nice_from_interior_ticks_falsified.
 Print Assumptions integer_dist_floor_bounds_safe.
 Print Assumptions naive_integer_dist_bounds_falsified.
 Print Assumptions simd_chunked_sum_eq_fold.
+Print Assumptions scale_precomputed_linear_eq_reference.
+Print Assumptions simd_chunked_sq_diff_eq_fold.
+Print Assumptions single_table_join_eq_data_join.
+Print Assumptions dsv_unescaped_span_slice_eq_char_scan.
 
 (* Pure.Spatial *)
 Print Assumptions quadtree_aabb_lower_bound_sound.
@@ -24,6 +28,7 @@ Print Assumptions minmax_run_preserves_endpoints_and_order.
 Print Assumptions hamilton_quotas_conserve_budget.
 Print Assumptions selection_reconcile_preserves_hidden_and_idempotent.
 Print Assumptions length_prefixed_key_injective.
+Print Assumptions lttb_precomputed_cross_eq_area.
 
 (* Pure.GeometryGeo *)
 Print Assumptions marching_squares_cell_degree_balanced.

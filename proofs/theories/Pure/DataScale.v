@@ -384,3 +384,170 @@ Proof.
   rewrite firstn_skipn.
   reflexivity.
 Qed.
+
+(** ** 5. Batch D1 refinements: precomputed linear `Scale`, SIMD variance, single-table `Data.join`, and `SearchValues` DSV scan *)
+
+Definition linear_map_ref (a b c d : Z) (clamped : bool) (v : Z) : Z :=
+  if Z.eqb a b then (c + d) / 2
+  else
+    let raw := c + ((v - a) * (d - c)) / (b - a) in
+    if clamped then clamp_z c d raw else raw.
+
+Definition linear_map_precomputed (a c span_d span_r : Z) (clamped : bool) (v : Z) : Z :=
+  if Z.eqb span_d 0 then (c + (c + span_r)) / 2
+  else
+    let raw := c + ((v - a) * span_r) / span_d in
+    if clamped then clamp_z c (c + span_r) raw else raw.
+
+(**md
+**Precomputing `span_d = b - a` and `span_r = d - c` on `Continuous` linear scales matches reference `Scale.map`.**
+
+Eliminating per-call `Forward`/`Accepts` delegate invocations and `Option` heap allocation via precomputed spans and `ValueOption` yields the exact reference coordinate across constant, reversed, and clamped ranges.
+
+- [a:] domain start.
+- [b:] domain end.
+- [c:] range start.
+- [d:] range end.
+- [clamped:] whether output clamping is enabled.
+- [v:] input domain observation.
+*)
+Theorem scale_precomputed_linear_eq_reference (a b c d : Z) (clamped : bool) (v : Z) :
+  linear_map_precomputed a c (b - a) (d - c) clamped v = linear_map_ref a b c d clamped v.
+Proof.
+  unfold linear_map_precomputed, linear_map_ref.
+  replace (c + (d - c)) with d by lia.
+  destruct (Z.eqb (b - a) 0) eqn:Hspan; destruct (Z.eqb a b) eqn:Hab; try reflexivity.
+  - apply Z.eqb_eq in Hspan. apply Z.eqb_neq in Hab. lia.
+  - apply Z.eqb_neq in Hspan. apply Z.eqb_eq in Hab. lia.
+Qed.
+
+Fixpoint sum_sq_diff (mu : Z) (xs : list Z) : Z :=
+  match xs with
+  | [] => 0
+  | x :: rest => (x - mu) * (x - mu) + sum_sq_diff mu rest
+  end.
+
+Fixpoint simd_chunked_sq_diff (fuel width : nat) (mu : Z) (xs : list Z) : Z :=
+  match fuel with
+  | 0%nat => sum_sq_diff mu xs
+  | S f =>
+    if Nat.ltb (length xs) width || Nat.eqb width 0%nat then sum_sq_diff mu xs
+    else sum_sq_diff mu (firstn width xs) + simd_chunked_sq_diff f width mu (skipn width xs)
+  end.
+
+Lemma sum_sq_diff_app (mu : Z) (a b : list Z) :
+  sum_sq_diff mu (a ++ b) = sum_sq_diff mu a + sum_sq_diff mu b.
+Proof.
+  induction a as [|x rest IH]; simpl; [lia | rewrite IH; lia].
+Qed.
+
+(**md
+**SIMD `W`-lane centered sum-of-squares plus scalar remainder equals sequential `sum_sq_diff`.**
+
+Accumulating `(x - mu)^2` across `Vector512`/`Vector256`/`Vector128` lanes followed by the scalar tail produces the exact centered sum-of-squares over `xs`.
+
+- [fuel:] maximum number of SIMD vector iterations.
+- [width:] SIMD register lane count (`2`, `4`, or `8`).
+- [mu:] centered pass mean.
+- [xs:] scaled finite observations.
+*)
+Theorem simd_chunked_sq_diff_eq_fold (fuel width : nat) (mu : Z) (xs : list Z) :
+  simd_chunked_sq_diff fuel width mu xs = sum_sq_diff mu xs.
+Proof.
+  revert xs. induction fuel as [|f IH]; intros xs; simpl; [reflexivity |].
+  destruct (Nat.ltb (length xs) width || Nat.eqb width 0%nat); [reflexivity |].
+  rewrite IH.
+  rewrite <- sum_sq_diff_app.
+  rewrite firstn_skipn.
+  reflexivity.
+Qed.
+
+Fixpoint mark_matched_table (next : list nat) (tbl : list (nat * bool)) : list (nat * bool) :=
+  match next with
+  | [] => tbl
+  | k :: rest =>
+    let tbl' := List.map (fun kv => if Nat.eqb (fst kv) k then (fst kv, true) else kv) tbl in
+    mark_matched_table rest tbl'
+  end.
+
+Definition single_table_join_keys (prev next : list nat) : join_model :=
+  let init_tbl := List.map (fun k => (k, false)) prev in
+  let final_tbl := mark_matched_table next init_tbl in
+  {| jm_enter := List.filter (fun k => negb (mem_key k prev)) next;
+     jm_update := List.filter (fun k => mem_key k prev) next;
+     jm_exit := List.map fst (List.filter (fun kv => negb (snd kv)) final_tbl) |}.
+
+Lemma mark_matched_flag (next : list nat) (tbl : list (nat * bool)) :
+  List.map fst (List.filter (fun kv => negb (snd kv)) (mark_matched_table next tbl)) =
+  List.filter (fun k => negb (mem_key k next)) (List.map fst (List.filter (fun kv => negb (snd kv)) tbl)).
+Proof.
+  revert tbl. induction next as [|x rest IH]; intros tbl; simpl.
+  - induction tbl as [|[k b] tl IHt]; simpl; [reflexivity |].
+    destruct b; simpl; [exact IHt | f_equal; exact IHt].
+  - rewrite IH. clear IH.
+    induction tbl as [|[k b] tl IHt]; simpl; [reflexivity |].
+    destruct b; simpl.
+    + destruct (Nat.eqb k x); simpl; exact IHt.
+    + destruct (Nat.eqb k x) eqn:Heq; simpl.
+      * exact IHt.
+      * destruct (mem_key k rest); simpl; [exact IHt | f_equal; exact IHt].
+Qed.
+
+(**md
+**Single-table `Data.join` in-place retention marking equals reference `data_join_keys`.**
+
+Tracking matched `prev` keys via a flag inside the single `prev` lookup table (eliminating the separate `retained` and `Check.unique` `HashSet` allocations) yields identical `Enter`, `Update`, and `Exit` key sequences.
+
+- [prev:] ordered keys from the previous dataset.
+- [next:] ordered keys from the incoming dataset.
+*)
+Theorem single_table_join_eq_data_join (prev next : list nat) :
+  single_table_join_keys prev next = data_join_keys prev next.
+Proof.
+  unfold single_table_join_keys, data_join_keys.
+  f_equal.
+  rewrite mark_matched_flag.
+  assert (Hinit : List.map fst (List.filter (fun kv => negb (snd kv)) (List.map (fun k => (k, false)) prev)) = prev).
+  { induction prev as [|k tl IH]; simpl; [reflexivity | f_equal; exact IH]. }
+  rewrite Hinit. reflexivity.
+Qed.
+
+Fixpoint char_scan_until (special : nat -> bool) (cs : list nat) : list nat * list nat :=
+  match cs with
+  | [] => ([], [])
+  | c :: rest =>
+    if special c then ([], cs)
+    else
+      let '(fld, rem) := char_scan_until special rest in
+      (c :: fld, rem)
+  end.
+
+Fixpoint find_special_offset (special : nat -> bool) (cs : list nat) : nat :=
+  match cs with
+  | [] => 0%nat
+  | c :: rest =>
+    if special c then 0%nat else S (find_special_offset special rest)
+  end.
+
+Definition span_slice_until (special : nat -> bool) (cs : list nat) : list nat * list nat :=
+  let pos := find_special_offset special cs in
+  (firstn pos cs, skipn pos cs).
+
+(**md
+**Vectorized `SearchValues` offset scan + `Span` slice equals character-by-character DSV scanning.**
+
+Jumping directly to `pos = find_special_offset special cs` (`ReadOnlySpan.IndexOfAny(SearchValues)`) and slicing `(firstn pos cs, skipn pos cs)` yields the exact same field text and remaining input stream as per-character `StringBuilder` accumulation.
+
+- [special:] predicate identifying delimiter, quote, CR, or LF characters.
+- [cs:] remaining input character codes starting at the current cursor.
+*)
+Theorem dsv_unescaped_span_slice_eq_char_scan (special : nat -> bool) (cs : list nat) :
+  span_slice_until special cs = char_scan_until special cs.
+Proof.
+  unfold span_slice_until.
+  induction cs as [|c rest IH]; simpl; [reflexivity |].
+  destruct (special c); simpl; [reflexivity |].
+  destruct (char_scan_until special rest) as [fld rem] eqn:Hscan.
+  injection IH as Hf Hr.
+  rewrite Hf, Hr. reflexivity.
+Qed.

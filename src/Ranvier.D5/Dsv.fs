@@ -1,6 +1,10 @@
 namespace Ranvier.D5
 
 open System
+#if !FABLE_COMPILER
+open System.Buffers
+#endif
+open System.Collections.Generic
 open System.Globalization
 open System.IO
 open System.Text
@@ -84,6 +88,16 @@ module DsvRow =
 module Dsv =
     exception private Rejected of LayoutError
 
+#if !FABLE_COMPILER
+    let private csvSpecial = SearchValues.Create ",\"\r\n"
+    let private tsvSpecial = SearchValues.Create "\t\"\r\n"
+    let private quoteSpecial = SearchValues.Create "\"\r\n"
+    let inline private specialFor delimiter =
+        if delimiter = ',' then csvSpecial
+        elif delimiter = '\t' then tsvSpecial
+        else SearchValues.Create([| delimiter; '"'; '\r'; '\n' |])
+#endif
+
     let private validConfig config =
         config.Delimiter<>'"' && config.Delimiter<>'\r' && config.Delimiter<>'\n' &&
         config.MaxCharacters>=0 && config.MaxRows>=1 && config.MaxColumns>=1
@@ -95,30 +109,154 @@ module Dsv =
         elif text.Length>config.MaxCharacters then Error [BudgetExceeded "DSV input exceeds its character budget."]
         else
             try
-                let start=if text.Length>0 && text[0]='﻿' then 1 else 0
-                let rows=ResizeArray<string list>()
-                let fields=ResizeArray<string>()
-                let field=StringBuilder()
-                let mutable index=start
-                let mutable line=1
-                let mutable column=1
-                let fail message=raise(Rejected(InvalidObservation(sprintf "Line %d, column %d: %s" line column message)))
-                let endField () =
-                    if fields.Count>=config.MaxColumns then raise(Rejected(BudgetExceeded "DSV record exceeds its column budget."))
-                    fields.Add(field.ToString())
-                    field.Clear() |> ignore
-                let endRecord () =
-                    token.ThrowIfCancellationRequested()
-                    endField()
-                    if rows.Count>=config.MaxRows then raise(Rejected(BudgetExceeded "DSV input exceeds its row budget."))
-                    rows.Add(List.ofSeq fields)
-                    fields.Clear()
-                let newline () =
-                    if text[index]='\r' && index+1<text.Length && text[index+1]='\n' then index<-index+1
-                    index<-index+1
-                    line<-line+1
-                    column<-1
-                if index<text.Length then
+                let start=if text.Length>0 && text[0]='\uFEFF' then 1 else 0
+                if start>=text.Length then Ok []
+                else
+#if !FABLE_COMPILER
+                    let special = specialFor config.Delimiter
+                    let rows = ResizeArray<string list>()
+                    let mutable fieldBuf = Array.zeroCreate<string> 16
+                    let mutable fieldCount = 0
+                    let mutable sb: StringBuilder = null
+                    let mutable index = start
+                    let mutable line = 1
+                    let mutable column = 1
+                    let fail message = raise(Rejected(InvalidObservation(sprintf "Line %d, column %d: %s" line column message)))
+                    let pushField (value: string) =
+                        if fieldCount >= config.MaxColumns then raise(Rejected(BudgetExceeded "DSV record exceeds its column budget."))
+                        if fieldCount = fieldBuf.Length then
+                            let nextCap = min config.MaxColumns (fieldBuf.Length * 2)
+                            let grown = Array.zeroCreate<string> (max (fieldCount + 1) nextCap)
+                            Array.Copy(fieldBuf, grown, fieldCount)
+                            fieldBuf <- grown
+                        fieldBuf[fieldCount] <- value
+                        fieldCount <- fieldCount + 1
+                    let emitRecord () =
+                        token.ThrowIfCancellationRequested()
+                        if rows.Count >= config.MaxRows then raise(Rejected(BudgetExceeded "DSV input exceeds its row budget."))
+                        let mutable rowList = []
+                        for j = fieldCount - 1 downto 0 do
+                            rowList <- fieldBuf[j] :: rowList
+                        rows.Add rowList
+                        fieldCount <- 0
+                    let newline () =
+                        if text[index] = '\r' && index + 1 < text.Length && text[index + 1] = '\n' then index <- index + 1
+                        index <- index + 1
+                        line <- line + 1
+                        column <- 1
+                    let mutable trailingDelimiter = false
+                    while index < text.Length do
+                        let pos = text.AsSpan(index).IndexOfAny special
+                        if pos < 0 then
+                            let fld = text.Substring index
+                            pushField fld
+                            emitRecord ()
+                            trailingDelimiter <- false
+                            index <- text.Length
+                        else
+                            let stopIdx = index + pos
+                            let stopChar = text[stopIdx]
+                            if stopChar = '"' then
+                                if pos > 0 then
+                                    column <- column + pos
+                                    fail "a quote may only start a field."
+                                index <- index + 1
+                                column <- column + 1
+                                // Fast path for unescaped single-line quoted fields (e.g. "q123, 0")
+                                let qPos = text.AsSpan(index).IndexOfAny quoteSpecial
+                                let mutable valStr: string = null
+                                if qPos >= 0 && text[index + qPos] = '"' && (index + qPos + 1 >= text.Length || text[index + qPos + 1] <> '"') then
+                                    valStr <- if qPos = 0 then "" else text.Substring(index, qPos)
+                                    index <- index + qPos + 1
+                                    column <- column + qPos + 1
+                                else
+                                    if isNull sb then sb <- StringBuilder() else sb.Clear() |> ignore
+                                    let mutable closed = false
+                                    while not closed do
+                                        if index >= text.Length then fail "unterminated quoted field."
+                                        let subPos = text.AsSpan(index).IndexOfAny quoteSpecial
+                                        if subPos < 0 then
+                                            fail "unterminated quoted field."
+                                        if subPos > 0 then
+                                            sb.Append(text, index, subPos) |> ignore
+                                            index <- index + subPos
+                                            column <- column + subPos
+                                        let q = text[index]
+                                        if q = '"' then
+                                            if index + 1 < text.Length && text[index + 1] = '"' then
+                                                sb.Append '"' |> ignore
+                                                index <- index + 2
+                                                column <- column + 2
+                                            else
+                                                index <- index + 1
+                                                column <- column + 1
+                                                closed <- true
+                                        else
+                                            if q = '\r' && index + 1 < text.Length && text[index + 1] = '\n' then
+                                                sb.Append "\r\n" |> ignore
+                                            else
+                                                sb.Append q |> ignore
+                                            newline ()
+                                    valStr <- sb.ToString()
+                                if index >= text.Length then
+                                    pushField valStr
+                                    emitRecord ()
+                                    trailingDelimiter <- false
+                                else
+                                    let after = text[index]
+                                    if after = config.Delimiter then
+                                        pushField valStr
+                                        index <- index + 1
+                                        column <- column + 1
+                                        trailingDelimiter <- true
+                                    elif after = '\r' || after = '\n' then
+                                        pushField valStr
+                                        emitRecord ()
+                                        newline ()
+                                        trailingDelimiter <- false
+                                    else
+                                        fail "a closing quote must end its field."
+                            elif stopChar = config.Delimiter then
+                                let fld = if pos = 0 then "" else text.Substring(index, pos)
+                                pushField fld
+                                index <- stopIdx + 1
+                                column <- column + pos + 1
+                                trailingDelimiter <- true
+                            else
+                                // '\r' or '\n'
+                                let fld = if pos = 0 then "" else text.Substring(index, pos)
+                                pushField fld
+                                emitRecord ()
+                                index <- stopIdx
+                                newline ()
+                                trailingDelimiter <- false
+                    if trailingDelimiter then
+                        pushField ""
+                        emitRecord ()
+                    Ok(Data.resizeToList rows)
+#else
+                    let rows=ResizeArray<string list>()
+                    let fields=ResizeArray<string>()
+                    let field=StringBuilder()
+                    let mutable index=start
+                    let mutable line=1
+                    let mutable column=1
+                    let fail message=raise(Rejected(InvalidObservation(sprintf "Line %d, column %d: %s" line column message)))
+                    let endField () =
+                        if fields.Count>=config.MaxColumns then raise(Rejected(BudgetExceeded "DSV record exceeds its column budget."))
+                        fields.Add(field.ToString())
+                        field.Clear() |> ignore
+                    let endRecord () =
+                        token.ThrowIfCancellationRequested()
+                        endField()
+                        if rows.Count>=config.MaxRows then raise(Rejected(BudgetExceeded "DSV input exceeds its row budget."))
+                        rows.Add(Data.resizeToList fields)
+                        fields.Clear()
+                    let newline () =
+                        if text[index]='\r' && index+1<text.Length && text[index+1]='\n' then index<-index+1
+                        index<-index+1
+                        line<-line+1
+                        column<-1
                     let mutable atFieldStart=true
                     while index<text.Length do
                         let c=text[index]
@@ -157,7 +295,6 @@ module Dsv =
                             endRecord()
                             newline()
                             atFieldStart<-true
-                            // One trailing line break ends the input without an extra empty record.
                             if index>=text.Length then field.Clear() |> ignore
                         elif c='"' then fail "a quote may only start a field."
                         else
@@ -167,7 +304,8 @@ module Dsv =
                             atFieldStart<-false
                     let last=text[text.Length-1]
                     if not(last='\n' || last='\r') || fields.Count>0 || field.Length>0 then endRecord()
-                Ok(List.ofSeq rows)
+                    Ok(Data.resizeToList rows)
+#endif
             with Rejected error -> Error [error]
 
     /// <summary>Parses every record without cancellation.</summary>
@@ -178,18 +316,34 @@ module Dsv =
         parseRowsWithCancellation config token text |> Result.bind(fun rows ->
             match rows with
             | [] -> Error [InvalidObservation "DSV input has no header."]
-            | header::rows ->
-                let headerErrors=
-                    (header |> List.filter String.IsNullOrEmpty |> List.map(fun _ -> InvalidObservation "DSV header names cannot be empty."))
-                    @ (header |> List.countBy id |> List.choose(fun (name,count) -> if count>1 && name<>"" then Some(DuplicateId name) else None))
-                let widthErrors=
-                    rows |> List.mapi(fun index row -> index,row) |> List.choose(fun (index,row) ->
-                        if row.Length=header.Length then None
-                        else Some(InvalidObservation(sprintf "Record %d has %d fields; the header has %d." (index+2) row.Length header.Length)))
-                    |> List.truncate 100
-                match headerErrors@widthErrors with
-                | [] -> Ok {Header=header;Rows=rows}
-                | errors -> Error errors)
+            | header::dataRows ->
+                let errors = ResizeArray<LayoutError>()
+                let headerWidth = List.length header
+                for name in header do
+                    if String.IsNullOrEmpty name then
+                        errors.Add(InvalidObservation "DSV header names cannot be empty.")
+                let seen = Dictionary<string, int>(headerWidth, StringComparer.Ordinal)
+                let order = ResizeArray<string>(headerWidth)
+                for name in header do
+                    if name <> "" then
+                        match seen.TryGetValue name with
+                        | true, c -> seen[name] <- c + 1
+                        | false, _ ->
+                            seen.Add(name, 1)
+                            order.Add name
+                for name in order do
+                    if seen[name] > 1 then errors.Add(DuplicateId name)
+                let mutable rowIndex = 0
+                let mutable widthErrCount = 0
+                for row in dataRows do
+                    if widthErrCount < 100 then
+                        let rowLen = List.length row
+                        if rowLen <> headerWidth then
+                            errors.Add(InvalidObservation(sprintf "Record %d has %d fields; the header has %d." (rowIndex + 2) rowLen headerWidth))
+                            widthErrCount <- widthErrCount + 1
+                    rowIndex <- rowIndex + 1
+                if errors.Count = 0 then Ok { Header = header; Rows = dataRows }
+                else Error(Data.resizeToList errors))
 
     /// <summary>Parses a header and rows without cancellation.</summary>
     let parse config text = parseWithCancellation config CancellationToken.None text
@@ -204,7 +358,12 @@ module Dsv =
 
     let private quoteIfNeeded delimiter (value:string) =
         if isNull value then nullArg "value"
+#if !FABLE_COMPILER
+        let special = specialFor delimiter
+        if value.AsSpan().IndexOfAny special >= 0 then "\""+value.Replace("\"","\"\"")+"\"" else value
+#else
         if value.IndexOfAny([|delimiter;'"';'\r';'\n'|])>=0 then "\""+value.Replace("\"","\"\"")+"\"" else value
+#endif
 
     /// <summary>Formats records with LF line ends, quoting only fields that need it.</summary>
     let formatRows (config:DsvConfig) (rows:string list list) =
@@ -214,7 +373,12 @@ module Dsv =
 #if FABLE_COMPILER
             builder.Append(String.Join(string config.Delimiter,row |> List.map(quoteIfNeeded config.Delimiter))).Append('\n') |> ignore
 #else
-            builder.AppendJoin(config.Delimiter,row |> List.map(quoteIfNeeded config.Delimiter)).Append('\n') |> ignore
+            let mutable first = true
+            for cell in row do
+                if not first then builder.Append config.Delimiter |> ignore
+                first <- false
+                builder.Append(quoteIfNeeded config.Delimiter cell) |> ignore
+            builder.Append '\n' |> ignore
 #endif
         builder.ToString()
 

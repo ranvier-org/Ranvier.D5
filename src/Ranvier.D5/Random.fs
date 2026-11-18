@@ -10,7 +10,7 @@ type RandomState = private { S0:uint64; S1:uint64; S2:uint64; S3:uint64 }
 /// <summary>Seeding, advancing and splitting explicit random states.</summary>
 [<RequireQualifiedAccess>]
 module RandomState =
-    let private splitMix (value:uint64) =
+    let inline private splitMix (value:uint64) =
         let next=value+0x9E3779B97F4A7C15UL
         let mutable z=next
         z<-(z^^^(z>>>30))*0xBF58476D1CE4E5B9UL
@@ -73,25 +73,24 @@ type Distribution =
 /// <remarks>Invalid parameters are rejected when a distribution is created, so sampling is total. Every sample consumes a deterministic number of draws except the rejection samplers (gamma, beta, Poisson), which stay deterministic for a given state.</remarks>
 [<RequireQualifiedAccess>]
 module Distribution =
-    let private finite values=values |> List.forall Double.IsFinite
     let private check valid message distribution=if valid then Ok distribution else Error [InvalidObservation message]
 
     /// <summary>Uniform on [low,high).</summary>
-    let uniform low high = check (finite [low;high;high-low] && low<=high) "Uniform bounds must be finite with low <= high." (Distribution.Uniform(low,high))
+    let uniform low high = check (Double.IsFinite low && Double.IsFinite high && Double.IsFinite(high-low) && low<=high) "Uniform bounds must be finite with low <= high." (Distribution.Uniform(low,high))
     /// <summary>Integers in [low,high), as floor of a uniform draw.</summary>
     let integer low high =
-        let lo,highFloor = floor low,floor high
-        check (finite [low;high;high-low] && lo<highFloor) "Integer bounds must be finite with floor low < floor high." (Distribution.Integer(lo,highFloor))
+        let fl,fh=floor low,floor high
+        check (Double.IsFinite low && Double.IsFinite high && Double.IsFinite(high-low) && low<high && fl<fh) "Integer bounds must be finite with at least one integer in [low, high)." (Distribution.Integer(fl,fh))
     /// <summary>Gaussian by the Box–Muller transform, using two draws per sample and no cached spare.</summary>
-    let normal mean deviation = check (finite [mean;deviation] && deviation>=0.) "Normal parameters must be finite with nonnegative deviation." (Distribution.Normal(mean,deviation))
+    let normal mean deviation = check (Double.IsFinite mean && Double.IsFinite deviation && deviation>=0.) "Normal parameters must be finite with nonnegative deviation." (Distribution.Normal(mean,deviation))
     /// <summary>exp of a normal draw with the given underlying mean and deviation.</summary>
-    let logNormal mean deviation = check (finite [mean;deviation] && deviation>=0.) "Log-normal parameters must be finite with nonnegative deviation." (Distribution.LogNormal(mean,deviation))
+    let logNormal mean deviation = check (Double.IsFinite mean && Double.IsFinite deviation && deviation>=0.) "Log-normal parameters must be finite with nonnegative deviation." (Distribution.LogNormal(mean,deviation))
     /// <summary>Exponential with positive rate (mean 1/rate).</summary>
     let exponential rate = check (Double.IsFinite rate && rate>0.) "Exponential rate must be positive and finite." (Distribution.Exponential rate)
     /// <summary>Gamma with shape k and scale theta (Marsaglia–Tsang).</summary>
-    let gamma shape scale = check (finite [shape;scale] && shape>0. && scale>0.) "Gamma shape and scale must be positive and finite." (Distribution.Gamma(shape,scale))
+    let gamma shape scale = check (Double.IsFinite shape && Double.IsFinite scale && shape>0. && scale>0.) "Gamma shape and scale must be positive and finite." (Distribution.Gamma(shape,scale))
     /// <summary>Beta on [0,1] from two gamma draws.</summary>
-    let beta alpha beta = check (finite [alpha;beta] && alpha>0. && beta>0.) "Beta parameters must be positive and finite." (Distribution.Beta(alpha,beta))
+    let beta alpha beta = check (Double.IsFinite alpha && Double.IsFinite beta && alpha>0. && beta>0.) "Beta parameters must be positive and finite." (Distribution.Beta(alpha,beta))
     /// <summary>Poisson counts: multiplication below mean 10, Hörmann's transformed rejection (PTRS) above.</summary>
     let poisson mean = check (Double.IsFinite mean && mean>=0. && mean<=1e12) "Poisson mean must be finite in [0,1e12]." (Distribution.Poisson mean)
     /// <summary>Binomial counts by d3-random's beta splitting followed by geometric counting.</summary>
@@ -103,71 +102,98 @@ module Distribution =
     /// <summary>Pareto with minimum 1 and positive shape alpha.</summary>
     let pareto alpha = check (Double.IsFinite alpha && alpha>0.) "Pareto alpha must be positive and finite." (Distribution.Pareto alpha)
     /// <summary>Logistic with location and positive scale.</summary>
-    let logistic location scale = check (finite [location;scale] && scale>0.) "Logistic scale must be positive and finite." (Distribution.Logistic(location,scale))
+    let logistic location scale = check (Double.IsFinite location && Double.IsFinite scale && scale>0.) "Logistic scale must be positive and finite." (Distribution.Logistic(location,scale))
     /// <summary>Weibull with shape k, location and scale; k = 0 gives the Gumbel distribution, as in d3-random.</summary>
-    let weibull shape location scale = check (finite [shape;location;scale] && scale>0.) "Weibull parameters must be finite with positive scale." (Distribution.Weibull(shape,location,scale))
+    let weibull shape location scale = check (Double.IsFinite shape && Double.IsFinite location && Double.IsFinite scale && scale>0.) "Weibull parameters must be finite with positive scale." (Distribution.Weibull(shape,location,scale))
     /// <summary>Cauchy with location and positive scale.</summary>
-    let cauchy location scale = check (finite [location;scale] && scale>0.) "Cauchy scale must be positive and finite." (Distribution.Cauchy(location,scale))
+    let cauchy location scale = check (Double.IsFinite location && Double.IsFinite scale && scale>0.) "Cauchy scale must be positive and finite." (Distribution.Cauchy(location,scale))
     /// <summary>Sum of count uniform draws.</summary>
     let irwinHall count = check (count>=0 && count<=1_000_000) "Irwin–Hall count must be in [0,1000000]." (Distribution.IrwinHall count)
     /// <summary>Mean of count uniform draws.</summary>
     let bates count = check (count>=1 && count<=1_000_000) "Bates count must be in [1,1000000]." (Distribution.Bates count)
 
-    let private uniformOpen state =
+    let inline private uniformOpen state =
         let struct(value,next)=RandomState.nextFloat state
         struct(1.-value,next)
 
-    let private standardNormal state =
+    let inline private standardNormal state =
         let struct(u,a)=uniformOpen state
         let struct(v,b)=RandomState.nextFloat a
         struct(sqrt(-2.*log u)*cos(2.*Math.PI*v),b)
 
+    let inline private marsagliaGamma d c state =
+        let mutable current=state
+        let mutable result=nan
+        while Double.IsNaN result do
+            let struct(x,a)=standardNormal current
+            let v=1.+c*x
+            if v<=0. then current<-a
+            else
+                let v=v*v*v
+                let struct(u,b)=uniformOpen a
+                current<-b
+                if log u<0.5*x*x+d-d*v+d*log v then result<-d*v
+        struct(result,current)
+
     let rec private standardGamma shape state =
         if shape<1. then
-            let struct(value,next)=standardGamma (shape+1.) state
+            let d=(shape+1.)-1./3.
+            let c=1./sqrt(9.*d)
+            let struct(value,next)=marsagliaGamma d c state
             let struct(u,last)=uniformOpen next
             struct(value*Math.Pow(u,1./shape),last)
         else
             let d=shape-1./3.
             let c=1./sqrt(9.*d)
-            let mutable current=state
-            let mutable result=nan
-            while Double.IsNaN result do
-                let struct(x,a)=standardNormal current
-                let v=1.+c*x
-                if v<=0. then current<-a
-                else
-                    let v=v*v*v
-                    let struct(u,b)=uniformOpen a
-                    current<-b
-                    if log u<0.5*x*x+d-d*v+d*log v then result<-d*v
-            struct(result,current)
+            marsagliaGamma d c state
 
-    // Lanczos approximation (g = 7, n = 9) of log Gamma for the Poisson acceptance test. The table is shared: built per
-    // call, it is a heap allocation on every rejection step until the optimising JIT stack-allocates it.
-    let private lanczos=[|0.99999999999980993;676.5203681218851;-1259.1392167224028;771.32342877765313;-176.61502916214059;
-                          12.507343278686905;-0.13857109526572012;9.9843695780195716e-6;1.5056327351493116e-7|]
+    // Unrolled Lanczos approximation (g = 7, n = 9) of log Gamma with precomputed 0.5*log(2*pi)
+    let private halfLogTwoPi = 0.91893853320467274178
     let private logGamma (x:float) =
-        let coefficients=lanczos
-        let x=x-1.
-        let mutable sum=coefficients[0]
-        for index=1 to 8 do sum<-sum+coefficients[index]/(x+float index)
-        let t=x+7.5
-        0.5*log(2.*Math.PI)+(x+0.5)*log t-t+log sum
+        let x = x - 1.
+        let sum =
+            0.99999999999980993
+            + 676.5203681218851 / (x + 1.)
+            - 1259.1392167224028 / (x + 2.)
+            + 771.32342877765313 / (x + 3.)
+            - 176.61502916214059 / (x + 4.)
+            + 12.507343278686905 / (x + 5.)
+            - 0.13857109526572012 / (x + 6.)
+            + 9.9843695780195716e-6 / (x + 7.)
+            + 1.5056327351493116e-7 / (x + 8.)
+        let t = x + 7.5
+        halfLogTwoPi + (x + 0.5) * log t - t + log sum
+
+    let inline private poissonPtrs mean logMean b a logInvAlpha ratio state =
+        let mutable current=state
+        let mutable result=nan
+        while Double.IsNaN result do
+            let struct(u,first)=RandomState.nextFloat current
+            let struct(v,second)=RandomState.nextFloat first
+            current<-second
+            let u=u-0.5
+            let us=0.5-abs u
+            let k=floor((2.*a/us+b)*u+mean+0.43)
+            if us>=0.07 && v<=ratio then result<-k
+            elif k>=0. && not(us<0.013 && v>us) &&
+                 log v+logInvAlpha-log(a/(us*us)+b)<= -mean+k*logMean-logGamma(k+1.) then result<-k
+        struct(result,current)
+
+    let inline private poissonKnuth limit state =
+        let mutable product=1.
+        let mutable count= -1.
+        let mutable current=state
+        while product>limit do
+            let struct(u,next)=RandomState.nextFloat current
+            product<-product*u
+            count<-count+1.
+            current<-next
+        struct(count,current)
 
     let private poissonDraw mean state =
         if mean=0. then struct(0.,state)
         elif mean<10. then
-            let limit=exp(-mean)
-            let mutable product=1.
-            let mutable count= -1.
-            let mutable current=state
-            while product>limit do
-                let struct(u,next)=RandomState.nextFloat current
-                product<-product*u
-                count<-count+1.
-                current<-next
-            struct(count,current)
+            poissonKnuth (exp(-mean)) state
         else
             let root=sqrt mean
             let logMean=log mean
@@ -175,19 +201,11 @@ module Distribution =
             let a= -0.059+0.02483*b
             let inverseAlpha=1.1239+1.1328/(b-3.4)
             let ratio=0.9277-3.6224/(b-2.)
-            let mutable current=state
-            let mutable result=nan
-            while Double.IsNaN result do
-                let struct(u,first)=RandomState.nextFloat current
-                let struct(v,second)=RandomState.nextFloat first
-                current<-second
-                let u=u-0.5
-                let us=0.5-abs u
-                let k=floor((2.*a/us+b)*u+mean+0.43)
-                if us>=0.07 && v<=ratio then result<-k
-                elif k>=0. && not(us<0.013 && v>us) &&
-                     log v+log inverseAlpha-log(a/(us*us)+b)<= -mean+k*logMean-logGamma(k+1.) then result<-k
-            struct(result,current)
+            poissonPtrs mean logMean b a (log inverseAlpha) ratio state
+
+    let inline private geometricWithDenom invLogOneMinusP state =
+        let struct(u,next)=RandomState.nextFloat state
+        struct(floor(Math.Log(1.-u)*invLogOneMinusP)+1.,next)
 
     let private geometricDraw probability state =
         if probability=1. then struct(1.,state)
@@ -269,7 +287,7 @@ module Distribution =
         | Distribution.IrwinHall count ->
             let mutable sum=0.
             let mutable current=state
-            for _ in 1..count do
+            for _ = 1 to count do
                 let struct(u,next)=RandomState.nextFloat current
                 sum<-sum+u
                 current<-next
@@ -287,8 +305,72 @@ module Distribution =
         else
             let values=Array.zeroCreate<float> count
             let mutable current=state
-            for index=0 to count-1 do
-                let struct(value,next)=draw distribution current
-                values[index]<-value
-                current<-next
+            match distribution with
+            | Distribution.Uniform(low,high) ->
+                let span=high-low
+                for index=0 to count-1 do
+                    let struct(u,next)=RandomState.nextFloat current
+                    values[index]<-low+span*u
+                    current<-next
+            | Distribution.Integer(low,high) ->
+                let span=high-low
+                let cap=high-1.
+                for index=0 to count-1 do
+                    let struct(u,next)=RandomState.nextFloat current
+                    values[index]<-min cap (floor(low+span*u))
+                    current<-next
+            | Distribution.Normal(mean,deviation) ->
+                for index=0 to count-1 do
+                    let struct(z,next)=standardNormal current
+                    values[index]<-mean+deviation*z
+                    current<-next
+            | Distribution.LogNormal(mean,deviation) ->
+                for index=0 to count-1 do
+                    let struct(z,next)=standardNormal current
+                    values[index]<-exp(mean+deviation*z)
+                    current<-next
+            | Distribution.Exponential rate ->
+                let invRate= -1./rate
+                for index=0 to count-1 do
+                    let struct(u,next)=uniformOpen current
+                    values[index]<-log u*invRate
+                    current<-next
+            | Distribution.Gamma(shape,scale) when shape>=1. ->
+                let d=shape-1./3.
+                let c=1./sqrt(9.*d)
+                for index=0 to count-1 do
+                    let struct(v,next)=marsagliaGamma d c current
+                    values[index]<-v*scale
+                    current<-next
+            | Distribution.Poisson mean ->
+                if mean=0. then
+                    () // Array.zeroCreate already initialized to 0.0 and state does not advance
+                elif mean<10. then
+                    let limit=exp(-mean)
+                    for index=0 to count-1 do
+                        let struct(v,next)=poissonKnuth limit current
+                        values[index]<-v
+                        current<-next
+                else
+                    let root=sqrt mean
+                    let logMean=log mean
+                    let b=0.931+2.53*root
+                    let a= -0.059+0.02483*b
+                    let logInvAlpha=log(1.1239+1.1328/(b-3.4))
+                    let ratio=0.9277-3.6224/(b-2.)
+                    for index=0 to count-1 do
+                        let struct(v,next)=poissonPtrs mean logMean b a logInvAlpha ratio current
+                        values[index]<-v
+                        current<-next
+            | Distribution.Geometric probability when probability<1. ->
+                let invLog=1./Math.Log(1.-probability)
+                for index=0 to count-1 do
+                    let struct(v,next)=geometricWithDenom invLog current
+                    values[index]<-v
+                    current<-next
+            | _ ->
+                for index=0 to count-1 do
+                    let struct(value,next)=draw distribution current
+                    values[index]<-value
+                    current<-next
             Ok(values,current)

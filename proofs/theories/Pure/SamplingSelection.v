@@ -318,3 +318,26 @@ Proof.
       as [-> Htail].
     f_equal. apply IH, Htail.
 Qed.
+
+(** ** 5. Batch D1 SIMD LTTB precomputed cross-product identity *)
+
+(**md
+**Precomputing `dx_ac = ax - cx` and `dy_ca = cy - ay` preserves the exact LTTB signed triangle determinant.**
+
+In `Sampling.lttbRun`, hoisting `dx_ac := ax - cx` and `dy_ca := cy - ay` outside the bucket loop and evaluating `dx_ac * (by_ - ay) + (bx - ax) * dy_ca` across SIMD lanes equals the reference determinant `(ax - cx) * (by_ - ay) - (ax - bx) * (cy - ay)`.
+
+- [ax:] anchor point X coordinate.
+- [ay:] anchor point Y coordinate.
+- [bx:] candidate bucket point X coordinate.
+- [by_:] candidate bucket point Y coordinate.
+- [cx:] next-bucket lookahead centroid X coordinate.
+- [cy:] next-bucket lookahead centroid Y coordinate.
+*)
+Theorem lttb_precomputed_cross_eq_area (ax ay bx by_ cx cy : Z) :
+  let dx_ac := (ax - cx)%Z in
+  let dy_ca := (cy - ay)%Z in
+  (dx_ac * (by_ - ay) + (bx - ax) * dy_ca)%Z =
+  ((ax - cx) * (by_ - ay) - (ax - bx) * (cy - ay))%Z.
+Proof.
+  cbv zeta. lia.
+Qed.

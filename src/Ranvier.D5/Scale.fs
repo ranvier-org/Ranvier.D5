@@ -6,9 +6,14 @@ open System
 type Continuous = private {
     Domain: float * float
     Range: float * float
+    ForwardA: float
+    ForwardB: float
+    ForwardSpan: float
+    RangeSpan: float
     Forward: float -> float
     Backward: float -> float
     Accepts: float -> bool
+    IsLinear: bool
     Clamped: bool
 }
 
@@ -28,43 +33,80 @@ type TimeScale = private { Numeric: Continuous; First: DateTimeOffset; Last: Dat
 /// <summary>Immutable scales. Constructors reject invalid configuration; tryMap omits invalid observations.</summary>
 [<RequireQualifiedAccess>]
 module Scale =
-    let private create forward backward accepts domain range =
+    let private createCore isLinear forward backward accepts domain range =
         Check.interval "domain" domain
         Check.interval "range" range
-        let a,b = domain
+        let a, b = domain
+        let c, d = range
         if not (accepts a && accepts b) then invalidArg "domain" "Domain is outside the transform."
-        Check.interval "domain" (forward a, forward b)
-        { Domain=domain; Range=range; Forward=forward; Backward=backward; Accepts=accepts; Clamped=false }
+        let fa, fb = forward a, forward b
+        Check.interval "domain" (fa, fb)
+        { Domain = domain
+          Range = range
+          ForwardA = fa
+          ForwardB = fb
+          ForwardSpan = fb - fa
+          RangeSpan = d - c
+          Forward = forward
+          Backward = backward
+          Accepts = accepts
+          IsLinear = isLinear
+          Clamped = false }
+
+    let private create forward backward accepts domain range =
+        createCore false forward backward accepts domain range
 
     /// <summary>Maps a finite numeric domain to a finite numeric range.</summary>
-    let linear domain range = create id id (fun _ -> true) domain range
+    let linear domain range = createCore true id id (fun _ -> true) domain range
 
     /// <summary>Returns a copy that clamps mapping and inversion to the configured intervals.</summary>
-    let clamp enabled scale = { scale with Clamped=enabled }
+    let clamp enabled scale = { scale with Clamped = enabled }
 
-    let private normalize a b value = if a = b then 0.5 else (value-a)/(b-a)
+    let inline private lerpWithSpan c d span t =
+        if t = 1. then d
+        elif t = 0. then c
+        else
+            let value = c + span * t
+            if Double.IsFinite value then value else c * (1. - t) + d * t
+
+    let inline private tryMapV (scale: Continuous) (value: float) : float voption =
+        if not (Double.IsFinite value) then ValueNone
+        elif scale.IsLinear then
+            let a, _ = scale.Domain
+            let c, d = scale.Range
+            let rawT = if scale.ForwardSpan = 0. then 0.5 else (value - a) / scale.ForwardSpan
+            let t = if scale.Clamped then Math.Clamp(rawT, 0., 1.) else rawT
+            let result = lerpWithSpan c d scale.RangeSpan t
+            if Double.IsFinite result then ValueSome result else ValueNone
+        elif not (scale.Accepts value) then ValueNone
+        else
+            let c, d = scale.Range
+            let fv = scale.Forward value
+            let rawT = if scale.ForwardSpan = 0. then 0.5 else (fv - scale.ForwardA) / scale.ForwardSpan
+            let t = if scale.Clamped then Math.Clamp(rawT, 0., 1.) else rawT
+            let result = lerpWithSpan c d scale.RangeSpan t
+            if Double.IsFinite result then ValueSome result else ValueNone
 
     /// <summary>Returns None for non-finite or transform-invalid observations, including arithmetic overflow.</summary>
     let tryMap scale value =
-        if not (Double.IsFinite value) || not (scale.Accepts value) then None
-        else
-            let a,b = scale.Domain
-            let c,d = scale.Range
-            let t = normalize (scale.Forward a) (scale.Forward b) (scale.Forward value)
-            let result = Check.lerp c d (if scale.Clamped then Math.Clamp(t,0.,1.) else t)
-            if Double.IsFinite result then Some result else None
+        match tryMapV scale value with
+        | ValueSome result -> Some result
+        | ValueNone -> None
 
     /// <summary>Maps an observation; rejects invalid observations with ArgumentException.</summary>
     let map scale value =
-        tryMap scale value |> Option.defaultWith (fun () -> invalidArg "value" "Observation cannot be mapped to a finite value.")
+        match tryMapV scale value with
+        | ValueSome result -> result
+        | ValueNone -> invalidArg "value" "Observation cannot be mapped to a finite value."
 
     /// <summary>Inverts a range value; a constant range maps to the transformed domain midpoint.</summary>
     let invert scale value =
         Check.finite "value" value
-        let a,b = scale.Domain
-        let c,d = scale.Range
-        let t = normalize c d value
-        let result = scale.Backward (Check.lerp (scale.Forward a) (scale.Forward b) (if scale.Clamped then Math.Clamp(t,0.,1.) else t))
+        let c, _ = scale.Range
+        let rawT = if scale.RangeSpan = 0. then 0.5 else (value - c) / scale.RangeSpan
+        let t = if scale.Clamped then Math.Clamp(rawT, 0., 1.) else rawT
+        let interpolated = lerpWithSpan scale.ForwardA scale.ForwardB scale.ForwardSpan t
+        let result = if scale.IsLinear then interpolated else scale.Backward interpolated
         Check.finite "value" result
         result
 
@@ -196,7 +238,7 @@ module Scale =
                 let low = if scale.Accepts roundedLo && Double.IsFinite(scale.Forward roundedLo) then roundedLo else lo
                 let high = if scale.Accepts roundedHi && Double.IsFinite(scale.Forward roundedHi) then roundedHi else hi
                 let domain = if a <= b then low,high else high,low
-                let candidate = create scale.Forward scale.Backward scale.Accepts domain scale.Range
+                let candidate = createCore scale.IsLinear scale.Forward scale.Backward scale.Accepts domain scale.Range
                 { candidate with Clamped = scale.Clamped }
 
     let private categories domain =
@@ -265,15 +307,24 @@ module Scale =
     let quantile samples range =
         let values = List.toArray range
         if values.Length=0 then invalidArg "range" "Range cannot be empty."
-        let sample = samples |> Seq.filter Double.IsFinite |> Seq.toArray
+        let sample = Quickselect.copyFinite samples
         if sample.Length=0 then invalidArg "samples" "At least one finite sample is required."
-        let edges = [|for i in 1..values.Length-1 -> Data.quantile (float i/float values.Length) sample |> Option.get|]
+        Array.Sort sample
+        let interp p =
+            let pos = p * float (sample.Length - 1)
+            let lo = int (floor pos)
+            let hi = min (lo + 1) (sample.Length - 1)
+            Check.lerp sample[lo] sample[hi] (pos - float lo)
+        let edges = [|for i in 1..values.Length-1 -> interp (float i/float values.Length)|]
         fun value -> if Double.IsFinite value then Some values[Data.bisectRight edges value] else None
 
     /// <summary>Maps a numeric domain through a caller-supplied interpolator; values extrapolate.</summary>
     let sequential domain interpolate =
         let scale = linear domain (0.,1.)
-        fun value -> tryMap scale value |> Option.map interpolate
+        fun value ->
+            match tryMapV scale value with
+            | ValueSome t -> Some(interpolate t)
+            | ValueNone -> None
 
     /// <summary>Maps an ascending three-point domain to progress 0, 0.5 and 1 for a caller-supplied interpolator.</summary>
     let diverging (a,middle,b) interpolate =
@@ -281,7 +332,10 @@ module Scale =
         Check.finite "middle" middle
         if not (a<middle && middle<b) then invalidArg "domain" "Diverging domain must increase strictly."
         let lower,upper = linear (a,middle) (0.,0.5),linear (middle,b) (0.5,1.)
-        fun value -> tryMap (if value<=middle then lower else upper) value |> Option.map interpolate
+        fun value ->
+            match tryMapV (if value<=middle then lower else upper) value with
+            | ValueSome t -> Some(interpolate t)
+            | ValueNone -> None
 
     /// <summary>Creates a UTC scale using millisecond precision and immutable endpoint values.</summary>
     let utcTime (first:DateTimeOffset,last:DateTimeOffset) range =
@@ -327,6 +381,5 @@ module Scale =
             if result.Count>10000 then invalidArg "interval" "Time tick count exceeds 10,000."
             try current <- advance current
             with :? ArgumentOutOfRangeException -> finished <- true
-        let values = List.ofSeq result
+        let values = Data.resizeToList result
         if scale.First>scale.Last then List.rev values else values
-
