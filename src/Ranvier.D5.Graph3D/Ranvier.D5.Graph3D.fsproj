@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Ranvier.D5.Graph3D$(RanvierPackageSuffix)</PackageId>
+    <Description>High-performance 3D Euclidean and H3/Walrus 3D hyperbolic graph, tree and compound layout engines for Ranvier.D5.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Space3D.fs" />
+    <Compile Include="Octree.fs" />
+    <Compile Include="Hyperbolic3D.fs" />
+    <Compile Include="H3.fs" />
+    <Compile Include="Walrus.fs" />
+    <Compile Include="Force3D.fs" />
+    <Compile Include="Stress3D.fs" />
+    <Compile Include="ConeTree3D.fs" />
+    <Compile Include="Layered3D.fs" />
+    <Compile Include="Scene3D.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(MSBuildProjectFile);*.fs" Pack="true" PackagePath="fable/" />
+    <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />
+    <ProjectReference Include="../Ranvier.D5.Graph/Ranvier.D5.Graph.fsproj" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>
