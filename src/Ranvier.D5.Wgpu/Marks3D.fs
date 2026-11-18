@@ -64,36 +64,44 @@ module private MarksKernel =
         else
             struct (false, Quaternion.Identity)
 
+    let fallbackPerp (t: Vector3) : Vector3 =
+        let refAxis = if MathF.Abs t.Y < 0.9f then Vector3.UnitY else Vector3.UnitX
+        let cross = Vector3.Cross (refAxis, t)
+        if cross.LengthSquared () > 1e-12f then Vector3.Normalize cross else Vector3.UnitX
+
     let rotateMinimal (u: Vector3) (v: Vector3) (vec: Vector3) : Vector3 =
         let d = Vector3.Dot (u, v)
 
-        if d >= 1.0f - 1e-6f then
-            vec
-        elif d <= -1.0f + 1e-6f then
-            let ortho = vec - v * Vector3.Dot (vec, v)
-            if ortho.LengthSquared () > 1e-12f then Vector3.Normalize ortho else vec
-        else
-            let qxyz = Vector3.Cross (u, v)
-            let qw = 1.0f + d
-            let lenSq = qxyz.LengthSquared () + qw * qw
-
-            if lenSq <= 1e-12f then
+        let candidate =
+            if d <= -1.0f + 1e-6f then
                 vec
             else
-                let inv = 1.0f / MathF.Sqrt lenSq
-                let rx = qxyz.X * inv
-                let ry = qxyz.Y * inv
-                let rz = qxyz.Z * inv
-                let rw = qw * inv
-                let tx = 2.0f * (ry * vec.Z - rz * vec.Y)
-                let ty = 2.0f * (rz * vec.X - rx * vec.Z)
-                let tz = 2.0f * (rx * vec.Y - ry * vec.X)
-                let ccx = ry * tz - rz * ty
-                let ccy = rz * tx - rx * tz
-                let ccz = rx * ty - ry * tx
-                let rot = Vector3 (vec.X + rw * tx + ccx, vec.Y + rw * ty + ccy, vec.Z + rw * tz + ccz)
-                let ortho = rot - v * Vector3.Dot (rot, v)
-                if ortho.LengthSquared () > 1e-12f then Vector3.Normalize ortho else rot
+                let qxyz = Vector3.Cross (u, v)
+                let qw = 1.0f + d
+                let lenSq = qxyz.LengthSquared () + qw * qw
+
+                if lenSq <= 1e-12f then
+                    vec
+                else
+                    let inv = 1.0f / MathF.Sqrt lenSq
+                    let rx = qxyz.X * inv
+                    let ry = qxyz.Y * inv
+                    let rz = qxyz.Z * inv
+                    let rw = qw * inv
+                    let tx = 2.0f * (ry * vec.Z - rz * vec.Y)
+                    let ty = 2.0f * (rz * vec.X - rx * vec.Z)
+                    let tz = 2.0f * (rx * vec.Y - ry * vec.X)
+                    let ccx = ry * tz - rz * ty
+                    let ccy = rz * tx - rx * tz
+                    let ccz = rx * ty - ry * tx
+                    Vector3 (vec.X + rw * tx + ccx, vec.Y + rw * ty + ccy, vec.Z + rw * tz + ccz)
+
+        let ortho = candidate - v * Vector3.Dot (candidate, v)
+
+        if ortho.LengthSquared () > 1e-12f then
+            Vector3.Normalize ortho
+        else
+            fallbackPerp v
 
 /// <summary>Input datum describing a camera-facing SDF scatter disc with optional concentric progress rings and hollow portal.</summary>
 [<Struct>]
@@ -658,8 +666,7 @@ module Line3D =
                         sinTable[s] <- MathF.Sin ang
 
                     let t0 = tangents[0]
-                    let ref0 = if MathF.Abs t0.Y < 0.9f then Vector3.UnitY else Vector3.UnitX
-                    let mutable prevSide = Vector3.Normalize (Vector3.Cross (ref0, t0))
+                    let mutable prevSide = MarksKernel.fallbackPerp t0
                     let mutable prevT = t0
 
                     let ringNormals = Array.zeroCreate<Vector3> (n * sides)

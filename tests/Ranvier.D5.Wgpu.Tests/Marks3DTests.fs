@@ -531,4 +531,34 @@ let marks3DTests =
 
                 let struct (rbR, rbG, rbB, _) = pixelAt ctx 32 32
                 Expect.isTrue (rbR > 50uy || rbG > 50uy || rbB > 50uy) "ribbon back side also renders with CullMode.Back"
+
+            testCase "Line3D.tube preserves finite unit orthogonal frames across a finely sampled 3,000-segment 225-degree curve"
+            <| fun () ->
+                let scale = Scale3D.create BoxAspect.Cube UpAxis.ZUp (AxisScale3D.linear (-1.0, 1.0)) (AxisScale3D.linear (-1.0, 1.0)) (AxisScale3D.linear (-1.0, 1.0))
+                let segments = 3000
+                let sides = 8
+                let tubeRadius = 0.04f
+                let sweep = 1.25 * Math.PI
+
+                let pts =
+                    Array.init (segments + 1) (fun i ->
+                        let theta = sweep * float i / float segments
+                        struct (Point3.create (cos theta) (-sin theta) 0.0, tubeRadius, RgbaColor.white))
+
+                let mesh =
+                    Line3D.tube scale sides (ReadOnlySpan<struct (Point3 * float32 * RgbaColor)> pts)
+                    |> unwrapOk "fine 3000-segment tube"
+
+                verifyOutwardWinding mesh "fine 3000-segment tube"
+
+                for i = 0 to segments do
+                    let theta = sweep * float i / float segments
+                    let center = Scale3D.map scale (Point3.create (cos theta) (-sin theta) 0.0)
+                    let tangent = Vector3.Normalize (Vector3 (-float32 (sin theta), 0.0f, float32 (cos theta)))
+
+                    for s = 0 to sides - 1 do
+                        let v = mesh.Vertices[i * sides + s]
+                        Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float (v.Normal.Length ())) 1.0 $"fine tube ring[{i}].v[{s}] unit normal"
+                        Expect.floatClose { absolute = 1e-3; relative = 0.0 } (float (Vector3.Dot (v.Normal, tangent))) 0.0 $"fine tube ring[{i}].v[{s}] normal orthogonal to tangent"
+                        Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float ((v.Position - center).Length ())) (float tubeRadius) $"fine tube ring[{i}].v[{s}] preserves circular radius"
         ]
