@@ -447,7 +447,7 @@ module Orientation3D =
                     let qLen = sqrt (uz * uz + ux * ux + w * w)
                     Quaternion (float32 (uz / qLen), 0.0f, float32 (-ux / qLen), float32 (w / qLen))
 
-    let private matrixFromQuaternion (q: Quaternion) : Matrix4x4 =
+    let internal matrixFromQuaternion (q: Quaternion) : Matrix4x4 =
 #if FABLE_COMPILER
         let xx = q.X * q.X
         let yy = q.Y * q.Y

@@ -13,6 +13,7 @@
     <Compile Include="Channels3D.fs" />
     <Compile Include="ColorShader.fs" />
     <Compile Include="Surface3D.fs" />
+    <Compile Include="Marks3D.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />

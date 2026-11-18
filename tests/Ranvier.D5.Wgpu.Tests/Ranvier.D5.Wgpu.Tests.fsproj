@@ -8,6 +8,7 @@
     <Compile Include="ScaleAxisTests.fs" />
     <Compile Include="ChannelTests.fs" />
     <Compile Include="SurfaceTests.fs" />
+    <Compile Include="Marks3DTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
