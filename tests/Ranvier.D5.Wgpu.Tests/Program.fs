@@ -97,6 +97,7 @@ let main args =
                 ChannelTests.channelTests
                 SurfaceTests.surfaceTests
                 Marks3DTests.marks3DTests
+                VolumeTests.volumeTests
             ]
 
     runTestsWithCLIArgs [] args allTests
