@@ -3,6 +3,7 @@ namespace Ranvier.D5
 open System
 open System.Collections.Generic
 #if !FABLE_COMPILER
+open System.Runtime.CompilerServices
 open System.Runtime.InteropServices
 open System.Runtime.Intrinsics
 #endif
@@ -241,6 +242,165 @@ module internal SimdNumeric =
             sumDiff <- sumDiff + d
             j <- j + 1
         max 0. (sumSq - (sumDiff * sumDiff) / float n)
+
+    /// Checks whether every element in arr is finite using 3-tier SIMD.
+    let allFinite (arr: float array) : bool =
+        let n = arr.Length
+        let mutable i = 0
+        let mutable ok = true
+        let r0 = &MemoryMarshal.GetArrayDataReference arr
+        if Vector512.IsHardwareAccelerated && n >= 8 then
+            let vInf = Vector512.Create Double.PositiveInfinity
+            while ok && i <= n - 8 do
+                let v = Vector512.LoadUnsafe(&r0, unativeint i)
+                if Vector512.LessThan(Vector512.Abs v, vInf) <> Vector512<float>.AllBitsSet then ok <- false
+                i <- i + 8
+        elif Vector256.IsHardwareAccelerated && n >= 4 then
+            let vInf = Vector256.Create Double.PositiveInfinity
+            while ok && i <= n - 4 do
+                let v = Vector256.LoadUnsafe(&r0, unativeint i)
+                if Vector256.LessThan(Vector256.Abs v, vInf) <> Vector256<float>.AllBitsSet then ok <- false
+                i <- i + 4
+        elif Vector128.IsHardwareAccelerated && n >= 2 then
+            let vInf = Vector128.Create Double.PositiveInfinity
+            while ok && i <= n - 2 do
+                let v = Vector128.LoadUnsafe(&r0, unativeint i)
+                if Vector128.LessThan(Vector128.Abs v, vInf) <> Vector128<float>.AllBitsSet then ok <- false
+                i <- i + 2
+        while ok && i < n do
+            if not (Double.IsFinite arr[i]) then ok <- false
+            i <- i + 1
+        ok
+
+    /// Checks whether any element in src[offset .. offset + len - 1] is nonzero.
+    let isSliceNonZero (src: float array) (offset: int) (len: int) : bool =
+        let mutable i = 0
+        let mutable found = false
+        let r0 = &Unsafe.Add(&MemoryMarshal.GetArrayDataReference src, offset)
+        if Vector512.IsHardwareAccelerated && len >= 8 then
+            while not found && i <= len - 8 do
+                let v = Vector512.LoadUnsafe(&r0, unativeint i)
+                if Vector512.Equals(v, Vector512<float>.Zero) <> Vector512<float>.AllBitsSet then found <- true
+                i <- i + 8
+        elif Vector256.IsHardwareAccelerated && len >= 4 then
+            while not found && i <= len - 4 do
+                let v = Vector256.LoadUnsafe(&r0, unativeint i)
+                if Vector256.Equals(v, Vector256<float>.Zero) <> Vector256<float>.AllBitsSet then found <- true
+                i <- i + 4
+        elif Vector128.IsHardwareAccelerated && len >= 2 then
+            while not found && i <= len - 2 do
+                let v = Vector128.LoadUnsafe(&r0, unativeint i)
+                if Vector128.Equals(v, Vector128<float>.Zero) <> Vector128<float>.AllBitsSet then found <- true
+                i <- i + 2
+        while not found && i < len do
+            if src[offset + i] <> 0. then found <- true
+            i <- i + 1
+        found
+
+    /// Computes dst[i] <- a[aOffset + i] * b[i] for i in 0 .. len - 1 and returns true iff any a[aOffset + i] <> 0.
+    let mulPairwiseCheckNonZero (dst: float array) (a: float array) (aOffset: int) (b: float array) (len: int) : bool =
+        let mutable i = 0
+        let mutable anyNonZero = false
+        let rDst = &MemoryMarshal.GetArrayDataReference dst
+        let rA = &Unsafe.Add(&MemoryMarshal.GetArrayDataReference a, aOffset)
+        let rB = &MemoryMarshal.GetArrayDataReference b
+        if Vector512.IsHardwareAccelerated && len >= 8 then
+            while i <= len - 8 do
+                let va = Vector512.LoadUnsafe(&rA, unativeint i)
+                if not anyNonZero && Vector512.Equals(va, Vector512<float>.Zero) <> Vector512<float>.AllBitsSet then
+                    anyNonZero <- true
+                let vb = Vector512.LoadUnsafe(&rB, unativeint i)
+                Vector512.StoreUnsafe(va * vb, &rDst, unativeint i)
+                i <- i + 8
+        elif Vector256.IsHardwareAccelerated && len >= 4 then
+            while i <= len - 4 do
+                let va = Vector256.LoadUnsafe(&rA, unativeint i)
+                if not anyNonZero && Vector256.Equals(va, Vector256<float>.Zero) <> Vector256<float>.AllBitsSet then
+                    anyNonZero <- true
+                let vb = Vector256.LoadUnsafe(&rB, unativeint i)
+                Vector256.StoreUnsafe(va * vb, &rDst, unativeint i)
+                i <- i + 4
+        elif Vector128.IsHardwareAccelerated && len >= 2 then
+            while i <= len - 2 do
+                let va = Vector128.LoadUnsafe(&rA, unativeint i)
+                if not anyNonZero && Vector128.Equals(va, Vector128<float>.Zero) <> Vector128<float>.AllBitsSet then
+                    anyNonZero <- true
+                let vb = Vector128.LoadUnsafe(&rB, unativeint i)
+                Vector128.StoreUnsafe(va * vb, &rDst, unativeint i)
+                i <- i + 2
+        while i < len do
+            let x = a[aOffset + i]
+            if x <> 0. then anyNonZero <- true
+            dst[i] <- x * b[i]
+            i <- i + 1
+        anyNonZero
+
+    /// Accumulates dst[dstOffset + i] <- dst[dstOffset + i] + factor * src[srcOffset + i] using 3-tier FMA.
+    let fmaSlice (dst: float array) (dstOffset: int) (src: float array) (srcOffset: int) (factor: float) (len: int) : unit =
+        let mutable i = 0
+        let rDst = &Unsafe.Add(&MemoryMarshal.GetArrayDataReference dst, dstOffset)
+        let rSrc = &Unsafe.Add(&MemoryMarshal.GetArrayDataReference src, srcOffset)
+        if Vector512.IsHardwareAccelerated && len >= 8 then
+            let vf = Vector512.Create factor
+            while i <= len - 8 do
+                let vd = Vector512.LoadUnsafe(&rDst, unativeint i)
+                let vs = Vector512.LoadUnsafe(&rSrc, unativeint i)
+                Vector512.StoreUnsafe(Vector512.FusedMultiplyAdd(vs, vf, vd), &rDst, unativeint i)
+                i <- i + 8
+        elif Vector256.IsHardwareAccelerated && len >= 4 then
+            let vf = Vector256.Create factor
+            while i <= len - 4 do
+                let vd = Vector256.LoadUnsafe(&rDst, unativeint i)
+                let vs = Vector256.LoadUnsafe(&rSrc, unativeint i)
+                Vector256.StoreUnsafe(Vector256.FusedMultiplyAdd(vs, vf, vd), &rDst, unativeint i)
+                i <- i + 4
+        elif Vector128.IsHardwareAccelerated && len >= 2 then
+            let vf = Vector128.Create factor
+            while i <= len - 2 do
+                let vd = Vector128.LoadUnsafe(&rDst, unativeint i)
+                let vs = Vector128.LoadUnsafe(&rSrc, unativeint i)
+                Vector128.StoreUnsafe(Vector128.FusedMultiplyAdd(vs, vf, vd), &rDst, unativeint i)
+                i <- i + 2
+        while i < len do
+            dst[dstOffset + i] <- dst[dstOffset + i] + factor * src[srcOffset + i]
+            i <- i + 1
+
+    /// Divides arr[i] <- arr[i] / divisor in place using 3-tier SIMD and returns true iff all results are finite.
+    let divideInPlaceCheckFinite (arr: float array) (divisor: float) : bool =
+        let n = arr.Length
+        let mutable i = 0
+        let mutable allFin = true
+        let r0 = &MemoryMarshal.GetArrayDataReference arr
+        if Vector512.IsHardwareAccelerated && n >= 8 then
+            let vDiv = Vector512.Create divisor
+            let vInf = Vector512.Create Double.PositiveInfinity
+            while i <= n - 8 do
+                let q = Vector512.LoadUnsafe(&r0, unativeint i) / vDiv
+                Vector512.StoreUnsafe(q, &r0, unativeint i)
+                if Vector512.LessThan(Vector512.Abs q, vInf) <> Vector512<float>.AllBitsSet then allFin <- false
+                i <- i + 8
+        elif Vector256.IsHardwareAccelerated && n >= 4 then
+            let vDiv = Vector256.Create divisor
+            let vInf = Vector256.Create Double.PositiveInfinity
+            while i <= n - 4 do
+                let q = Vector256.LoadUnsafe(&r0, unativeint i) / vDiv
+                Vector256.StoreUnsafe(q, &r0, unativeint i)
+                if Vector256.LessThan(Vector256.Abs q, vInf) <> Vector256<float>.AllBitsSet then allFin <- false
+                i <- i + 4
+        elif Vector128.IsHardwareAccelerated && n >= 2 then
+            let vDiv = Vector128.Create divisor
+            let vInf = Vector128.Create Double.PositiveInfinity
+            while i <= n - 2 do
+                let q = Vector128.LoadUnsafe(&r0, unativeint i) / vDiv
+                Vector128.StoreUnsafe(q, &r0, unativeint i)
+                if Vector128.LessThan(Vector128.Abs q, vInf) <> Vector128<float>.AllBitsSet then allFin <- false
+                i <- i + 2
+        while i < n do
+            let q = arr[i] / divisor
+            arr[i] <- q
+            if not (Double.IsFinite q) then allFin <- false
+            i <- i + 1
+        allFin
 #endif
 
 module internal Quickselect =

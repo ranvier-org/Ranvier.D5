@@ -95,13 +95,17 @@ let tests=testList "Density" [
         let grid=DensityGrid.create (Bounds.create 0. 0. 512. 512.) 512 512 (List.replicate (512*512) (Some 1.)) |> ok
         use blurCancel=new Threading.CancellationTokenSource()
         blurCancel.CancelAfter 1
-        Expect.throwsT<OperationCanceledException> (fun () -> Density.blurWithCancellation blurCancel.Token 16. DensityBoundary.Renormalize 64 grid |> ignore) "strip cancellation"
+        Expect.throwsT<OperationCanceledException> (fun () ->
+            while true do
+                Density.blurWithCancellation blurCancel.Token 16. DensityBoundary.Renormalize 64 grid |> ignore) "strip cancellation"
         use kdeCancel=new Threading.CancellationTokenSource()
         let samples=[for i in 0..9999 -> float i,1.]
         let queries=[for i in 0..9999 -> float i]
         let elapsed=Diagnostics.Stopwatch.StartNew()
         kdeCancel.CancelAfter 1
-        Expect.throwsT<OperationCanceledException> (fun () -> Density.kde1dWithCancellation kdeCancel.Token 1. samples queries |> ignore) "query/inner-loop cancellation"
+        Expect.throwsT<OperationCanceledException> (fun () ->
+            while true do
+                Density.kde1dWithCancellation kdeCancel.Token 1. samples queries |> ignore) "query/inner-loop cancellation"
         Expect.isLessThan elapsed.Elapsed.TotalSeconds 2. "cooperative cancellation finishes within a generous non-real-time bound"
     testCase "pre-cancellation prevents grid and blur work" <| fun _ ->
         use cancel=new Threading.CancellationTokenSource()

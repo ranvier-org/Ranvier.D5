@@ -284,3 +284,119 @@ Proof.
   intros Hlo Hhi. cbv zeta. unfold sankey_clamp_move.
   repeat split; lia.
 Qed.
+
+(** ** 5. Batch D2 refinements: SIMD homogeneous `Contour` strip skip & order-preserving 64-bit `Edge` packing *)
+
+Definition corner_code (threshold a b c d : Z) : nat :=
+  (if Z.geb a threshold then 1%nat else 0%nat) +
+  (if Z.geb b threshold then 2%nat else 0%nat) +
+  (if Z.geb c threshold then 4%nat else 0%nat) +
+  (if Z.geb d threshold then 8%nat else 0%nat).
+
+Lemma forall_nth_z (P : Z -> Prop) (xs : list Z) (i : nat) :
+  Forall P xs ->
+  (i < length xs)%nat ->
+  P (nth i xs 0).
+Proof.
+  intros Hall. revert i.
+  induction Hall as [|x rest Hx Hrest IH]; intros [|i] Hlt; simpl in *; try lia.
+  - exact Hx.
+  - apply IH. lia.
+Qed.
+
+(**md
+**SIMD homogeneous row-strip comparison soundly skips `W - 1` adjacent marching-squares cells (`Contour.compute`).**
+
+Whenever a `W`-wide SIMD load on `r0` (row `y`) and `r1` (row `y + 1`) satisfies either all `< threshold` (`code = 0`) or all `>= threshold` (`code = 15`), every adjacent cell `j` (`S j < length r0`, `S j < length r1`) produces `cell_segments = []` regardless of saddle decision, allowing `Vector512` to skip 7 cells and `Vector256` to skip 3 cells per vector instruction.
+
+- [threshold:] contour threshold level.
+- [r0:] consecutive observed grid values along row `y`.
+- [r1:] consecutive observed grid values along row `y + 1`.
+- [saddle_high:] saddle decision at cell `j`.
+- [j:] cell offset within the loaded strip (`S j < length r0`, `S j < length r1`).
+*)
+Theorem marching_squares_homogeneous_strip_skip_sound
+    (threshold : Z) (r0 r1 : list Z) (saddle_high : bool) (j : nat) :
+  ((Forall (fun v => v < threshold) r0 /\ Forall (fun v => v < threshold) r1) \/
+   (Forall (fun v => threshold <= v) r0 /\ Forall (fun v => threshold <= v) r1)) ->
+  (S j < length r0)%nat ->
+  (S j < length r1)%nat ->
+  cell_segments saddle_high
+    (corner_code threshold (nth j r0 0) (nth (S j) r0 0) (nth (S j) r1 0) (nth j r1 0)) = [].
+Proof.
+  intros Hhom Hj0 Hj1.
+  unfold corner_code.
+  destruct Hhom as [[H0 H1] | [H0 H1]].
+  - pose proof (forall_nth_z (fun v => v < threshold) r0 j H0 ltac:(lia)) as Ha.
+    pose proof (forall_nth_z (fun v => v < threshold) r0 (S j) H0 Hj0) as Hb.
+    pose proof (forall_nth_z (fun v => v < threshold) r1 (S j) H1 Hj1) as Hc.
+    pose proof (forall_nth_z (fun v => v < threshold) r1 j H1 ltac:(lia)) as Hd.
+    cbv beta in Ha, Hb, Hc, Hd.
+    rewrite !Z.geb_leb.
+    destruct (Z.leb threshold (nth j r0 0)) eqn:E1; [apply Z.leb_le in E1; lia |].
+    destruct (Z.leb threshold (nth (S j) r0 0)) eqn:E2; [apply Z.leb_le in E2; lia |].
+    destruct (Z.leb threshold (nth (S j) r1 0)) eqn:E3; [apply Z.leb_le in E3; lia |].
+    destruct (Z.leb threshold (nth j r1 0)) eqn:E4; [apply Z.leb_le in E4; lia |].
+    simpl. reflexivity.
+  - pose proof (forall_nth_z (fun v => threshold <= v) r0 j H0 ltac:(lia)) as Ha.
+    pose proof (forall_nth_z (fun v => threshold <= v) r0 (S j) H0 Hj0) as Hb.
+    pose proof (forall_nth_z (fun v => threshold <= v) r1 (S j) H1 Hj1) as Hc.
+    pose proof (forall_nth_z (fun v => threshold <= v) r1 j H1 ltac:(lia)) as Hd.
+    cbv beta in Ha, Hb, Hc, Hd.
+    rewrite !Z.geb_leb.
+    destruct (Z.leb threshold (nth j r0 0)) eqn:E1; [| apply Z.leb_gt in E1; lia].
+    destruct (Z.leb threshold (nth (S j) r0 0)) eqn:E2; [| apply Z.leb_gt in E2; lia].
+    destruct (Z.leb threshold (nth (S j) r1 0)) eqn:E3; [| apply Z.leb_gt in E3; lia].
+    destruct (Z.leb threshold (nth j r1 0)) eqn:E4; [| apply Z.leb_gt in E4; lia].
+    simpl. reflexivity.
+Qed.
+
+Definition pack_contour_edge (x y : Z) (horiz : bool) : Z :=
+  (x + 1) * 4294967296 + (y + 1) * 2 + (if horiz then 1 else 0).
+
+Definition edge_lex_lt (x1 y1 : Z) (h1 : bool) (x2 y2 : Z) (h2 : bool) : Prop :=
+  x1 < x2 \/ (x1 = x2 /\ (y1 < y2 \/ (y1 = y2 /\ h1 = false /\ h2 = true))).
+
+(**md
+**64-bit packed `Contour` edge key (`((x + 1) <<< 32) ||| ((y + 1) <<< 1) ||| horiz`) is injective and order-isomorphic to `struct(x, y, horiz)`.**
+
+For all valid marching-squares edge coordinates (`-1 <= x, y < 2^31 - 1`), `pack_contour_edge` fits in nonnegative signed `int64` (`[0, 2^63)`), is injective, and preserves exact lexicographic `(x, y, horiz)` sort order under primitive `int64` sorting.
+
+- [x1:] first edge column (`-1 <= x1 < 2^31 - 1`).
+- [y1:] first edge row (`-1 <= y1 < 2^31 - 1`).
+- [h1:] first edge orientation (`false` = vertical, `true` = horizontal).
+- [x2:] second edge column (`-1 <= x2 < 2^31 - 1`).
+- [y2:] second edge row (`-1 <= y2 < 2^31 - 1`).
+- [h2:] second edge orientation.
+*)
+Theorem packed_contour_edge_order_isomorphic
+    (x1 y1 : Z) (h1 : bool) (x2 y2 : Z) (h2 : bool) :
+  -1 <= x1 -> x1 < 2147483647 ->
+  -1 <= y1 -> y1 < 2147483647 ->
+  -1 <= x2 -> x2 < 2147483647 ->
+  -1 <= y2 -> y2 < 2147483647 ->
+  0 <= pack_contour_edge x1 y1 h1 /\
+  pack_contour_edge x1 y1 h1 < 9223372036854775808 /\
+  (pack_contour_edge x1 y1 h1 = pack_contour_edge x2 y2 h2 <-> x1 = x2 /\ y1 = y2 /\ h1 = h2) /\
+  (pack_contour_edge x1 y1 h1 < pack_contour_edge x2 y2 h2 <-> edge_lex_lt x1 y1 h1 x2 y2 h2).
+Proof.
+  intros Hx1lo Hx1hi Hy1lo Hy1hi Hx2lo Hx2hi Hy2lo Hy2hi.
+  unfold pack_contour_edge, edge_lex_lt.
+  destruct h1, h2.
+  - split; [lia | split; [lia | split]].
+    + split; [intros Heq; split; [lia | split; [lia | reflexivity]] | intros [? [? _]]; lia].
+    + split; [intros Hlt; destruct (Z.lt_ge_cases x1 x2); [left; lia | right; split; [lia | left; lia]]
+             | intros [? | [? [? | [? [Hf _]]]]]; try discriminate; lia].
+  - split; [lia | split; [lia | split]].
+    + split; [intros Heq; exfalso; lia | intros [_ [_ Hf]]; discriminate].
+    + split; [intros Hlt; destruct (Z.lt_ge_cases x1 x2); [left; lia | right; split; [lia | left; lia]]
+             | intros [? | [? [? | [? [Hf _]]]]]; try discriminate; lia].
+  - split; [lia | split; [lia | split]].
+    + split; [intros Heq; exfalso; lia | intros [_ [_ Hf]]; discriminate].
+    + split; [intros Hlt; destruct (Z.lt_ge_cases x1 x2); [left; lia | right; split; [lia | destruct (Z.lt_ge_cases y1 y2); [left; lia | right; split; [lia | split; reflexivity]]]]
+             | intros [? | [? [? | [? [_ _]]]]]; lia].
+  - split; [lia | split; [lia | split]].
+    + split; [intros Heq; split; [lia | split; [lia | reflexivity]] | intros [? [? _]]; lia].
+    + split; [intros Hlt; destruct (Z.lt_ge_cases x1 x2); [left; lia | right; split; [lia | left; lia]]
+             | intros [? | [? [? | [? [_ Ht]]]]]; try discriminate; lia].
+Qed.

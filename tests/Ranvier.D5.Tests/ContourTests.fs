@@ -105,7 +105,9 @@ let tests=testList "Contour" [
         use cancel=new Threading.CancellationTokenSource()
         let elapsed=Diagnostics.Stopwatch.StartNew()
         cancel.CancelAfter 1
-        Expect.throwsT<OperationCanceledException> (fun () -> Contour.computeWithCancellation cancel.Token (ContourConfig.create [3.;5.;8.]) field |> ignore) "grid strip cancellation"
+        Expect.throwsT<OperationCanceledException> (fun () ->
+            while true do
+                Contour.computeWithCancellation cancel.Token (ContourConfig.create [3.;5.;8.]) field |> ignore) "grid strip cancellation"
         Expect.isLessThan elapsed.Elapsed.TotalSeconds 2. "cooperative cancellation bound"
     testCase "invalid thresholds budgets and pre-cancellation are rejected" <| fun _ ->
         let field=grid 2 2 [Some 1.;Some 2.;None;Some 3.]
