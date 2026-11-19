@@ -15,7 +15,7 @@ Functional-first visualization foundations for native F# applications. Compose i
 - **Ranvier.D5.Wgpu.Sdl**: Native SDL3 + WebGPU interactive 3D plot host view (`PlotView3D`, `PlotPass3D`, `PlotViewConfig3D`) binding `WgpuSdlSurface` with a pointer-transparent `Renderer.passive` SVG axis overlay, container orbit/pan/zoom/keyboard controls, GPU picking hover spikes, and dirty-only frame scheduling.
 - All 9 packages (`Ranvier.D5*`, `Fable.Ranvier.D5.Wgpu`, and `Ranvier.D5.Wgpu.Sdl`) have a **.Traced** variant (`-p:RanvierTrace=true`). Use one variant throughout the dependency graph.
 
-Target: .NET 10. Version: **0.3.0**. This is a pre-1.0 release: APIs may still change between 0.x versions. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
+Target: .NET 10. Version: **0.4.0**. This is a pre-1.0 release: APIs may still change between 0.x versions. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
 
 ## A reactive scene
 
