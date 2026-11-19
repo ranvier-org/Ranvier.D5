@@ -10,7 +10,10 @@ Functional-first visualization foundations for native F# applications. Compose i
 - **Ranvier.D5.Geo**: optional [geographic geometry, interchange and spherical kernels](docs/geographic-kernels.md); full projection and map-chart pipelines are still in development.
 - **Ranvier.D5.Graph**: [2D compound diagram, port, obstacle-avoiding orthogonal routing and association-machine layout engines](docs/graph-layouts.md) (Sugiyama/ELK-class layered, IPSep-CoLa constrained stress, fCoSE, PivotMDS, SGD Stress, Modularity ForceAtlas2/LinLog, radial mindmaps and skyline packing) — see [graph layout research and package ADR](docs/graph-layout-research.md).
 - **Ranvier.D5.Graph3D**: [3D Euclidean and hyperbolic layout engines](docs/graph-layouts.md) including Tamara Munzner's H3, CAIDA Walrus, Octree Barnes-Hut Force3D, 3D SGD Stress, Cone/Balloon trees, 3D stratified layers and SVG projection.
-- All packages have a **.Traced** variant. Use one variant throughout the dependency graph.
+- **Ranvier.D5.Wgpu**: WebGPU 3D and multi-dimensional visualization scales (`Scale3D`), 3-wall projections and framing (`Axis3D`), perceptual colormaps (`ColorRamp`) and WGSL uniform-LUT shader (`ColorShader`), structured/curvilinear/Delaunay surfaces (`SurfaceGrid`, `Surface3D`, `SurfaceBatch`), instanced glyphs/bars/lines/SDF scatter discs (`Glyph3D`, `Bar3D`, `Line3D`, `Scatter3D`), volumetric marching-cubes isosurfaces and orthogonal slices (`VolumeGrid`, `IsoSurface3D`), camera controls and GPU picking probes (`PlotCamera3D`, `Probe3D`), and Ranvier reactive GPU sinks (`Reactive3D`) over `Ranvier.Wgpu`.
+- **Fable.Ranvier.D5.Wgpu**: Browser/Fable source-compatible package of `Ranvier.D5.Wgpu` targeting `Fable.Ranvier.Wgpu` (WebGPU with WebGL2 fallback) for Fickl compilation to JavaScript.
+- **Ranvier.D5.Wgpu.Sdl**: Native SDL3 + WebGPU interactive 3D plot host view (`PlotView3D`, `PlotPass3D`, `PlotViewConfig3D`) binding `WgpuSdlSurface` with a pointer-transparent `Renderer.passive` SVG axis overlay, container orbit/pan/zoom/keyboard controls, GPU picking hover spikes, and dirty-only frame scheduling.
+- All 9 packages (`Ranvier.D5*`, `Fable.Ranvier.D5.Wgpu`, and `Ranvier.D5.Wgpu.Sdl`) have a **.Traced** variant (`-p:RanvierTrace=true`). Use one variant throughout the dependency graph.
 
 Target: .NET 10. Version: **0.1.1**. This is a pre-1.0 release: APIs may still change between 0.x versions. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
 
@@ -64,22 +67,33 @@ See the [native example gallery](examples/Ranvier.D5.Gallery/README.md) for rend
 
 Run `dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --linked` for signal-linked scatter/brush/line views. Use `--chart` for the reactive Cartesian recipe demo.
 
+Run `dotnet run --project examples/Ranvier.D5.Wgpu.WaveDemo -c Release` (or `-- --capture wgpu-wave.bmp` for a hidden-window frame capture) to explore the live WebGPU `(96 × 96)` wave plane colored by instantaneous phase velocity (`4`th dimension `ColorRamp.turbo`), `Axis3D` bounded frame, `Editable<PlotCamera3D>`, interactive `Editable<SectionPlane>`, and `KeyedCollection` extrema markers.
+
 ## Build and verify
 
 ```sh
 dotnet run --project tests/Ranvier.D5.Tests -c Release
+dotnet run --project tests/Ranvier.D5.Wgpu.Tests -c Release
 dotnet run --project tests/Ranvier.D5.Native.Tests -c Release
+dotnet run --project tests/Ranvier.D5.Wgpu.Native.Tests -c Release
 dotnet run --project benchmarks/Ranvier.D5.Benchmarks -c Release
 dotnet run --project benchmarks/Ranvier.D5.Graph.Benchmarks -c Release
+dotnet run --project benchmarks/Ranvier.D5.Wgpu.Benchmarks -c Release
 dotnet pack src/Ranvier.D5 -c Release -o artifacts/packages
 dotnet pack src/Ranvier.D5.View -c Release -o artifacts/packages
+dotnet pack src/Ranvier.D5.Charts -c Release -o artifacts/packages
+dotnet pack src/Ranvier.D5.Geo -c Release -o artifacts/packages
 dotnet pack src/Ranvier.D5.Graph -c Release -o artifacts/packages
 dotnet pack src/Ranvier.D5.Graph3D -c Release -o artifacts/packages
+dotnet pack src/Ranvier.D5.Wgpu -c Release -o artifacts/packages
+dotnet pack src/Fable.Ranvier.D5.Wgpu -c Release -o artifacts/packages
+dotnet pack src/Ranvier.D5.Wgpu.Sdl -c Release -o artifacts/packages
+dotnet fickl src/Fable.Ranvier.D5.Wgpu -o artifacts/fable/d5-wgpu
 ```
 
 See [performance gates and evidence](docs/performance-gates.md) for the paired comparison method and rendering phase diagnostics.
 
-Append `-p:RanvierTrace=true` for Traced. Native acceptance requires WebCore's platform libraries; [CI](.github/workflows/ci.yml) lists Ubuntu dependencies. Windows, Linux and macOS run normal and Traced tests, native rendering, performance gates, gallery capture and packing.
+Append `-p:RanvierTrace=true` for Traced. Native acceptance requires WebCore and Vulkan platform libraries; [CI](.github/workflows/ci.yml) lists Ubuntu dependencies (including `mesa-vulkan-drivers` and `libvulkan1` for headless Vulkan/Lavapipe WebGPU tests). Windows, Linux and macOS run normal and Traced tests, native rendering, performance gates, gallery/wave captures and packing.
 
 ## Kit snapshot and compatibility
 
@@ -89,7 +103,7 @@ Append `-p:RanvierTrace=true` for Traced. Native acceptance requires WebCore's p
 python tools/snapshot-kit.py ../snapshots
 ```
 
-Snapshots are reference material; builds use the published cohort set as minimum versions in [Directory.Build.props](Directory.Build.props): Ranvier 0.2.0, Anime 0.1.0, CSS 0.1.1, View 0.1.49 (its `Ranvier.View.Dsl` surface), View.WebCore 0.1.0 and SDL 0.1.0. See [design](docs/design.md).
+Snapshots are reference material; builds use the published cohort set as minimum versions in [Directory.Build.props](Directory.Build.props): Ranvier 0.2.0, Anime 0.1.0, CSS 0.1.1, View 0.2.0 (its `Ranvier.View.Dsl` surface), View.WebCore 0.2.0, View.WebCore.Sdl 0.2.1, Wgpu 0.3.0, Wgpu.Sdl 0.2.2, and Fable.Ranvier.Wgpu 0.2.0. See [design](docs/design.md).
 
 D5 provides reusable foundations, not every D3 algorithm. Spatial indexing, triangulation and force/network layouts are available; see [network examples and measured limits](docs/network.md). [Chord layouts and ribbons](docs/chord.md) provide matrix relationship geometry. [DAG Sankey layouts](docs/sankey.md) support explicit flow imbalance. [Interactive flow recipes](docs/flow-charts.md) include staged alluvial and constrained node dragging. [Density grids, Gaussian blur and 1D KDE](docs/density.md) provide bounded aggregation and an owned-worker native example. [Contour topology](docs/contours.md) provides closed shells and holes with bilinear saddle decisions. [Hexbin and source-preserving line reduction](docs/reduction.md) bound visible data. [Heatmap, hexbin, contour and isoband recipes](docs/density-charts.md) add explicit aggregate membership and region-aware picking, with working native snapshots. [Violin and reduced-series compositions](docs/distribution-series.md) preserve original statistics while bounding visible geometry. Geographic clipping/projections remain planned. Large scenes need aggregation/windowing; SVG does not promise million-mark frame rates.
 

@@ -17,9 +17,12 @@
     <RanvierVersion>0.2.0</RanvierVersion>
     <RanvierAnimeVersion>0.1.0</RanvierAnimeVersion>
     <RanvierCssVersion>0.1.1</RanvierCssVersion>
-    <RanvierViewVersion>0.1.49</RanvierViewVersion>
-    <RanvierViewWebCoreVersion>0.1.0</RanvierViewWebCoreVersion>
-    <RanvierViewWebCoreSdlVersion>0.1.0</RanvierViewWebCoreSdlVersion>
+    <RanvierViewVersion>0.2.0</RanvierViewVersion>
+    <RanvierViewWebCoreVersion>0.2.0</RanvierViewWebCoreVersion>
+    <RanvierViewWebCoreSdlVersion>0.2.1</RanvierViewWebCoreSdlVersion>
+    <RanvierWgpuVersion>0.3.0</RanvierWgpuVersion>
+    <RanvierWgpuSdlVersion>0.2.2</RanvierWgpuSdlVersion>
+    <FableRanvierWgpuVersion>0.2.0</FableRanvierWgpuVersion>
     <RanvierPackageSuffix Condition="'$(RanvierTrace)' == 'true'">.Traced</RanvierPackageSuffix>
   </PropertyGroup>
 </Project>

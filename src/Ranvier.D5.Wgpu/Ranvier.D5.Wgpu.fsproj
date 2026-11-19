@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Ranvier.D5.Wgpu$(RanvierPackageSuffix)</PackageId>
+    <Description>3D and multi-dimensional visualization scales, axes, encodings, surfaces, volumes and Ranvier reactive GPU sinks over Ranvier.Wgpu.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Contracts3D.fs" />
+    <Compile Include="Scale3D.fs" />
+    <Compile Include="Axis3D.fs" />
+    <Compile Include="Channels3D.fs" />
+    <Compile Include="ColorShader.fs" />
+    <Compile Include="Surface3D.fs" />
+    <Compile Include="Marks3D.fs" />
+    <Compile Include="Volume3D.fs" />
+    <Compile Include="Interaction3D.fs" />
+    <Compile Include="Reactive3D.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />
+    <PackageReference Include="Ranvier.Wgpu" Version="$(RanvierWgpuVersion)" />
+    <PackageReference Update="FSharp.Core" Version="10.0.100" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>
