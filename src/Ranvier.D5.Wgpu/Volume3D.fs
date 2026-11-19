@@ -61,14 +61,6 @@ type SliceIndices3D =
     }
 
 [<Struct>]
-type private VolumeAxisMapper =
-    | ContinuousFast of transform: RampTransform
-    | TimeLinear of ms0: float * spanMs: float
-    | TimeConst of mid: float
-    | PiecewiseAxis of piecewise: Piecewise
-    | CategoricalAxis
-
-[<Struct>]
 type private MappedVolumeAxes =
     {
         Xs: float array
@@ -78,9 +70,9 @@ type private MappedVolumeAxes =
         Dy: float
         Dz: float
         UpAxis: UpAxis
-        XMapper: VolumeAxisMapper
-        YMapper: VolumeAxisMapper
-        ZMapper: VolumeAxisMapper
+        XMapper: AxisCoordMapper
+        YMapper: AxisCoordMapper
+        ZMapper: AxisCoordMapper
         WxArr: float array
         WxValid: bool array
         WyArr: float array
@@ -158,72 +150,6 @@ module private VolumeKernel =
             else
                 Ok (int xy64 * nz)
 
-    let classifyAxis (axis: AxisScale3D) : VolumeAxisMapper =
-        match axis with
-        | AxisScale3D.Continuous c -> VolumeAxisMapper.ContinuousFast (ColorRamp.classifyTransform c)
-        | AxisScale3D.TimeUtc ts ->
-            let ms0 = float ((Scale.timeInvert ts 0.0).ToUnixTimeMilliseconds ())
-            let ms1 = float ((Scale.timeInvert ts 1.0).ToUnixTimeMilliseconds ())
-
-            if ms0 = ms1 then
-                VolumeAxisMapper.TimeConst 0.5
-            else
-                VolumeAxisMapper.TimeLinear (ms0, ms1 - ms0)
-        | AxisScale3D.Piecewise p -> VolumeAxisMapper.PiecewiseAxis p
-        | AxisScale3D.Categorical _ -> VolumeAxisMapper.CategoricalAxis
-
-    let inline evalAxis (mapper: VolumeAxisMapper) (value: float) : float =
-        if not (Check3D.isFinite value) then
-            Double.NaN
-        else
-            match mapper with
-            | VolumeAxisMapper.ContinuousFast rt -> RampTransform.eval rt value
-            | VolumeAxisMapper.TimeLinear (ms0, spanMs) ->
-                let t = (value - ms0) / spanMs
-                if Check3D.isFinite t then t else Double.NaN
-            | VolumeAxisMapper.TimeConst mid -> mid
-            | VolumeAxisMapper.PiecewiseAxis p ->
-                try
-                    let t = Scale.piecewiseMap p value
-                    if Check3D.isFinite t then t else Double.NaN
-                with :? ArgumentException ->
-                    Double.NaN
-            | VolumeAxisMapper.CategoricalAxis -> value
-
-    let axisDir (axis: AxisScale3D) : float =
-        match axis with
-        | AxisScale3D.Categorical _ -> 1.0
-        | _ ->
-            let d = AxisScale3D.invertNormalized axis 1.0 - AxisScale3D.invertNormalized axis 0.0
-            if d < 0.0 then -1.0 else 1.0
-
-    let mapAxisCoords (mapper: VolumeAxisMapper) (extent: float) (coords: float array) : float array * bool array =
-        let n = coords.Length
-        let world = Array.zeroCreate<float> n
-        let valid = Array.zeroCreate<bool> n
-
-        for i = 0 to n - 1 do
-            let t = evalAxis mapper coords[i]
-
-            if Check3D.isFinite t then
-                let w = (t - 0.5) * extent
-
-                if Check3D.isFinite w && Check3D.isFinite32 (float32 w) then
-                    world[i] <- w
-                    valid[i] <- true
-
-        world, valid
-
-    let inline mapInterpolatedAxis (mapper: VolumeAxisMapper) (extent: float) (c0: float) (c1: float) (w0: float) (w1: float) (mu: float) : float =
-        let c = c0 + (c1 - c0) * mu
-        let t = evalAxis mapper c
-
-        if Check3D.isFinite t then
-            let w = (t - 0.5) * extent
-            if Check3D.isFinite w && Check3D.isFinite32 (float32 w) then w else w0 + (w1 - w0) * mu
-        else
-            w0 + (w1 - w0) * mu
-
     let inline worldPoint (upAxis: UpAxis) (wx: float) (wy: float) (wz: float) : Vector3 =
         match upAxis with
         | UpAxis.ZUp -> Vector3 (float32 wx, float32 wz, float32 (-wy))
@@ -246,11 +172,6 @@ module private VolumeKernel =
         else
             fallback
 
-    let inline safeNormalizeCross (u: Vector3) (v: Vector3) : Vector3 =
-        let ux, uy, uz = float u.X, float u.Y, float u.Z
-        let vx, vy, vz = float v.X, float v.Y, float v.Z
-        safeNormalize (uy * vz - uz * vy) (uz * vx - ux * vz) (ux * vy - uy * vx) Vector3.UnitY
-
     let clearIntArray (arr: int array) =
         for i = 0 to arr.Length - 1 do
             arr[i] <- -1
@@ -261,12 +182,12 @@ module private VolumeKernel =
         let ys = sampleLinearAxis volume.Ny (Bounds3.minY gb) (Bounds3.sizeY gb)
         let zs = sampleLinearAxis volume.Nz (Bounds3.minZ gb) (Bounds3.sizeZ gb)
         let struct (dx, dy, dz) = scale.DataExtents
-        let xMapper = classifyAxis scale.XScale
-        let yMapper = classifyAxis scale.YScale
-        let zMapper = classifyAxis scale.ZScale
-        let wxArr, wxValid = mapAxisCoords xMapper dx xs
-        let wyArr, wyValid = mapAxisCoords yMapper dy ys
-        let wzArr, wzValid = mapAxisCoords zMapper dz zs
+        let xMapper = AxisCoordMapper.classify scale.XScale
+        let yMapper = AxisCoordMapper.classify scale.YScale
+        let zMapper = AxisCoordMapper.classify scale.ZScale
+        let wxArr, wxValid = AxisCoordMapper.mapWorldCoords xMapper dx xs
+        let wyArr, wyValid = AxisCoordMapper.mapWorldCoords yMapper dy ys
+        let wzArr, wzValid = AxisCoordMapper.mapWorldCoords zMapper dz zs
 
         {
             Xs = xs
@@ -301,13 +222,13 @@ module private VolumeKernel =
 
         if hasPrev && hasNext then
             let d = wArr[coord + 1] - wArr[coord - 1]
-            if abs d > 1e-12 then float (values[idx + stride] - values[idx - stride]) / d else 0.0
+            if abs d > 1e-12 then (float values[idx + stride] - float values[idx - stride]) / d else 0.0
         elif hasNext then
             let d = wArr[coord + 1] - wArr[coord]
-            if abs d > 1e-12 then float (values[idx + stride] - values[idx]) / d else 0.0
+            if abs d > 1e-12 then (float values[idx + stride] - float values[idx]) / d else 0.0
         elif hasPrev then
             let d = wArr[coord] - wArr[coord - 1]
-            if abs d > 1e-12 then float (values[idx] - values[idx - stride]) / d else 0.0
+            if abs d > 1e-12 then (float values[idx] - float values[idx - stride]) / d else 0.0
         else
             0.0
 
@@ -741,12 +662,13 @@ module IsoSurface3D =
             let wxArr, wxValid = mapped.WxArr, mapped.WxValid
             let wyArr, wyValid = mapped.WyArr, mapped.WyValid
             let wzArr, wzValid = mapped.WzArr, mapped.WzValid
-            let flipWinding = (VolumeKernel.axisDir scale.XScale * VolumeKernel.axisDir scale.YScale * VolumeKernel.axisDir scale.ZScale) < 0.0
+            let flipWinding = (AxisCoordMapper.axisDir scale.XScale * AxisCoordMapper.axisDir scale.YScale * AxisCoordMapper.axisDir scale.ZScale) < 0.0
 
             let values = volume.Values
             let secondary = volume.SecondaryScalars
             let hasSecondary = secondary.Length > 0
             let threshold = config.Threshold
+            let thr = float threshold
             let maxVerts = config.MaxVertices
             let maxTris = config.MaxTriangles
 
@@ -757,15 +679,15 @@ module IsoSurface3D =
 
             let inline voxelIndex (ix: int) (iy: int) (iz: int) = ix + strideY * iy + strideZ * iz
 
-            let voxelOutwardGrad (ix: int) (iy: int) (iz: int) : Vector3 =
+            let voxelOutwardGrad (ix: int) (iy: int) (iz: int) : struct (float * float * float) =
                 let idx = voxelIndex ix iy iz
                 let dfx = VolumeKernel.axisFiniteDiff values wxArr wxValid ix nx idx 1
                 let dfy = VolumeKernel.axisFiniteDiff values wyArr wyValid iy ny idx strideY
                 let dfz = VolumeKernel.axisFiniteDiff values wzArr wzValid iz nz idx strideZ
 
                 match upAxis with
-                | UpAxis.ZUp -> Vector3 (float32 (-dfx), float32 (-dfz), float32 dfy)
-                | UpAxis.YUp -> Vector3 (float32 (-dfx), float32 (-dfy), float32 (-dfz))
+                | UpAxis.ZUp -> struct (-dfx, -dfz, dfy)
+                | UpAxis.YUp -> struct (-dfx, -dfy, -dfz)
 
             let inline emitEdgeVertex (x0: int) (y0: int) (z0: int) (x1: int) (y1: int) (z1: int) (cache: int array) (slot: int) (fixedNormal: Vector3 voption) : int =
                 let existing = cache[slot]
@@ -775,23 +697,22 @@ module IsoSurface3D =
                 else
                     let idx0 = voxelIndex x0 y0 z0
                     let idx1 = voxelIndex x1 y1 z1
-                    let v0 = values[idx0]
-                    let v1 = values[idx1]
+                    let v0 = float values[idx0]
+                    let v1 = float values[idx1]
                     let dv = v1 - v0
-                    let mu = if abs dv <= 1e-20f then 0.5f else Math.Clamp ((threshold - v0) / dv, 0.0f, 1.0f)
-                    let muf = float mu
+                    let muf = if abs dv <= 1e-20 then 0.5 else Math.Clamp ((thr - v0) / dv, 0.0, 1.0)
 
                     let wx =
                         if x0 = x1 then wxArr[x0]
-                        else VolumeKernel.mapInterpolatedAxis xMapper dx xs[x0] xs[x1] wxArr[x0] wxArr[x1] muf
+                        else AxisCoordMapper.mapInterpolatedWorld xMapper dx xs[x0] xs[x1] wxArr[x0] wxArr[x1] muf
 
                     let wy =
                         if y0 = y1 then wyArr[y0]
-                        else VolumeKernel.mapInterpolatedAxis yMapper dy ys[y0] ys[y1] wyArr[y0] wyArr[y1] muf
+                        else AxisCoordMapper.mapInterpolatedWorld yMapper dy ys[y0] ys[y1] wyArr[y0] wyArr[y1] muf
 
                     let wz =
                         if z0 = z1 then wzArr[z0]
-                        else VolumeKernel.mapInterpolatedAxis zMapper dz zs[z0] zs[z1] wzArr[z0] wzArr[z1] muf
+                        else AxisCoordMapper.mapInterpolatedWorld zMapper dz zs[z0] zs[z1] wzArr[z0] wzArr[z1] muf
 
                     let pos = VolumeKernel.worldPoint upAxis wx wy wz
 
@@ -801,7 +722,7 @@ module IsoSurface3D =
                             let s1 = float secondary[idx1]
                             s0 + (s1 - s0) * muf
                         else
-                            float threshold
+                            thr
 
                     match ColorRamp.tryMap color scalar with
                     | ValueNone ->
@@ -816,16 +737,18 @@ module IsoSurface3D =
                                 match fixedNormal with
                                 | ValueSome fn -> fn
                                 | ValueNone ->
-                                    let g0 = voxelOutwardGrad x0 y0 z0
-                                    let g1 = voxelOutwardGrad x1 y1 z1
-                                    let g = Vector3.Lerp (g0, g1, mu)
+                                    let struct (gx0, gy0, gz0) = voxelOutwardGrad x0 y0 z0
+                                    let struct (gx1, gy1, gz1) = voxelOutwardGrad x1 y1 z1
+                                    let gx = gx0 + (gx1 - gx0) * muf
+                                    let gy = gy0 + (gy1 - gy0) * muf
+                                    let gz = gz0 + (gz1 - gz0) * muf
                                     let fallbackDir =
                                         let p0 = VolumeKernel.worldPoint upAxis wxArr[x0] wyArr[y0] wzArr[z0]
                                         let p1 = VolumeKernel.worldPoint upAxis wxArr[x1] wyArr[y1] wzArr[z1]
-                                        let d = if v0 >= threshold then p1 - p0 else p0 - p1
+                                        let d = if v0 >= thr then p1 - p0 else p0 - p1
                                         VolumeKernel.safeNormalize (float d.X) (float d.Y) (float d.Z) Vector3.UnitY
 
-                                    VolumeKernel.safeNormalize (float g.X) (float g.Y) (float g.Z) fallbackDir
+                                    VolumeKernel.safeNormalize gx gy gz fallbackDir
 
                             let vIdx = verts.Count
                             verts.Add (Vertex3D (pos, normal, rgba.ToVector4 ()))
@@ -1003,9 +926,9 @@ module IsoSurface3D =
 
             // Optional boundary capping across the 6 Bounds3 faces
             if config.CapBoundaries && budgetError.IsNone then
-                let sX = float32 (VolumeKernel.axisDir scale.XScale)
-                let sY = float32 (VolumeKernel.axisDir scale.YScale)
-                let sZ = float32 (VolumeKernel.axisDir scale.ZScale)
+                let sX = float32 (AxisCoordMapper.axisDir scale.XScale)
+                let sY = float32 (AxisCoordMapper.axisDir scale.YScale)
+                let sZ = float32 (AxisCoordMapper.axisDir scale.ZScale)
 
                 let unitX, unitY, unitZ =
                     match upAxis with
@@ -1277,6 +1200,22 @@ module VolumeSlices3D =
             let strideY = nx
             let strideZ = nx * ny
 
+            let sX = float32 (AxisCoordMapper.axisDir scale.XScale)
+            let sY = float32 (AxisCoordMapper.axisDir scale.YScale)
+            let sZ = float32 (AxisCoordMapper.axisDir scale.ZScale)
+
+            let dirX = Vector3 (sX, 0.0f, 0.0f)
+
+            let dirY =
+                match upAxis with
+                | UpAxis.ZUp -> Vector3 (0.0f, 0.0f, -sY)
+                | UpAxis.YUp -> Vector3 (0.0f, sY, 0.0f)
+
+            let dirZ =
+                match upAxis with
+                | UpAxis.ZUp -> Vector3 (0.0f, sZ, 0.0f)
+                | UpAxis.YUp -> Vector3 (0.0f, 0.0f, sZ)
+
             let verts = ResizeArray<Vertex3D>()
             let inds = ResizeArray<uint32>()
 
@@ -1293,22 +1232,18 @@ module VolumeSlices3D =
                     let struct (ix, iy, iz) = to3D u v
                     VolumeKernel.worldPoint upAxis wxArr[ix] wyArr[iy] wzArr[iz]
 
-                let struct (ix0, iy0, iz0) = to3D 0 0
-                let struct (ixU, iyU, izU) = to3D (nu - 1) 0
-                let struct (ixV, iyV, izV) = to3D 0 (nv - 1)
-
                 let planeNormal =
-                    if
-                        wxValid[ix0] && wyValid[iy0] && wzValid[iz0]
-                        && wxValid[ixU] && wyValid[iyU] && wzValid[izU]
-                        && wxValid[ixV] && wyValid[iyV] && wzValid[izV]
-                    then
-                        let p00 = VolumeKernel.worldPoint upAxis wxArr[ix0] wyArr[iy0] wzArr[iz0]
-                        let pU = VolumeKernel.worldPoint upAxis wxArr[ixU] wyArr[iyU] wzArr[izU]
-                        let pV = VolumeKernel.worldPoint upAxis wxArr[ixV] wyArr[iyV] wzArr[izV]
-                        VolumeKernel.safeNormalizeCross (pU - p00) (pV - p00)
-                    else
-                        Vector3.UnitY
+                    match upAxis, axisType with
+                    | UpAxis.ZUp, 0 -> Vector3.UnitX
+                    | UpAxis.ZUp, 1 -> -Vector3.UnitZ
+                    | UpAxis.ZUp, _ -> Vector3.UnitY
+                    | UpAxis.YUp, 0 -> Vector3.UnitX
+                    | UpAxis.YUp, 1 -> Vector3.UnitY
+                    | UpAxis.YUp, _ -> Vector3.UnitZ
+
+                let uDir = if axisType = 0 then dirY else dirX
+                let vDir = if axisType = 2 then dirY else dirZ
+                let flipWinding = Vector3.Dot (Vector3.Cross (uDir, vDir), planeNormal) < 0.0f
 
                 let vertIndexMap = Array.create (nu * nv) -1
 
@@ -1350,12 +1285,21 @@ module VolumeSlices3D =
                             let v10 = uint32 i10
                             let v11 = uint32 i11
                             let v01 = uint32 i01
-                            inds.Add v00
-                            inds.Add v10
-                            inds.Add v11
-                            inds.Add v00
-                            inds.Add v11
-                            inds.Add v01
+
+                            if flipWinding then
+                                inds.Add v00
+                                inds.Add v11
+                                inds.Add v10
+                                inds.Add v00
+                                inds.Add v01
+                                inds.Add v11
+                            else
+                                inds.Add v00
+                                inds.Add v10
+                                inds.Add v11
+                                inds.Add v00
+                                inds.Add v11
+                                inds.Add v01
 
             match slices.XIndex with
             | Some ix -> appendSlicePlane 0 ix ny nz
