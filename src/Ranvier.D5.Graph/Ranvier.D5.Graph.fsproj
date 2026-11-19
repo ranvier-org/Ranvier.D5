@@ -22,6 +22,9 @@
     <Compile Include="AnalyticalLayouts.fs" />
     <Compile Include="ClusterRegions.fs" />
     <Compile Include="Manifold2D.fs" />
+    <Compile Include="Hyperbolic2D.fs" />
+    <Compile Include="ConstellationLayout.fs" />
+    <Compile Include="IsotonicLayers.fs" />
     <Compile Include="DiagramScene.fs" />
   </ItemGroup>
   <ItemGroup>
