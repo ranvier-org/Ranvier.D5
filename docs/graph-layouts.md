@@ -2,7 +2,7 @@
 
 `Ranvier.D5.Graph` and `Ranvier.D5.Graph3D` extend `Ranvier.D5` with pure, deterministic, cancellable layout and routing engines for compound grouped diagrams, port-constrained flowcharts, state/ER/UML association machines, scalable metric/modularity networks, and 3D Euclidean & $\mathbb{H}^3$ hyperbolic spaces (including Tamara Munzner's **H3** and CAIDA's **Walrus**).
 
-See [graph-layout-research.md](graph-layout-research.md) for the academic literature survey, Mermaid/ELK/CoLa/fCoSE/H3/Walrus prior art, and package boundary rationale.
+See [graph-layout-research.md](https://github.com/ranvier-org/Ranvier.D5/blob/main/docs/graph-layout-research.md) for the academic literature survey, Mermaid/ELK/CoLa/fCoSE/H3/Walrus prior art, and package boundary rationale.
 
 ![Native 2D compound Sugiyama, IPSep-CoLa and fCoSE gallery](images/graph-layouts.png)
 
