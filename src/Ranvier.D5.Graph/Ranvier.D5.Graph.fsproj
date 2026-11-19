@@ -16,6 +16,12 @@
     <Compile Include="FCose.fs" />
     <Compile Include="Stress2D.fs" />
     <Compile Include="ModularityForce2D.fs" />
+    <Compile Include="Community.fs" />
+    <Compile Include="EdgeBundling.fs" />
+    <Compile Include="OctilinearRouter.fs" />
+    <Compile Include="AnalyticalLayouts.fs" />
+    <Compile Include="ClusterRegions.fs" />
+    <Compile Include="Manifold2D.fs" />
     <Compile Include="DiagramScene.fs" />
   </ItemGroup>
   <ItemGroup>
