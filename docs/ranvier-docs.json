@@ -69,6 +69,7 @@
       "items": [
         "quadtree.md",
         "spatial.md",
+        "spatial-and-organisation-layouts.md",
         "tiling.md",
         "geographic-kernels.md",
         "geographic-projections.md",
@@ -82,5 +83,8 @@
         "transitions.md"
       ]
     }
+  ],
+  "unlisted": [
+    "spatial-and-organisation-research.md"
   ]
 }
