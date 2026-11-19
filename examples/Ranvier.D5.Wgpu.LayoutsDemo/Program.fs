@@ -105,7 +105,7 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
             let sec = Reactive3D.editableSection (fun () -> SectionPlane.disabled)
             let tick = Api.createSignal 0.0
             let isPaused = Api.createSignal false
-            let readout = Api.createSignal "Drag orbit | Shift+Drag pan | Wheel zoom | 1-4 scenes | [ / ] scrub | Click mark"
+            let readout = Api.createSignal ""
             let stg = new LayoutsStage3D (wgpu)
             Api.onCleanup (fun () -> (stg :> IDisposable).Dispose ())
             sc, cam, sec, tick, isPaused, readout, stg)
@@ -117,9 +117,10 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
 
     let switchScene (sc: LayoutSceneId) =
         graph.Run (fun () ->
-            activeScene.Value <- sc
-            readoutSig.Value <- LayoutSceneId.title sc
-            frameTick.Value <- frameTick.Value + 1e-4)
+            Api.batch (fun () ->
+                activeScene.Value <- sc
+                readoutSig.Value <- ""
+                frameTick.Value <- frameTick.Value + 1e-4))
 
         focusPlot ()
 
@@ -157,9 +158,10 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
 
     let scrub (delta: float) =
         graph.Run (fun () ->
-            let msg = stage.ScrubScene (activeScene.Value, delta)
-            readoutSig.Value <- msg
-            frameTick.Value <- frameTick.Value + 1e-4)
+            Api.batch (fun () ->
+                let msg = stage.ScrubScene (activeScene.Value, delta)
+                readoutSig.Value <- msg
+                frameTick.Value <- frameTick.Value + 1e-4))
 
         focusPlot ()
 
@@ -169,11 +171,12 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
 
     let resetAll () =
         graph.Run (fun () ->
-            camera.Reset ()
-            section.Reset ()
-            stage.ResetScene activeScene.Value
-            readoutSig.Value <- "Reset camera, section & layout parameters"
-            frameTick.Value <- frameTick.Value + 1e-4)
+            Api.batch (fun () ->
+                camera.Reset ()
+                section.Reset ()
+                stage.ResetScene activeScene.Value
+                readoutSig.Value <- "Reset camera, section & layout parameters"
+                frameTick.Value <- frameTick.Value + 1e-4))
 
         focusPlot ()
 
@@ -181,13 +184,17 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
         match hit with
         | ValueSome h when h.PickId <> 0u ->
             readoutSig.Value <- stage.DescribeHit (activeScene.Value, h)
-        | _ -> ()
+        | _ ->
+            if not (String.IsNullOrEmpty readoutSig.Value) then
+                readoutSig.Value <- ""
 
     let onClick (hit: PickHit voption) =
         match hit with
         | ValueSome h when h.PickId <> 0u ->
-            readoutSig.Value <- stage.ClickHit (activeScene.Value, h)
-            frameTick.Value <- frameTick.Value + 1e-4
+            graph.Run (fun () ->
+                Api.batch (fun () ->
+                    readoutSig.Value <- stage.ClickHit (activeScene.Value, h)
+                    frameTick.Value <- frameTick.Value + 1e-4))
         | _ -> ()
 
     let readScene () : PlotPass3D =
@@ -204,8 +211,19 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
         let secSuffix = if sec.Enabled then $" | Sec={sec.Offset:F2}" else ""
 
         let statusMark =
-            Mark.text "hud/status" (Point.create 18.0 40.0) $"{pass.Subtitle}{secSuffix} | {readoutSig.Value}"
+            Mark.text "hud/status" (Point.create 18.0 40.0) $"{pass.Subtitle}{secSuffix}"
             |> Mark.withFill (Paint.rgb 148 163 184)
+            |> Mark.withFontSize 11.0
+
+        let detailText =
+            if String.IsNullOrWhiteSpace readoutSig.Value then
+                pass.Detail
+            else
+                readoutSig.Value
+
+        let detailMark =
+            Mark.text "hud/detail" (Point.create 18.0 56.0) detailText
+            |> Mark.withFill (Paint.rgb 125 211 252)
             |> Mark.withFontSize 11.0
 
         {
@@ -216,7 +234,7 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
             ExtraBatches = pass.Batches
             ExtraLines = pass.Lines
             ExtraDiscs = pass.Discs
-            ExtraOverlayMarks = [ titleMark; statusMark ]
+            ExtraOverlayMarks = [ titleMark; statusMark; detailMark ]
         }
 
     let toolbarHeight = 34
@@ -264,6 +282,12 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
                         | "[" -> scrub -1.0
                         | "]" -> scrub 1.0
                         | "r" | "R" | "Home" -> resetAll ()
+                        | "p" | "P" when not ev.defaultPrevented ->
+                            ev.preventDefault ()
+                            togglePerspective ()
+                        | "m" | "M" when not ev.defaultPrevented ->
+                            ev.preventDefault ()
+                            toggleOrbitMode ()
                         | _ -> ())
                 |]
             )
@@ -318,6 +342,11 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
             None
             (fun ctx -> Program.run (Component.render shellComponent ()) ctx.Backend)
 
+    if not hidden then
+        win.Host.SetFocused true
+
+    focusPlot ()
+
     {
         Mounted = mounted
         Graph = graph
@@ -336,49 +365,51 @@ let private poseSceneForCapture (demo: DemoSession) (scene: LayoutSceneId) =
     let baseAz = PlotCamera3D.defaultValue.AzimuthRad
 
     demo.Graph.Run (fun () ->
-        demo.ActiveScene.Value <- scene
-        demo.Section.Value <- SectionPlane.disabled
+        Ranvier.Api.batch (fun () ->
+            demo.ActiveScene.Value <- scene
+            demo.Section.Value <- SectionPlane.disabled
+            demo.Readout.Value <- ""
 
-        match scene with
-        | LayoutSceneId.PoincareH3 ->
-            demo.Stage.StepPoincare 0.72
-            demo.Camera.Value <-
-                { PlotCamera3D.defaultValue with
-                    AzimuthRad = baseAz + 0.25f
-                    ElevationRad = 0.34f
-                    Perspectiveness = 0.28f
-                    Zoom = 1.06f
-                }
-        | LayoutSceneId.CodeCityTreemap3D ->
-            demo.Stage.StepCodeCity (0.58, 1.0)
-            demo.Camera.Value <-
-                { PlotCamera3D.defaultValue with
-                    AzimuthRad = baseAz + 0.18f
-                    ElevationRad = 0.44f
-                    Perspectiveness = 0.30f
-                    Zoom = 1.06f
-                }
-        | LayoutSceneId.SphericalBundling3D ->
-            demo.Stage.StepSphericalBundling (0.85, 1.45)
-            demo.Camera.Value <-
-                { PlotCamera3D.defaultValue with
-                    AzimuthRad = baseAz + 0.35f
-                    ElevationRad = 0.36f
-                    Perspectiveness = 0.28f
-                    Zoom = 1.08f
-                }
-        | LayoutSceneId.ManifoldClusterBvh3D ->
-            demo.Stage.SetDbscanEpsilon 0.17
-            demo.Stage.StepManifoldRay 0.75
-            demo.Camera.Value <-
-                { PlotCamera3D.defaultValue with
-                    AzimuthRad = baseAz + 0.28f
-                    ElevationRad = 0.38f
-                    Perspectiveness = 0.30f
-                    Zoom = 1.08f
-                }
+            match scene with
+            | LayoutSceneId.PoincareH3 ->
+                demo.Stage.StepPoincare 0.72
+                demo.Camera.Value <-
+                    { PlotCamera3D.defaultValue with
+                        AzimuthRad = baseAz + 0.25f
+                        ElevationRad = 0.34f
+                        Perspectiveness = 0.28f
+                        Zoom = 1.06f
+                    }
+            | LayoutSceneId.CodeCityTreemap3D ->
+                demo.Stage.StepCodeCity (0.58, 1.0)
+                demo.Camera.Value <-
+                    { PlotCamera3D.defaultValue with
+                        AzimuthRad = baseAz + 0.18f
+                        ElevationRad = 0.44f
+                        Perspectiveness = 0.30f
+                        Zoom = 1.06f
+                    }
+            | LayoutSceneId.SphericalBundling3D ->
+                demo.Stage.StepSphericalBundling (0.85, 1.45)
+                demo.Camera.Value <-
+                    { PlotCamera3D.defaultValue with
+                        AzimuthRad = baseAz + 0.35f
+                        ElevationRad = 0.36f
+                        Perspectiveness = 0.28f
+                        Zoom = 1.08f
+                    }
+            | LayoutSceneId.ManifoldClusterBvh3D ->
+                demo.Stage.SetDbscanEpsilon 0.17
+                demo.Stage.StepManifoldRay 0.75
+                demo.Camera.Value <-
+                    { PlotCamera3D.defaultValue with
+                        AzimuthRad = baseAz + 0.28f
+                        ElevationRad = 0.38f
+                        Perspectiveness = 0.30f
+                        Zoom = 1.08f
+                    }
 
-        demo.FrameTick.Value <- demo.FrameTick.Value + 1.0)
+            demo.FrameTick.Value <- demo.FrameTick.Value + 1.0))
 
 let private capturePoseToBmp (demo: DemoSession) (scene: LayoutSceneId) (outputPath: string) =
     let sw = Stopwatch.StartNew ()

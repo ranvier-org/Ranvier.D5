@@ -138,18 +138,22 @@ module private LayoutsHelpers =
             Z = { baseSpec.Z with Title = zTitle; TickCount = tickCount }
         }
 
-    let appendWireframeBoxXZFloor (scale: Scale3D) (box: Bounds3) (color: RgbaColor) (dst: ResizeArray<LineVertex3D>) =
-        // CodeCity / Treemap3D emit Bounds3 in (X, +Y elevation, Z depth); ZUp Scale3D expects (X, Z depth, +Y elevation).
+    let private appendMappedWireframeBox
+        (mapCorner: float -> float -> float -> Vector3)
+        (box: Bounds3)
+        (color: RgbaColor)
+        (dst: ResizeArray<LineVertex3D>)
+        =
         let x0, y0, z0 = Bounds3.minX box, Bounds3.minY box, Bounds3.minZ box
         let x1, y1, z1 = Bounds3.maxX box, Bounds3.maxY box, Bounds3.maxZ box
-        let c000 = Scale3D.map scale (Point3.create x0 z0 y0)
-        let c100 = Scale3D.map scale (Point3.create x1 z0 y0)
-        let c010 = Scale3D.map scale (Point3.create x0 z1 y0)
-        let c110 = Scale3D.map scale (Point3.create x1 z1 y0)
-        let c001 = Scale3D.map scale (Point3.create x0 z0 y1)
-        let c101 = Scale3D.map scale (Point3.create x1 z0 y1)
-        let c011 = Scale3D.map scale (Point3.create x0 z1 y1)
-        let c111 = Scale3D.map scale (Point3.create x1 z1 y1)
+        let c000 = mapCorner x0 y0 z0
+        let c100 = mapCorner x1 y0 z0
+        let c010 = mapCorner x0 y1 z0
+        let c110 = mapCorner x1 y1 z0
+        let c001 = mapCorner x0 y0 z1
+        let c101 = mapCorner x1 y0 z1
+        let c011 = mapCorner x0 y1 z1
+        let c111 = mapCorner x1 y1 z1
         let vCol = color.ToVector4 ()
         let inline addEdge (a: Vector3) (b: Vector3) =
             dst.Add (LineVertex3D (a, vCol))
@@ -167,33 +171,12 @@ module private LayoutsHelpers =
         addEdge c010 c011
         addEdge c110 c111
 
+    let appendWireframeBoxXZFloor (scale: Scale3D) (box: Bounds3) (color: RgbaColor) (dst: ResizeArray<LineVertex3D>) =
+        // CodeCity / Treemap3D emit Bounds3 in (X, +Y elevation, Z depth); ZUp Scale3D expects (X, Z depth, +Y elevation).
+        appendMappedWireframeBox (fun x y z -> Scale3D.map scale (Point3.create x z y)) box color dst
+
     let appendWireframeBox (scale: Scale3D) (box: Bounds3) (color: RgbaColor) (dst: ResizeArray<LineVertex3D>) =
-        let x0, y0, z0 = Bounds3.minX box, Bounds3.minY box, Bounds3.minZ box
-        let x1, y1, z1 = Bounds3.maxX box, Bounds3.maxY box, Bounds3.maxZ box
-        let c000 = Scale3D.map scale (Point3.create x0 y0 z0)
-        let c100 = Scale3D.map scale (Point3.create x1 y0 z0)
-        let c010 = Scale3D.map scale (Point3.create x0 y1 z0)
-        let c110 = Scale3D.map scale (Point3.create x1 y1 z0)
-        let c001 = Scale3D.map scale (Point3.create x0 y0 z1)
-        let c101 = Scale3D.map scale (Point3.create x1 y0 z1)
-        let c011 = Scale3D.map scale (Point3.create x0 y1 z1)
-        let c111 = Scale3D.map scale (Point3.create x1 y1 z1)
-        let vCol = color.ToVector4 ()
-        let inline addEdge (a: Vector3) (b: Vector3) =
-            dst.Add (LineVertex3D (a, vCol))
-            dst.Add (LineVertex3D (b, vCol))
-        addEdge c000 c100
-        addEdge c010 c110
-        addEdge c001 c101
-        addEdge c011 c111
-        addEdge c000 c010
-        addEdge c100 c110
-        addEdge c001 c011
-        addEdge c101 c111
-        addEdge c000 c001
-        addEdge c100 c101
-        addEdge c010 c011
-        addEdge c110 c111
+        appendMappedWireframeBox (fun x y z -> Scale3D.map scale (Point3.create x y z)) box color dst
 
     let appendGreatCircleSegments
         (scale: Scale3D)
@@ -382,7 +365,8 @@ type LayoutsStage3D(wgpu: WgpuContext) =
     let mutable h3ManualTargetPt = Hyperbolic3D.origin
     let mutable h3ManualTargetId : string option = None
     let mutable h3ManualElapsed = 0.0
-    let mutable h3LastT = 0.0
+    let mutable h3ManualSettled = false
+    let mutable lastSceneT = 0.0
     let mutable h3TourPhaseOffset = 0.0
     let mutable h3Detail = "Click any node to boost it isometrically to the Poincaré center"
 
@@ -454,20 +438,27 @@ type LayoutsStage3D(wgpu: WgpuContext) =
             (a.Z + (b.Z - a.Z) * s)
 
     let stepPoincareInternal (t: float) =
-        let dt = if t >= h3LastT then t - h3LastT else 0.0
-        h3LastT <- t
+        let dt = if t >= lastSceneT then t - lastSceneT else 0.0
+        lastSceneT <- t
 
         match h3ManualTargetId with
         | Some targetId ->
-            h3ManualElapsed <- h3ManualElapsed + dt
-            let u = min 1.0 (h3ManualElapsed / 0.65)
-            let pt = interpMinkowski h3ManualFromPt h3ManualTargetPt u
-            h3FocusNodeId <- targetId
-            applyPoincareFocus pt targetId
+            if not h3ManualSettled then
+                h3ManualElapsed <- h3ManualElapsed + dt
+                let u = min 1.0 (h3ManualElapsed / 0.65)
+                let pt = interpMinkowski h3ManualFromPt h3ManualTargetPt u
+                h3FocusNodeId <- targetId
+                applyPoincareFocus pt targetId
+
+                if u >= 1.0 then
+                    h3ManualSettled <- true
         | None ->
             let segDuration = 1.65
-            let scaled = max 0.0 (t + h3TourPhaseOffset) / segDuration
             let count = h3TourNodes.Length
+            let tourPeriod = float count * segDuration
+            let raw = t + h3TourPhaseOffset
+            let wrapped = ((raw % tourPeriod) + tourPeriod) % tourPeriod
+            let scaled = wrapped / segDuration
             let segIdx = int (floor scaled) % count
             let nextIdx = (segIdx + 1) % count
             let frac = scaled - floor scaled
@@ -609,8 +600,14 @@ type LayoutsStage3D(wgpu: WgpuContext) =
     let mutable cityBuildings : CityBuilding<string> list = []
     let mutable currentMorphT = 0.0
     let mutable cityManualMorph : float option = None
+    let mutable cityMorphPhaseOffset = 0.0
     let mutable selectedBuildingId : string option = None
     let mutable cityDetail = "Click a module tower to boost complexity | [ / ] morphs CodeCity ↔ CubeHilbert"
+
+    let resetModuleMetrics () =
+        for _, mods in archSpec do
+            for modName, _, compH in mods do
+                moduleHeightMetric[modName] <- compH
 
     let recomputeCodeCity () =
         let footprint = Bounds.create -0.95 -0.95 1.90 1.90
@@ -933,6 +930,7 @@ type LayoutsStage3D(wgpu: WgpuContext) =
 
     let mutable sphBundleBlend = 0.82
     let mutable sphManualBlend : float option = None
+    let mutable sphBlendPhaseOffset = 0.0
     let mutable sphSelectedHub : string option = None
     let mutable sphLastMeshBlend = 0.82
     let mutable sphLastMeshHub : string option = None
@@ -961,10 +959,11 @@ type LayoutsStage3D(wgpu: WgpuContext) =
                 let nPts = e.Unbundled.Length
 
                 if nPts >= 2 then
-                    let phase = (t * 0.48 + float ei * 0.137) % 1.0
+                    let raw = t * 0.48 + float ei * 0.137
+                    let phase = raw - floor raw
                     let fPos = phase * float (nPts - 1)
-                    let idx0 = min (nPts - 2) (int (floor fPos))
-                    let frac = fPos - float idx0
+                    let idx0 = min (nPts - 2) (max 0 (int (floor fPos)))
+                    let frac = Math.Clamp (fPos - float idx0, 0.0, 1.0)
                     let p0 = Point3.lerp e.Unbundled[idx0] e.Bundled[idx0] beta
                     let p1 = Point3.lerp e.Unbundled[idx0 + 1] e.Bundled[idx0 + 1] beta
                     let pt = Point3.lerp p0 p1 frac
@@ -1215,7 +1214,7 @@ type LayoutsStage3D(wgpu: WgpuContext) =
                 manifoldDiscColl.AddOrUpdate (struct (a.Id, datum)))
 
     let runDbscan (eps: float) =
-        let clamped = Math.Clamp (eps, 0.08, 0.75)
+        let clamped = Math.Clamp (eps, 0.08, 0.48)
         dbscanEps <- clamped
 
         let res =
@@ -1303,18 +1302,21 @@ type LayoutsStage3D(wgpu: WgpuContext) =
     /// <summary>True when a manual Poincaré node focus boost transition is currently interpolating.</summary>
     member _.HasPendingPoincareTransition =
         match h3ManualTargetId with
-        | Some _ -> h3ManualElapsed < 0.65
+        | Some _ -> not h3ManualSettled && h3ManualElapsed < 0.65
         | None -> false
 
     /// <summary>Advances an active manual Poincaré focus boost by <paramref name="dt"/> seconds (e.g. while auto-tour is paused).</summary>
     member _.StepPendingPoincare(dt: float) =
         match h3ManualTargetId with
-        | Some targetId when dt > 0.0 && h3ManualElapsed < 0.65 ->
+        | Some targetId when not h3ManualSettled && dt > 0.0 ->
             h3ManualElapsed <- h3ManualElapsed + dt
             let u = min 1.0 (h3ManualElapsed / 0.65)
             let pt = interpMinkowski h3ManualFromPt h3ManualTargetPt u
             h3FocusNodeId <- targetId
             applyPoincareFocus pt targetId
+
+            if u >= 1.0 then
+                h3ManualSettled <- true
         | _ -> ()
 
     /// <summary>Smoothly boosts the requested node isometrically to the Poincaré ball center via Lorentz interpolation.</summary>
@@ -1325,6 +1327,7 @@ type LayoutsStage3D(wgpu: WgpuContext) =
             h3ManualTargetPt <- targetPt
             h3ManualTargetId <- Some nodeId
             h3ManualElapsed <- 0.0
+            h3ManualSettled <- false
             h3FocusNodeId <- nodeId
             h3Detail <- $"Focusing [{nodeId}] via Lorentz boostToOrigin"
             // Highlight immediately at the current focus position so live interpolation glides cleanly with zero 1-frame snap-back.
@@ -1339,6 +1342,7 @@ type LayoutsStage3D(wgpu: WgpuContext) =
             h3ManualTargetPt <- targetPt
             h3ManualTargetId <- Some nodeId
             h3ManualElapsed <- 0.65
+            h3ManualSettled <- true
             h3FocusNodeId <- nodeId
             h3Detail <- $"Focused [{nodeId}] via Lorentz boostToOrigin"
             applyPoincareFocus targetPt nodeId
@@ -1377,7 +1381,7 @@ type LayoutsStage3D(wgpu: WgpuContext) =
     member _.SetBundleBlend(bundleBlend: float) =
         let clamped = Math.Clamp (bundleBlend, 0.0, 1.0)
         sphManualBlend <- Some clamped
-        stepSphericalInternal clamped h3LastT
+        stepSphericalInternal clamped lastSceneT
 
     /// <summary>Current spherical edge-bundling blend in `[0.0, 1.0]`.</summary>
     member _.BundleBlend = sphBundleBlend
@@ -1386,7 +1390,7 @@ type LayoutsStage3D(wgpu: WgpuContext) =
     member _.SelectHub(hubId: string) =
         let nextSel = if sphSelectedHub = Some hubId then None else Some hubId
         sphSelectedHub <- nextSel
-        stepSphericalInternal sphBundleBlend h3LastT
+        stepSphericalInternal sphBundleBlend lastSceneT
 
         sphDetail <-
             match nextSel with
@@ -1410,24 +1414,24 @@ type LayoutsStage3D(wgpu: WgpuContext) =
         match scene with
         | LayoutSceneId.PoincareH3 -> stepPoincareInternal t
         | LayoutSceneId.CodeCityTreemap3D ->
-            h3LastT <- t
+            lastSceneT <- t
 
             match cityManualMorph with
             | Some _ -> ()
             | None ->
-                let m = 0.5 - 0.5 * cos (t * 0.55)
+                let m = 0.5 - 0.5 * cos ((t + cityMorphPhaseOffset) * 0.55)
                 syncCityVisuals m
         | LayoutSceneId.SphericalBundling3D ->
-            h3LastT <- t
+            lastSceneT <- t
 
             let b =
                 match sphManualBlend with
                 | Some manual -> manual
-                | None -> 0.5 - 0.5 * cos (t * 0.45)
+                | None -> 0.5 - 0.5 * cos ((t + sphBlendPhaseOffset) * 0.45)
 
             stepSphericalInternal b t
         | LayoutSceneId.ManifoldClusterBvh3D ->
-            h3LastT <- t
+            lastSceneT <- t
             stepManifoldRayInternal t
 
     /// <summary>Applies interactive `[` / `]` parameter scrubbing for the active scene.</summary>
@@ -1436,9 +1440,11 @@ type LayoutsStage3D(wgpu: WgpuContext) =
         | LayoutSceneId.PoincareH3 ->
             h3ManualTargetId <- None
             h3ManualElapsed <- 0.0
+            h3ManualSettled <- false
             h3TourPhaseOffset <- h3TourPhaseOffset + delta * 1.65
-            stepPoincareInternal h3LastT
-            $"Poincaré tour focus -> [{h3FocusNodeId}]"
+            stepPoincareInternal lastSceneT
+            h3Detail <- $"Poincaré tour focus -> [{h3FocusNodeId}]"
+            h3Detail
         | LayoutSceneId.CodeCityTreemap3D ->
             let nextM = Math.Clamp (currentMorphT + delta * 0.14, 0.0, 1.0)
             cityManualMorph <- Some nextM
@@ -1448,11 +1454,11 @@ type LayoutsStage3D(wgpu: WgpuContext) =
         | LayoutSceneId.SphericalBundling3D ->
             let nextB = Math.Clamp (sphBundleBlend + delta * 0.14, 0.0, 1.0)
             sphManualBlend <- Some nextB
-            stepSphericalInternal nextB h3LastT
+            stepSphericalInternal nextB lastSceneT
             sphDetail <- $"Spherical KDE bundle blend={nextB:F2}"
             sphDetail
         | LayoutSceneId.ManifoldClusterBvh3D ->
-            let nextEps = Math.Clamp (dbscanEps + delta * 0.025, 0.09, 0.45)
+            let nextEps = Math.Clamp (dbscanEps + delta * 0.025, 0.08, 0.48)
             runDbscan nextEps
             manifoldDetail <- $"DBSCAN eps={dbscanEps:F2} -> {dbscanClusterCount} clusters, {dbscanNoiseCount} noise"
             manifoldDetail
@@ -1463,24 +1469,29 @@ type LayoutsStage3D(wgpu: WgpuContext) =
         | LayoutSceneId.PoincareH3 ->
             h3ManualTargetId <- None
             h3ManualElapsed <- 0.0
-            h3TourPhaseOffset <- -h3LastT
+            h3ManualSettled <- false
+            h3TourPhaseOffset <- -lastSceneT
             h3FocusNodeId <- "root"
             h3Detail <- "Reset Poincaré H³ focus to root"
             applyPoincareFocus Hyperbolic3D.origin "root"
         | LayoutSceneId.CodeCityTreemap3D ->
+            resetModuleMetrics ()
             selectedBuildingId <- None
-            cityManualMorph <- Some 0.0
+            recomputeCodeCity ()
+            cityManualMorph <- None
+            cityMorphPhaseOffset <- -lastSceneT
             syncCityVisuals 0.0
-            cityDetail <- "Reset CodeCity ↔ CubeHilbert morph=0.00"
+            cityDetail <- "Reset CodeCity towers & CubeHilbert morph"
         | LayoutSceneId.SphericalBundling3D ->
             sphSelectedHub <- None
-            sphManualBlend <- Some 0.82
-            stepSphericalInternal 0.82 h3LastT
-            sphDetail <- "Reset S² KDE bundle blend=0.82"
+            sphManualBlend <- None
+            sphBlendPhaseOffset <- (Math.Acos (1.0 - 2.0 * 0.82) / 0.45) - lastSceneT
+            stepSphericalInternal 0.82 lastSceneT
+            sphDetail <- "Reset S² KDE bundle blend & resumed animation"
         | LayoutSceneId.ManifoldClusterBvh3D ->
             clickedManifoldId <- None
             runDbscan 0.17
-            stepManifoldRayInternal 0.75
+            stepManifoldRayInternal (if abs lastSceneT > 1e-6 then lastSceneT else 0.75)
 
     /// <summary>Resolves a GPU hover <see cref="T:Ranvier.Wgpu.PickHit"/> into a concise readout string.</summary>
     member _.DescribeHit(scene: LayoutSceneId, hit: PickHit) : string =
@@ -1515,7 +1526,9 @@ type LayoutsStage3D(wgpu: WgpuContext) =
             | ValueNone ->
                 match Probe3D.resolveDisc sphScale sphPacketSink hit with
                 | ValueSome pkt -> $"Packet [{pkt.Key}] at ({pkt.DataPoint.X:F2}, {pkt.DataPoint.Y:F2}, {pkt.DataPoint.Z:F2})"
-                | ValueNone -> "Corridor streamtube"
+                | ValueNone ->
+                    let pt = Probe3D.invertHit sphScale hit
+                    $"Sphere ({pt.X:F2}, {pt.Y:F2}, {pt.Z:F2})"
         | LayoutSceneId.ManifoldClusterBvh3D ->
             match Probe3D.resolveDisc manifoldScale manifoldSink hit with
             | ValueSome m ->
