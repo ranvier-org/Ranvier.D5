@@ -19,6 +19,9 @@
     <Compile Include="Reactive3D.fs" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Ranvier.D5.Wgpu.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />
     <PackageReference Include="Ranvier.Wgpu" Version="$(RanvierWgpuVersion)" />
     <PackageReference Update="FSharp.Core" Version="10.0.100" />

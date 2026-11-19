@@ -230,6 +230,13 @@ module Axis3D =
                 let clamped = Math.Clamp (Math.Round ms, -62135596800000.0, 253402300799999.0)
                 let dt = DateTimeOffset.FromUnixTimeMilliseconds (int64 clamped)
                 Format.time CultureInfo.InvariantCulture TimeZoneInfo.Utc pattern dt)
+        | _ when AxisScale3D.isLogScale axisScale ->
+            ticks
+            |> List.map (fun v ->
+                if v = 0.0 then
+                    "0"
+                else
+                    v.ToString ("G6", CultureInfo.InvariantCulture))
         | _ ->
             let sorted = ticks |> List.distinct |> List.sort
 
@@ -360,8 +367,8 @@ module Axis3D =
         Instance3D.fromMatrix m color 0.5f 0u (InstanceFlags.Unlit ||| InstanceFlags.IgnoreSectionPlane) 0.0f
 
     let private addSegment (verts: ResizeArray<LineVertex3D>) (a: Vector3) (b: Vector3) (color: RgbaColor) =
-        verts.Add (LineVertex3D (a, color))
-        verts.Add (LineVertex3D (b, color))
+        verts.Add (LineVertex3D (a, color, true))
+        verts.Add (LineVertex3D (b, color, true))
 
     let private directionalTitlePad (protrusions: Protrusions) (dir2D: Vector2) : float32 =
         let px = if dir2D.X < 0.0f then float32 protrusions.Left else float32 protrusions.Right
@@ -427,6 +434,16 @@ module Axis3D =
         Check3D.vector3 "camera.Position" camera.Position
         Check3D.vector3 "camera.Target" camera.Target
         Check3D.vector3 "camera.Up" camera.Up
+        Check3D.finite32 "camera.FovYDeg" camera.FovYDeg
+
+        if abs camera.FovYDeg <= 1e-6f || camera.FovYDeg >= 179.9f then
+            raise (ArgumentOutOfRangeException ("camera.FovYDeg", "Camera FovYDeg must be negative (orthographic) or in (0, 179.9) degrees."))
+
+        Check3D.positive32 "camera.NearPlane" camera.NearPlane
+        Check3D.positive32 "camera.FarPlane" camera.FarPlane
+
+        if camera.FarPlane <= camera.NearPlane then
+            invalidArg "camera" "Camera FarPlane must exceed NearPlane."
 
         let ext = Scale3D.worldExtents spec.Scale
         let hx, hy, hz = ext.X * 0.5f, ext.Y * 0.5f, ext.Z * 0.5f
@@ -611,8 +628,8 @@ module Axis3D =
 
     /// <summary>
     /// Returns the contiguous line-segment endpoints for back-wall gridlines, cuboid spines, and outward tick hairlines.
-    /// Back-wall panels set <c>InstanceFlags.IgnoreSectionPlane</c>, whereas <c>LineBatch</c> segments (<c>Axis3D.lineVertices</c> and hover spikes)
-    /// share the pass <c>SectionPlane</c> in <c>Ranvier.Wgpu 0.3.0</c> and are clipped in the negative half-space.
+    /// Emitted <c>LineVertex3D</c> endpoints set <c>ignoreSectionPlane = true</c> (<c>Pad = 1.0f</c>) so cuboid spines, gridlines,
+    /// and ticks stay unclipped under active <c>SectionPlane</c> cuts.
     /// </summary>
     let lineVertices (frame: AxisFrame3D) : ReadOnlyMemory<LineVertex3D> =
         ReadOnlyMemory<LineVertex3D>(frame.Lines)

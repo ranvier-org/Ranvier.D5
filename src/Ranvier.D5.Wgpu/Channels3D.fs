@@ -389,6 +389,9 @@ module ColorRamp =
 
     /// <summary>Maps a scalar <c>value</c> into an <c>RgbaColor</c> in <c>O(1)</c> with zero heap allocations on linear, logarithmic, and constant scales.</summary>
     let tryMap (ramp: ColorRamp) (value: float) : RgbaColor voption =
+        if isNull (box ramp) then
+            nullArg (nameof ramp)
+
         let t = RampTransform.eval ramp.Transform value
         if Check3D.isFinite t then
             mapNormalized ramp t
@@ -403,6 +406,9 @@ module ColorRamp =
 
     /// <summary>Samples <c>count</c> evenly spaced <c>RgbaColor</c> stops across the ramp's <c>[0.0, 1.0]</c> range.</summary>
     let stops (count: int) (ramp: ColorRamp) : ReadOnlyMemory<RgbaColor> =
+        if isNull (box ramp) then
+            nullArg (nameof ramp)
+
         if count < 0 then
             raise (ArgumentOutOfRangeException (nameof count, "Stop count must be nonnegative."))
         elif count = 0 then
@@ -521,6 +527,9 @@ module WallProjection3D =
         (plane: WallPlane)
         (point: Point3)
         : Vector3 =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
         validateWalls activeBackWalls
         let struct (bx, fy, bz) = activeBackWalls
         let world = Scale3D.map scale point
@@ -589,6 +598,9 @@ module WallProjection3D =
         (color: RgbaColor)
         (contours: ContourPolygon list)
         : ReadOnlyMemory<LineVertex3D> =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
         validateWalls activeBackWalls
 
         if isNull (box contours) then
@@ -621,3 +633,82 @@ module WallProjection3D =
             ReadOnlyMemory<LineVertex3D>.Empty
         else
             ReadOnlyMemory<LineVertex3D>(vertices.ToArray ())
+
+[<Struct>]
+type internal AxisCoordMapper =
+    | ContinuousFast of transform: RampTransform
+    | TimeLinear of ms0: float * spanMs: float
+    | TimeConst of mid: float
+    | PiecewiseAxis of piecewise: Piecewise
+    | CategoricalAxis
+
+module internal AxisCoordMapper =
+    let classify (axis: AxisScale3D) : AxisCoordMapper =
+        match axis with
+        | AxisScale3D.Continuous c -> ContinuousFast (ColorRamp.classifyTransform c)
+        | AxisScale3D.TimeUtc ts ->
+            let ms0 = float ((Scale.timeInvert ts 0.0).ToUnixTimeMilliseconds ())
+            let ms1 = float ((Scale.timeInvert ts 1.0).ToUnixTimeMilliseconds ())
+
+            if ms0 = ms1 then
+                TimeConst 0.5
+            else
+                TimeLinear (ms0, ms1 - ms0)
+        | AxisScale3D.Piecewise p -> PiecewiseAxis p
+        | AxisScale3D.Categorical _ -> CategoricalAxis
+
+    let inline evalNormalized (mapper: AxisCoordMapper) (value: float) : float =
+        if not (Check3D.isFinite value) then
+            Double.NaN
+        else
+            match mapper with
+            | ContinuousFast rt -> RampTransform.eval rt value
+            | TimeLinear (ms0, spanMs) ->
+                let t = (value - ms0) / spanMs
+                if Check3D.isFinite t then t else Double.NaN
+            | TimeConst mid -> mid
+            | PiecewiseAxis p ->
+                try
+                    let t = Scale.piecewiseMap p value
+                    if Check3D.isFinite t then t else Double.NaN
+                with :? ArgumentException ->
+                    Double.NaN
+            | CategoricalAxis -> value
+
+    let axisDir (axis: AxisScale3D) : float =
+        match axis with
+        | AxisScale3D.Categorical _ -> 1.0
+        | _ ->
+            let d = AxisScale3D.invertNormalized axis 1.0 - AxisScale3D.invertNormalized axis 0.0
+            if d < 0.0 then -1.0 else 1.0
+
+    let mapArray (mapper: AxisCoordMapper) (coords: float array) (dst: float array) =
+        for i = 0 to coords.Length - 1 do
+            dst[i] <- evalNormalized mapper coords[i]
+
+    let mapWorldCoords (mapper: AxisCoordMapper) (extent: float) (coords: float array) : float array * bool array =
+        let n = coords.Length
+        let world = Array.zeroCreate<float> n
+        let valid = Array.zeroCreate<bool> n
+
+        for i = 0 to n - 1 do
+            let t = evalNormalized mapper coords[i]
+
+            if Check3D.isFinite t then
+                let w = (t - 0.5) * extent
+
+                if Check3D.isFinite w && Check3D.isFinite32 (float32 w) then
+                    world[i] <- w
+                    valid[i] <- true
+
+        world, valid
+
+    let inline mapInterpolatedWorld (mapper: AxisCoordMapper) (extent: float) (c0: float) (c1: float) (w0: float) (w1: float) (mu: float) : float =
+        let c = c0 + (c1 - c0) * mu
+        let t = evalNormalized mapper c
+
+        if Check3D.isFinite t then
+            let w = (t - 0.5) * extent
+            if Check3D.isFinite w && Check3D.isFinite32 (float32 w) then w else w0 + (w1 - w0) * mu
+        else
+            w0 + (w1 - w0) * mu

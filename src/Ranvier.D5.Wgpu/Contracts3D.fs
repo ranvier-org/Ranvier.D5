@@ -2,15 +2,28 @@ namespace Ranvier.D5.Wgpu
 
 open System
 open System.Numerics
+#if !FABLE_COMPILER
+open System.Runtime.CompilerServices
+#endif
 open Ranvier.D5
 
 /// <summary>Internal finite and domain-validation helpers shared across 3D modules.</summary>
 module internal Check3D =
+#if FABLE_COMPILER
     /// <summary>True when a 64-bit float is neither NaN nor infinite (Fable-compatible).</summary>
     let inline isFinite (value: float) = value - value = 0.0
 
     /// <summary>True when a 32-bit float is neither NaN nor infinite (Fable-compatible).</summary>
     let inline isFinite32 (value: float32) = value - value = 0.0f
+#else
+    /// <summary>True when a 64-bit float is neither NaN nor infinite (Fable-compatible).</summary>
+    [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
+    let isFinite (value: float) = value - value = 0.0
+
+    /// <summary>True when a 32-bit float is neither NaN nor infinite (Fable-compatible).</summary>
+    [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
+    let isFinite32 (value: float32) = value - value = 0.0f
+#endif
 
     let finite (name: string) (value: float) =
         if not (isFinite value) then
@@ -49,9 +62,11 @@ module internal Check3D =
 [<AutoOpen>]
 module Geometry3DExtensions =
     type Point3 with
-        /// <summary>Converts a finite <c>Point3</c> into a single-precision <c>System.Numerics.Vector3</c>.</summary>
+        /// <summary>Converts a finite <c>Point3</c> into a single-precision <c>System.Numerics.Vector3</c>; throws <c>ArgumentException</c> when any coordinate overflows <c>float32</c>.</summary>
         static member toVector3f(point: Point3) : Vector3 =
-            Vector3 (float32 point.X, float32 point.Y, float32 point.Z)
+            let v = Vector3 (float32 point.X, float32 point.Y, float32 point.Z)
+            Check3D.vector3 (nameof point) v
+            v
 
         /// <summary>Converts a finite <c>System.Numerics.Vector3</c> into a <c>Point3</c>; throws <c>ArgumentException</c> for non-finite components.</summary>
         static member ofVector3f(vector: Vector3) : Point3 =

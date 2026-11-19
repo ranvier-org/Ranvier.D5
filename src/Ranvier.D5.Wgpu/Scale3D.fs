@@ -2,6 +2,11 @@ namespace Ranvier.D5.Wgpu
 
 open System
 open System.Numerics
+#if FABLE_COMPILER
+open Fable.Core
+#else
+open System.Runtime.CompilerServices
+#endif
 open Ranvier.D5
 
 /// <summary>Vertical data-axis orientation mapping data <c>(X, Y, Z)</c> into right-handed <c>Ranvier.Wgpu</c> Y-up world space.</summary>
@@ -41,19 +46,56 @@ type AxisScale3D =
 /// <summary>Constructors, domain inspection, normalized mapping, inversion, and tick generation for <c>AxisScale3D</c>.</summary>
 [<RequireQualifiedAccess>]
 module AxisScale3D =
+#if FABLE_COMPILER
+    [<Emit("new WeakMap()")>]
+    let private createWeakMap () : obj = jsNative
+
+    [<Emit("$0.set($1, $2)")>]
+    let private weakMapSet (_map: obj) (_key: Continuous) (_value: float) : unit = jsNative
+
+    [<Emit("$0.get($1)")>]
+    let private weakMapGet (_map: obj) (_key: Continuous) : obj = jsNative
+
+    let private logBases = createWeakMap ()
+
+    let private registerLogBasis (scale: Continuous) (basis: float) =
+        weakMapSet logBases scale basis
+
+    let private tryGetLogBasis (scale: Continuous) : float voption =
+        let v = weakMapGet logBases scale
+        if isNull v then ValueNone else ValueSome (unbox<float> v)
+#else
+    let private logBases = ConditionalWeakTable<Continuous, ref<float>>()
+
+    let private registerLogBasis (scale: Continuous) (basis: float) =
+        logBases.AddOrUpdate (scale, ref basis)
+
+    let private tryGetLogBasis (scale: Continuous) : float voption =
+        match logBases.TryGetValue scale with
+        | true, basisRef -> ValueSome basisRef.Value
+        | false, _ -> ValueNone
+#endif
+
     let private isLogContinuous (scale: Continuous) =
         let a = Scale.invert scale 0.0
         let b = Scale.invert scale 1.0
 
-        if a * b > 0.0 && a <> b then
+        if ((a > 0.0 && b > 0.0) || (a < 0.0 && b < 0.0)) && a <> b then
             let mid = Scale.invert scale 0.5
             let sign = if a < 0.0 then -1.0 else 1.0
-            let geom = sign * sqrt (abs a * abs b)
-            let arith = 0.5 * (a + b)
-            abs (mid - geom) <= 1e-9 * max 1.0 (abs geom)
-            && abs (mid - arith) > 1e-6 * max 1.0 (abs arith)
+            let logA = Math.Log (abs a)
+            let logB = Math.Log (abs b)
+            let geom = sign * Math.Exp (0.5 * (logA + logB))
+            let arith = 0.5 * a + 0.5 * b
+            abs (mid - geom) <= 1e-9 * abs geom
+            && abs (mid - arith) > 1e-6 * abs arith
         else
             false
+
+    let internal isLogScale (axisScale: AxisScale3D) : bool =
+        match axisScale with
+        | AxisScale3D.Continuous c -> isLogContinuous c
+        | _ -> false
 
     /// <summary>Creates a linear numeric axis scale normalized to <c>[0.0, 1.0]</c>; throws <c>ArgumentException</c> for non-finite domains.</summary>
     let linear (domain: float * float) : AxisScale3D =
@@ -61,7 +103,9 @@ module AxisScale3D =
 
     /// <summary>Creates a logarithmic numeric axis scale normalized to <c>[0.0, 1.0]</c>; domain endpoints must be nonzero and share one sign.</summary>
     let log (basis: float) (domain: float * float) : AxisScale3D =
-        AxisScale3D.Continuous (Scale.log basis domain (0.0, 1.0))
+        let scale = Scale.log basis domain (0.0, 1.0)
+        registerLogBasis scale basis
+        AxisScale3D.Continuous scale
 
     /// <summary>Creates a symmetric logarithmic axis scale with positive linear-region constant normalized to <c>[0.0, 1.0]</c>.</summary>
     let symlog (constant: float) (domain: float * float) : AxisScale3D =
@@ -178,12 +222,29 @@ module AxisScale3D =
                 if isLogContinuous c then
                     let a = Scale.invert c 0.0
                     let b = Scale.invert c 1.0
-                    let decades = abs (Math.Log10 (abs b) - Math.Log10 (abs a))
+                    let rawBasis = tryGetLogBasis c |> ValueOption.defaultValue 10.0
 
-                    if decades < float count && decades * 9.0 > 10000.0 then
+                    let tickBasis =
+                        if rawBasis > 0.0 && rawBasis < 1.0 then
+                            let inv = 1.0 / rawBasis
+                            if Check3D.isFinite inv && inv > 1.0 then inv else 10.0
+                        elif Check3D.isFinite rawBasis && rawBasis > 1.0 then
+                            rawBasis
+                        else
+                            10.0
+
+                    let decades = abs (Math.Log (abs b) - Math.Log (abs a)) / abs (Math.Log tickBasis)
+
+                    let minorMult =
+                        if tickBasis = floor tickBasis && tickBasis <= 100.0 then
+                            max 1.0 (tickBasis - 1.0)
+                        else
+                            1.0
+
+                    if decades < float count && decades * minorMult > 10000.0 then
                         Scale.ticks count c
                     else
-                        Scale.logTicks 10.0 count c
+                        Scale.logTicks tickBasis count c
                 else
                     Scale.ticks count c
             | AxisScale3D.Piecewise p ->

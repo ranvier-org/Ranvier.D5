@@ -576,4 +576,251 @@ let scaleAxisTests =
                 Expect.isGreaterThan (zTopBase.Y - zLargeTop.Y) 10.0 "Top=60 pushes Z title further up beyond 30px clamp"
                 Expect.isGreaterThan (zSmallTop.Y - zTopBase.Y) 5.0 "Top=5 pulls Z title closer down below 20px clamp"
                 Expect.isGreaterThan (zSmallTop.Y - zLargeTop.Y) 15.0 "Top=5..60 spans full directional range without clamping"
+
+            testCase "Point3.toVector3f overflow guard and Check3D boundary helpers"
+            <| fun () ->
+                Expect.throwsT<ArgumentException> (fun () -> Point3.toVector3f (Point3.create 1e300 0.0 0.0) |> ignore) "toVector3f rejects +1e300 overflow"
+                Expect.throwsT<ArgumentException> (fun () -> Point3.toVector3f (Point3.create 0.0 -1e300 0.0) |> ignore) "toVector3f rejects -1e300 overflow"
+                let maxVec = Point3.toVector3f (Point3.create (float Single.MaxValue) (float -Single.MaxValue) 0.0)
+                Expect.equal maxVec (Vector3 (Single.MaxValue, -Single.MaxValue, 0.0f)) "toVector3f preserves Single.MaxValue"
+
+                Expect.isTrue (Check3D.isFinite 0.0) "isFinite 0.0"
+                Expect.isTrue (Check3D.isFinite -0.0) "isFinite -0.0"
+                Expect.isTrue (Check3D.isFinite Double.MaxValue) "isFinite Double.MaxValue"
+                Expect.isFalse (Check3D.isFinite Double.NaN) "isFinite NaN"
+                Expect.isFalse (Check3D.isFinite Double.PositiveInfinity) "isFinite +Inf"
+                Expect.isFalse (Check3D.isFinite Double.NegativeInfinity) "isFinite -Inf"
+
+                Expect.isTrue (Check3D.isFinite32 0.0f) "isFinite32 0.0f"
+                Expect.isTrue (Check3D.isFinite32 -0.0f) "isFinite32 -0.0f"
+                Expect.isTrue (Check3D.isFinite32 Single.MaxValue) "isFinite32 Single.MaxValue"
+                Expect.isFalse (Check3D.isFinite32 Single.NaN) "isFinite32 NaN"
+                Expect.isFalse (Check3D.isFinite32 Single.PositiveInfinity) "isFinite32 +Inf"
+                Expect.isFalse (Check3D.isFinite32 Single.NegativeInfinity) "isFinite32 -Inf"
+
+                Check3D.finite "ok" 0.0
+                Check3D.finite "ok" -0.0
+                Check3D.finite "ok" Double.MaxValue
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.finite "x" Double.NaN) "finite rejects NaN"
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.finite "x" Double.PositiveInfinity) "finite rejects +Inf"
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.finite "x" Double.NegativeInfinity) "finite rejects -Inf"
+
+                Check3D.finite32 "ok" 0.0f
+                Check3D.finite32 "ok" -0.0f
+                Check3D.finite32 "ok" Single.MaxValue
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.finite32 "x" Single.NaN) "finite32 rejects NaN"
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.finite32 "x" Single.PositiveInfinity) "finite32 rejects +Inf"
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.finite32 "x" Single.NegativeInfinity) "finite32 rejects -Inf"
+
+                Check3D.positive "ok" 1.0
+                Check3D.positive "ok" Double.MaxValue
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.positive "x" 0.0) "positive rejects 0.0"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.positive "x" -0.0) "positive rejects -0.0"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.positive "x" -1.0) "positive rejects negative"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.positive "x" Double.NaN) "positive rejects NaN"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.positive "x" Double.PositiveInfinity) "positive rejects +Inf"
+
+                Check3D.positive32 "ok" 1.0f
+                Check3D.positive32 "ok" Single.MaxValue
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.positive32 "x" 0.0f) "positive32 rejects 0.0f"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.positive32 "x" -0.0f) "positive32 rejects -0.0f"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.positive32 "x" -1.0f) "positive32 rejects negative"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.positive32 "x" Single.NaN) "positive32 rejects NaN"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.positive32 "x" Single.PositiveInfinity) "positive32 rejects +Inf"
+
+                Check3D.nonNegative "ok" 0.0
+                Check3D.nonNegative "ok" -0.0
+                Check3D.nonNegative "ok" Double.MaxValue
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.nonNegative "x" -1e-12) "nonNegative rejects negative"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.nonNegative "x" Double.NaN) "nonNegative rejects NaN"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.nonNegative "x" Double.NegativeInfinity) "nonNegative rejects -Inf"
+
+                Check3D.nonNegative32 "ok" 0.0f
+                Check3D.nonNegative32 "ok" -0.0f
+                Check3D.nonNegative32 "ok" Single.MaxValue
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.nonNegative32 "x" -1e-6f) "nonNegative32 rejects negative"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.nonNegative32 "x" Single.NaN) "nonNegative32 rejects NaN"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Check3D.nonNegative32 "x" Single.NegativeInfinity) "nonNegative32 rejects -Inf"
+
+                Check3D.vector3 "ok" (Vector3 (Single.MaxValue, -Single.MaxValue, 0.0f))
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.vector3 "v" (Vector3 (Single.NaN, 0.0f, 0.0f))) "vector3 rejects NaN"
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.vector3 "v" (Vector3 (0.0f, Single.PositiveInfinity, 0.0f))) "vector3 rejects +Inf"
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.vector3 "v" (Vector3 (0.0f, 0.0f, Single.NegativeInfinity))) "vector3 rejects -Inf"
+
+                Check3D.interval "ok" (0.0, 0.0)
+                Check3D.interval "ok" (-0.0, 0.0)
+                Check3D.interval "ok" (-1e300, 1e300)
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.interval "iv" (Double.NaN, 1.0)) "interval rejects NaN"
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.interval "iv" (0.0, Double.PositiveInfinity)) "interval rejects +Inf"
+                Expect.throwsT<ArgumentException> (fun () -> Check3D.interval "iv" (-Double.MaxValue, Double.MaxValue)) "interval rejects overflowing span"
+
+            testCase "AxisScale3D.log handles extreme exponents without overflow/underflow and arbitrary bases"
+            <| fun () ->
+                let hiLog = AxisScale3D.log 10.0 (1e190, 1e210)
+                Expect.isTrue (AxisScale3D.isLogScale hiLog) "1e190..1e210 classifies as log"
+                let hiTicks = AxisScale3D.ticks 5 hiLog
+                Expect.isNonEmpty hiTicks "1e190..1e210 emits ticks"
+                Expect.isTrue (hiTicks |> List.forall Check3D.isFinite) "1e190..1e210 ticks are finite"
+                Expect.isTrue (hiTicks |> List.exists (fun v -> abs (v - 1e200) <= 1e-9 * 1e200)) "1e190..1e210 includes 1e200"
+
+                let loLog = AxisScale3D.log 10.0 (1e-210, 1e-190)
+                Expect.isTrue (AxisScale3D.isLogScale loLog) "1e-210..1e-190 classifies as log"
+                let loTicks = AxisScale3D.ticks 5 loLog
+                Expect.isNonEmpty loTicks "1e-210..1e-190 emits ticks"
+                Expect.isTrue (loTicks |> List.forall (fun v -> Check3D.isFinite v && v > 0.0)) "1e-210..1e-190 ticks stay finite and positive"
+                Expect.isTrue (loTicks |> List.exists (fun v -> abs (v - 1e-200) <= 1e-9 * 1e-200)) "1e-210..1e-190 includes 1e-200"
+
+                let negLoLog = AxisScale3D.log 10.0 (-1e-190, -1e-210)
+                Expect.isTrue (AxisScale3D.isLogScale negLoLog) "-1e-190..-1e-210 classifies as log"
+                let negLoTicks = AxisScale3D.ticks 5 negLoLog
+                Expect.isTrue (negLoTicks |> List.forall (fun v -> Check3D.isFinite v && v < 0.0)) "negative extreme log ticks stay negative"
+
+                let base2 = AxisScale3D.log 2.0 (1.0, 64.0)
+                Expect.isTrue (AxisScale3D.isLogScale base2) "base-2 scale classifies as log"
+                Expect.equal (AxisScale3D.ticks 5 base2) [ 1.0; 2.0; 4.0; 8.0; 16.0; 32.0; 64.0 ] "base-2 emits powers of 2 at count=5"
+                Expect.equal (AxisScale3D.ticks 10 base2) [ 1.0; 2.0; 4.0; 8.0; 16.0; 32.0; 64.0 ] "base-2 emits powers of 2 at count=10"
+
+                let baseHalf = AxisScale3D.log 0.5 (1.0, 64.0)
+                Expect.equal (AxisScale3D.ticks 5 baseHalf) [ 1.0; 2.0; 4.0; 8.0; 16.0; 32.0; 64.0 ] "base-0.5 emits powers of 2 without throwing"
+
+                let base10 = AxisScale3D.log 10.0 (1.0, 1000.0)
+                let base10Ticks = AxisScale3D.ticks 5 base10
+
+                for p in [ 1.0; 10.0; 100.0; 1000.0 ] do
+                    Expect.isTrue (base10Ticks |> List.contains p) $"base-10 count=5 includes {p}"
+
+                let base10FiveDec = AxisScale3D.log 10.0 (1.0, 100000.0)
+                Expect.equal (AxisScale3D.ticks 5 base10FiveDec) [ 1.0; 10.0; 100.0; 1000.0; 10000.0; 100000.0 ] "base-10 5 decades emits exact powers of 10"
+
+            testCase "Axis3D camera FovYDeg/NearPlane/FarPlane validation, wide-range log formatting, and section-exempt lines"
+            <| fun () ->
+                let scale = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+                let baseSpec = Axis3D.defaultSpec scale
+                let validCam = Camera3D.orthographic Vector3.Zero 35.0f 25.0f 1.5f 6.0f
+
+                for badFov in [ 0.0f; 1e-7f; -1e-7f; 179.9f; 180.0f ] do
+                    Expect.throwsT<ArgumentOutOfRangeException>
+                        (fun () -> Axis3D.build baseSpec 128 128 { validCam with FovYDeg = badFov } |> ignore)
+                        $"rejects FovYDeg={badFov}"
+
+                for badNonFiniteFov in [ Single.NaN; Single.PositiveInfinity; Single.NegativeInfinity ] do
+                    Expect.throwsT<ArgumentException>
+                        (fun () -> Axis3D.build baseSpec 128 128 { validCam with FovYDeg = badNonFiniteFov } |> ignore)
+                        $"rejects non-finite FovYDeg={badNonFiniteFov}"
+
+                for badPlane in [ 0.0f; -0.5f; Single.NaN; Single.PositiveInfinity ] do
+                    Expect.throwsT<ArgumentOutOfRangeException>
+                        (fun () -> Axis3D.build baseSpec 128 128 { validCam with NearPlane = badPlane } |> ignore)
+                        $"rejects NearPlane={badPlane}"
+
+                    Expect.throwsT<ArgumentOutOfRangeException>
+                        (fun () -> Axis3D.build baseSpec 128 128 { validCam with FarPlane = badPlane } |> ignore)
+                        $"rejects FarPlane={badPlane}"
+
+                Expect.throwsT<ArgumentException>
+                    (fun () -> Axis3D.build baseSpec 128 128 { validCam with NearPlane = 2.0f; FarPlane = 2.0f } |> ignore)
+                    "rejects FarPlane = NearPlane"
+
+                Expect.throwsT<ArgumentException>
+                    (fun () -> Axis3D.build baseSpec 128 128 { validCam with NearPlane = 3.0f; FarPlane = 1.0f } |> ignore)
+                    "rejects FarPlane < NearPlane"
+
+                // Wide-range [1e-4 .. 1e6] log tick formatting
+                let wideLogScale =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.ZUp
+                        (AxisScale3D.log 10.0 (1e-4, 1e6))
+                        (AxisScale3D.log 10.0 (1e-210, 1e-190))
+                        (AxisScale3D.linear (0.0, 10.0))
+
+                let wideSpec =
+                    let s = Axis3D.defaultSpec wideLogScale
+                    { s with X = { s.X with TickCount = 10 } }
+
+                let wideFrame = Axis3D.build wideSpec 800 600 validCam
+                let xTickTexts =
+                    Axis3D.labels wideFrame
+                    |> Seq.filter (fun l -> l.Axis = AxisId3D.X && not l.IsTitle)
+                    |> Seq.map _.Text
+                    |> Seq.toList
+
+                Expect.isNonEmpty xTickTexts "wide log X axis emits tick labels"
+                Expect.isFalse (xTickTexts |> List.exists (fun s -> s.Contains ".0000")) "wide log ticks omit .0000 trailing zeros"
+                Expect.isTrue (xTickTexts |> List.contains "0.0001") "wide log ticks format 1e-4 cleanly"
+                Expect.isTrue (xTickTexts |> List.contains "1") "wide log ticks format 1 cleanly without .0000"
+                Expect.isTrue (xTickTexts |> List.contains "1E+06") "wide log ticks format 1e6 cleanly without 1000000.0000"
+
+                let yTickTexts =
+                    Axis3D.labels wideFrame
+                    |> Seq.filter (fun l -> l.Axis = AxisId3D.Y && not l.IsTitle)
+                    |> Seq.map _.Text
+                    |> Seq.toList
+
+                Expect.isNonEmpty yTickTexts "extreme negative-exponent log axis emits tick labels"
+                Expect.isFalse (yTickTexts |> List.exists (fun s -> s = "0")) "1e-210..1e-190 ticks do not clamp to 0"
+
+                // Section-exempt Axis3D lines remain visible in clipped half-space on GPU
+                let brightLineColor = RgbaColor (1.0f, 0.25f, 0.25f, 1.0f)
+
+                let lineOnlySpec =
+                    { baseSpec with
+                        X = { baseSpec.X with ShowPanel = false }
+                        Y = { baseSpec.Y with ShowPanel = false }
+                        Z = { baseSpec.Z with ShowPanel = false }
+                        Theme =
+                            { baseSpec.Theme with
+                                SpineColor = brightLineColor
+                                GridColor = brightLineColor
+                                TickColor = brightLineColor
+                            }
+                    }
+
+                let lineFrame = Axis3D.build lineOnlySpec 128 128 validCam
+                let exemptVerts = (Axis3D.lineVertices lineFrame).ToArray ()
+                Expect.isGreaterThan exemptVerts.Length 0 "Axis3D emits line vertices"
+
+                for i = 0 to exemptVerts.Length - 1 do
+                    Expect.equal exemptVerts[i].Pad 1.0f "Axis3D LineVertex3D sets Pad = 1.0f (ignoreSectionPlane)"
+
+                let unexemptVerts =
+                    exemptVerts
+                    |> Array.map (fun v -> LineVertex3D (v.Position, v.Color))
+
+                use ctx = new WgpuContext (initialWidth = 128, initialHeight = 128)
+                use clippedLineBatch = ctx.CreateLineBatch ()
+                use exemptLineBatch = ctx.CreateLineBatch ()
+                clippedLineBatch.UpdateVertices (ReadOnlySpan<LineVertex3D> unexemptVerts)
+                exemptLineBatch.UpdateVertices (ReadOnlySpan<LineVertex3D> exemptVerts)
+
+                // Clip entire cuboid (all y in [-1, 1] have y - 10 < 0)
+                let clipAllPlane = SectionPlane.create Vector3.UnitY -10.0f
+
+                ScenePass.create validCam
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withSection clipAllPlane
+                |> ScenePass.withLines [| clippedLineBatch |]
+                |> WgpuContext.render ctx
+                |> ignore
+
+                let clippedVisible =
+                    ctx.RgbaPixels
+                    |> Array.chunkBySize 4
+                    |> Array.exists (fun px -> px[0] > 20uy || px[1] > 20uy || px[2] > 20uy)
+
+                Expect.isFalse clippedVisible "unexempt lines in clipped half-space are discarded"
+
+                ScenePass.create validCam
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withSection clipAllPlane
+                |> ScenePass.withLines [| exemptLineBatch |]
+                |> WgpuContext.render ctx
+                |> ignore
+
+                let exemptVisible =
+                    ctx.RgbaPixels
+                    |> Array.chunkBySize 4
+                    |> Array.exists (fun px -> px[0] > 100uy)
+
+                Expect.isTrue exemptVisible "section-exempt Axis3D lines stay visible in clipped half-space on GPU"
         ]
