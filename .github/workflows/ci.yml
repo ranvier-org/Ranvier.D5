@@ -138,7 +138,7 @@ jobs:
           if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
           mkdir -p artifacts/consumer
           cat > artifacts/consumer/Consumer.fsproj <<EOF
-          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.3.0]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.3.0]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.3.0]" /><PackageReference Include="Ranvier.D5.Graph$suffix" Version="[0.3.0]" /><PackageReference Include="Ranvier.D5.Graph3D$suffix" Version="[0.3.0]" /><PackageReference Include="Ranvier.D5.Wgpu$suffix" Version="[0.3.0]" /><PackageReference Include="Ranvier.D5.Wgpu.Sdl$suffix" Version="[0.3.0]" /></ItemGroup></Project>
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Graph$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Graph3D$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Wgpu$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Wgpu.Sdl$suffix" Version="[0.4.0]" /></ItemGroup></Project>
           EOF
           cat > artifacts/consumer/Program.fs <<'EOF'
           open Ranvier
@@ -291,7 +291,7 @@ jobs:
             </PropertyGroup>
             <ItemGroup>
               <Compile Include="Program.fs" />
-              <PackageReference Include="Fable.Ranvier.D5.Wgpu" Version="[0.3.0]" />
+              <PackageReference Include="Fable.Ranvier.D5.Wgpu" Version="[0.4.0]" />
             </ItemGroup>
           </Project>
           EOF
