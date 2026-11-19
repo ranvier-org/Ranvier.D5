@@ -62,6 +62,7 @@ jobs:
           "${prefix[@]}" dotnet run --project benchmarks/Ranvier.D5.Benchmarks -c Release -p:RanvierTrace=${{ matrix.traced }} -- artifacts/benchmarks.json
           "${prefix[@]}" dotnet run --project benchmarks/Ranvier.D5.Wgpu.Benchmarks -c Release -p:RanvierTrace=${{ matrix.traced }} -- artifacts/wgpu-benchmarks.json
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Wgpu.WaveDemo -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture artifacts/wgpu-wave.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Wgpu.LayoutsDemo -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-all artifacts
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-geographic-kernels artifacts/geographic-kernels.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-projections artifacts/projections.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-advanced artifacts/advanced.bmp
