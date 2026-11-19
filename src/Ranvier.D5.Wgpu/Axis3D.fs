@@ -363,6 +363,11 @@ module Axis3D =
         verts.Add (LineVertex3D (a, color))
         verts.Add (LineVertex3D (b, color))
 
+    let private directionalTitlePad (protrusions: Protrusions) (dir2D: Vector2) : float32 =
+        let px = if dir2D.X < 0.0f then float32 protrusions.Left else float32 protrusions.Right
+        let py = if dir2D.Y < 0.0f then float32 protrusions.Top else float32 protrusions.Bottom
+        dir2D.X * dir2D.X * px + dir2D.Y * dir2D.Y * py
+
     let private projectLabel
         (width: int)
         (height: int)
@@ -371,7 +376,7 @@ module Axis3D =
         (anchorWorld: Vector3)
         (outwardDir: Vector3)
         (tickLen: float32)
-        (padPx: float32)
+        (computePad: Vector2 -> float32)
         (isVertical: bool)
         : struct (Point * string) voption =
         match Camera3D.projectToScreen width height camera anchorWorld with
@@ -391,6 +396,7 @@ module Axis3D =
                     if d.LengthSquared () > 1e-4f then Vector2.Normalize d else fallbackDir2D ()
                 | ValueNone -> fallbackDir2D ()
 
+            let padPx = computePad dir2D
             let pos = sBase + dir2D * padPx
 
             if Check3D.isFinite32 pos.X && Check3D.isFinite32 pos.Y then
@@ -514,19 +520,34 @@ module Axis3D =
             if spec.ShowFrontSpines then
                 addSegment lines (p0 (-backU) (-backV)) (p1 (-backU) (-backV)) spec.Theme.SpineColor
 
-            let rawTicks = AxisScale3D.ticks cfg.TickCount axisScale
+            let validTicks, formattedTicks =
+                match axisScale with
+                | AxisScale3D.Categorical band ->
+                    let catTicks = AxisScale3D.categoricalTicks cfg.TickCount band
+                    let vt = catTicks |> List.map (fun (_, tNorm) -> tNorm, Math.Clamp (tNorm, 0.0, 1.0))
 
-            let validTicks =
-                rawTicks
-                |> List.choose (fun v ->
-                    match AxisScale3D.tryMapNormalized axisScale v with
-                    | ValueSome t when t >= -1e-5 && t <= 1.0 + 1e-5 -> Some (v, Math.Clamp (t, 0.0, 1.0))
-                    | _ -> None)
+                    let ft =
+                        match cfg.FormatTick with
+                        | Some fmt -> catTicks |> List.map (snd >> fmt)
+                        | None -> catTicks |> List.map fst
 
-            let formattedTicks =
-                match cfg.FormatTick with
-                | Some fmt -> validTicks |> List.map (fst >> fmt)
-                | None -> formatDefaultTicks axisScale (validTicks |> List.map fst)
+                    vt, ft
+                | _ ->
+                    let rawTicks = AxisScale3D.ticks cfg.TickCount axisScale
+
+                    let vt =
+                        rawTicks
+                        |> List.choose (fun v ->
+                            match AxisScale3D.tryMapNormalized axisScale v with
+                            | ValueSome t when t >= -1e-5 && t <= 1.0 + 1e-5 -> Some (v, Math.Clamp (t, 0.0, 1.0))
+                            | _ -> None)
+
+                    let ft =
+                        match cfg.FormatTick with
+                        | Some fmt -> vt |> List.map (fst >> fmt)
+                        | None -> formatDefaultTicks axisScale (vt |> List.map fst)
+
+                    vt, ft
 
             let prefix = axisPrefix axisId
 
@@ -550,7 +571,7 @@ module Axis3D =
                 if cfg.TickLengthWorld > 0.0f then
                     addSegment lines tickStart tickEnd spec.Theme.TickColor
 
-                match projectLabel viewportWidth viewportHeight camera viewMat tickEnd outwardDir cfg.TickLengthWorld 8.0f isVertical with
+                match projectLabel viewportWidth viewportHeight camera viewMat tickEnd outwardDir cfg.TickLengthWorld (fun _ -> 8.0f) isVertical with
                 | ValueSome struct (screenPt, anchor) ->
                     labelsAcc.Add
                         {
@@ -566,9 +587,8 @@ module Axis3D =
             if not (String.IsNullOrEmpty cfg.Title) then
                 let midSpine = worldPointForAxis worldAxis hx hy hz 0.5f tickU tickV
                 let midTickTip = midSpine + outwardDir * cfg.TickLengthWorld
-                let titlePad = float32 (max 20.0 (min spec.Protrusions.Bottom 30.0))
 
-                match projectLabel viewportWidth viewportHeight camera viewMat midTickTip outwardDir cfg.TickLengthWorld titlePad isVertical with
+                match projectLabel viewportWidth viewportHeight camera viewMat midTickTip outwardDir cfg.TickLengthWorld (directionalTitlePad spec.Protrusions) isVertical with
                 | ValueSome struct (screenPt, anchor) ->
                     labelsAcc.Add
                         {
@@ -589,7 +609,11 @@ module Axis3D =
             BackWalls = struct (worldBackX, worldFloorY, worldBackZ)
         }
 
-    /// <summary>Returns the contiguous line-segment endpoints for back-wall gridlines, cuboid spines, and outward tick hairlines.</summary>
+    /// <summary>
+    /// Returns the contiguous line-segment endpoints for back-wall gridlines, cuboid spines, and outward tick hairlines.
+    /// Back-wall panels set <c>InstanceFlags.IgnoreSectionPlane</c>, whereas <c>LineBatch</c> segments (<c>Axis3D.lineVertices</c> and hover spikes)
+    /// share the pass <c>SectionPlane</c> in <c>Ranvier.Wgpu 0.3.0</c> and are clipped in the negative half-space.
+    /// </summary>
     let lineVertices (frame: AxisFrame3D) : ReadOnlyMemory<LineVertex3D> =
         ReadOnlyMemory<LineVertex3D>(frame.Lines)
 

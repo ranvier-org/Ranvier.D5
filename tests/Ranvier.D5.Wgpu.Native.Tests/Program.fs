@@ -7,8 +7,10 @@ open Ranvier
 open Ranvier.D5
 open Ranvier.D5.Wgpu
 open Ranvier.D5.Wgpu.Sdl
+open Ranvier.Dom
 open Ranvier.View
 open Ranvier.View.Dom
+open Ranvier.View.WebCore
 open Ranvier.View.WebCore.Sdl
 open Ranvier.Wgpu
 open Ranvier.Wgpu.Sdl
@@ -242,6 +244,67 @@ let private runNativeAcceptance () =
         |> Option.defaultWith (fun () -> failtest "Expected OnClickHit callback with PickHit over probe sphere")
 
     Expect.equal (resolvedClick |> ValueOption.map _.Key) (ValueSome "center") "click hit resolves KeyedCollection sphere key 'center'"
+
+    // 4. Keyboard "m" key toggle preserves continuous camera world Position across Turntable <-> Arcball
+    let plotRoot = container.querySelector "[tabindex='0']"
+    Expect.isNotNull plotRoot "PlotView3D container has tabindex='0'"
+    win.Host.SetFocused true
+    (plotRoot :?> HTMLElement).focus ()
+    pumpFrames win 1
+
+    let camBeforeModeToggle = graph.Run (fun () -> camera.Value)
+    let posBeforeModeToggle = (PlotCamera3D.toCamera3D scale camBeforeModeToggle).Position
+    Expect.equal camBeforeModeToggle.Mode OrbitMode3D.Turntable "camera starts in Turntable before 'm' toggle"
+
+    win.Host.Key (0, "m", "KeyM", null, 0, false) |> ignore
+    win.Host.Key (1, "m", "KeyM", null, 0, false) |> ignore
+    pumpFrames win 2
+
+    let camAfterM1 = graph.Run (fun () -> camera.Value)
+    let posAfterM1 = (PlotCamera3D.toCamera3D scale camAfterM1).Position
+    Expect.equal camAfterM1.Mode OrbitMode3D.Arcball "'m' toggles Turntable -> Arcball"
+    Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float (Vector3.Distance (posAfterM1, posBeforeModeToggle))) 0.0 "'m' toggle to Arcball preserves camera world Position"
+
+    win.Host.Key (0, "M", "KeyM", null, 0, false) |> ignore
+    win.Host.Key (1, "M", "KeyM", null, 0, false) |> ignore
+    pumpFrames win 2
+
+    let camAfterM2 = graph.Run (fun () -> camera.Value)
+    let posAfterM2 = (PlotCamera3D.toCamera3D scale camAfterM2).Position
+    Expect.equal camAfterM2.Mode OrbitMode3D.Turntable "'M' toggles Arcball -> Turntable"
+    Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float (Vector3.Distance (posAfterM2, posAfterM1))) 0.0 "'M' toggle to Turntable preserves camera world Position"
+
+    // 5. Chorded secondary pointerdown while dragging does not steal activePointerId or switch orbit to pan
+    win.Host.SetMaxTouchPoints 2
+    let mutable p1Down = PointerSample.Create (2, 10, 1, 240.0, 180.0)
+    p1Down.Button <- 0
+    let mutable p2Down = PointerSample.Create (2, 20, 1, 280.0, 200.0)
+    p2Down.Button <- 2
+    let p2Move = PointerSample.Create (2, 20, 0, 320.0, 230.0)
+    let p2Up = PointerSample.Create (2, 20, 2, 320.0, 230.0)
+    let p1Move = PointerSample.Create (2, 10, 0, 290.0, 160.0)
+    let p1Up = PointerSample.Create (2, 10, 2, 290.0, 160.0)
+
+    win.Host.Pointer [| p1Down |] |> ignore
+    let camAtP1Down = graph.Run (fun () -> camera.Value)
+
+    // Secondary pointerdown while p1 is dragging must be ignored, and moves from p2 must not alter camera
+    win.Host.Pointer [| p2Down |] |> ignore
+    win.Host.Pointer [| p2Move |] |> ignore
+    win.Host.Pointer [| p2Up |] |> ignore
+    pumpFrames win 1
+
+    let camAfterChordedP2 = graph.Run (fun () -> camera.Value)
+    Expect.equal camAfterChordedP2 camAtP1Down "chorded secondary pointerdown/move/up does not steal activePointerId or mutate camera"
+
+    // Original active pointer (id = 10) still orbits and completes cleanly
+    win.Host.Pointer [| p1Move |] |> ignore
+    win.Host.Pointer [| p1Up |] |> ignore
+    pumpFrames win 1
+
+    let camAfterP1Drag = graph.Run (fun () -> camera.Value)
+    Expect.notEqual camAfterP1Drag.AzimuthRad camAtP1Down.AzimuthRad "original activePointerId still orbits after chorded secondary pointer"
+    Expect.equal camAfterP1Drag.PanOffset camAtP1Down.PanOffset "chorded secondary pointerdown does not flip dragPan on"
 
     // Review Focus #5: idempotent double mounted.Dispose(), then graph.Dispose(), wgpu.Dispose(), win.Dispose()
     mounted.Dispose ()

@@ -85,7 +85,7 @@ module PlotCamera3D =
             && Check3D.isFinite32 q.W
         then
             let lenSq = q.LengthSquared ()
-            if lenSq > 1e-12f then Quaternion.Normalize q else Quaternion.Identity
+            if Check3D.isFinite32 lenSq && lenSq > 1e-12f then Quaternion.Normalize q else Quaternion.Identity
         else
             Quaternion.Identity
 
@@ -181,10 +181,39 @@ module PlotCamera3D =
         Check3D.vector3 (nameof worldTarget) worldTarget
         { camera with PanOffset = worldTarget }
 
+    /// <summary>Switches <c>camera.Mode</c> between <c>Turntable</c> and <c>Arcball</c> while preserving the continuous world-space camera pose.</summary>
+    let withMode (mode: OrbitMode3D) (camera: PlotCamera3D) : PlotCamera3D =
+        if camera.Mode = mode then
+            camera
+        else
+            match mode with
+            | OrbitMode3D.Arcball ->
+                let yaw = if Check3D.isFinite32 camera.AzimuthRad then camera.AzimuthRad else 0.0f
+                let pitch = clampElevation camera.ElevationRad
+                let yawQ = Quaternion.CreateFromAxisAngle (Vector3.UnitY, yaw)
+                let pitchQ = Quaternion.CreateFromAxisAngle (Vector3.UnitX, -pitch)
+                let q = normalizeQuat (yawQ * pitchQ)
+                { camera with Mode = OrbitMode3D.Arcball; Arcball = q }
+            | OrbitMode3D.Turntable ->
+                let m = Orientation3D.matrixFromQuaternion (normalizeQuat camera.Arcball)
+                let offsetDir = Vector3.Normalize (Vector3.Transform (Vector3.UnitZ, m))
+                let pitch = clampElevation (MathF.Asin (Math.Clamp (offsetDir.Y, -1.0f, 1.0f)))
+
+                let yaw =
+                    if MathF.Abs offsetDir.X > 1e-6f || MathF.Abs offsetDir.Z > 1e-6f then
+                        MathF.Atan2 (offsetDir.X, offsetDir.Z)
+                    elif Check3D.isFinite32 camera.AzimuthRad then
+                        camera.AzimuthRad
+                    else
+                        0.0f
+
+                { camera with Mode = OrbitMode3D.Turntable; AzimuthRad = yaw; ElevationRad = pitch }
+
     let private buildPose (camera: PlotCamera3D) (target: Vector3) (dist: float32) (fovYDeg: float32) (nearP: float32) (farP: float32) : Camera3D =
         match camera.Mode with
         | OrbitMode3D.Turntable ->
-            let yawDeg = camera.AzimuthRad * 180.0f / MathF.PI
+            let yawRad = if Check3D.isFinite32 camera.AzimuthRad then camera.AzimuthRad else 0.0f
+            let yawDeg = yawRad * 180.0f / MathF.PI
             let pitchDeg = clampElevation camera.ElevationRad * 180.0f / MathF.PI
 
             let baseCam =

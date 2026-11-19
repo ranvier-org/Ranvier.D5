@@ -93,9 +93,12 @@ module private SurfaceKernel =
             Error [ LayoutError.InvalidObservation "Surface grid requires at least 2 columns and 2 rows." ]
         else
             let count64 = int64 columns * int64 rows
+            let maxIndices64 = int64 (columns - 1) * int64 (rows - 1) * 6L
 
             if count64 > int64 Int32.MaxValue then
                 Error [ LayoutError.BudgetExceeded "Surface grid vertex count exceeds 32-bit capacity." ]
+            elif maxIndices64 > int64 Int32.MaxValue then
+                Error [ LayoutError.BudgetExceeded "Surface grid index count exceeds 32-bit capacity." ]
             else
                 Ok (int count64)
 

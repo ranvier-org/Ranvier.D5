@@ -23,7 +23,11 @@ type PlotPass3D =
         ClearColor: RgbaColor
         /// <summary>Optional directional studio lighting rig.</summary>
         Lighting: LightingRig voption
-        /// <summary>Optional world-space clipping plane.</summary>
+        /// <summary>
+        /// Optional world-space clipping plane.
+        /// Axis back-wall panels set <c>InstanceFlags.IgnoreSectionPlane</c>, whereas <c>LineBatch</c> segments (<c>Axis3D.lineVertices</c> and hover spikes)
+        /// share this pass <c>SectionPlane</c> in <c>Ranvier.Wgpu 0.3.0</c> and are clipped in the negative half-space.
+        /// </summary>
         SectionPlane: SectionPlane voption
         /// <summary>Additional hardware-instanced mesh batches rendered alongside axis wall panels.</summary>
         ExtraBatches: ReadOnlyMemory<InstanceBatch>
@@ -181,7 +185,7 @@ type private PlotViewInstance3D
     let renderNow () =
         if not disposed then
             match surfaceOpt, latestCam, latestPass, latestFrame with
-            | Some surface, Some cam, Some pass, Some _ when not surface.IsDisposed ->
+            | Some surface, Some cam, Some pass, Some _ when not surface.IsDisposed && not context.IsDisposed ->
                 dirty <- false
                 let scenePass = buildScenePass cam pass true
                 WgpuSdlSurface.render surface scenePass |> ignore
@@ -268,7 +272,7 @@ type private PlotViewInstance3D
         Api.onCleanup cleanupResources
 
         Api.createEffect (fun () ->
-            if not disposed then
+            if not disposed && not context.IsDisposed then
                 let plotCam = config.Camera.Value
                 let pass = readScene ()
                 let gpuCam = PlotCamera3D.toCamera3D pass.AxisSpec.Scale plotCam
@@ -320,7 +324,7 @@ type private PlotViewInstance3D
         fun () -> lease.Dispose ()
 
     member _.OnPointerDown(ev: PointerEvent) =
-        if not disposed then
+        if not disposed && not dragging then
             dragging <- true
             dragMoved <- false
             dragPan <- ev.button = 1s || ev.button = 2s || ev.shiftKey
@@ -421,7 +425,7 @@ type private PlotViewInstance3D
                     | OrbitMode3D.Turntable -> OrbitMode3D.Arcball
                     | OrbitMode3D.Arcball -> OrbitMode3D.Turntable
 
-                config.Camera.Value <- { cam with Mode = nextMode }
+                config.Camera.Value <- PlotCamera3D.withMode nextMode cam
             | "ArrowLeft" ->
                 ev.preventDefault ()
                 config.Camera.Value <- PlotCamera3D.orbitBy -12.0f 0.0f cam

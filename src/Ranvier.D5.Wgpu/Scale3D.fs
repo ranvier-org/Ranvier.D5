@@ -144,6 +144,28 @@ module AxisScale3D =
             if ms0 = ms1 then ms0 else ms0 + t * (ms1 - ms0)
         | AxisScale3D.Categorical _ -> t
 
+    let internal categoricalTicks (count: int) (band: Band<string>) : (string * float) list =
+        if count <= 0 then
+            []
+        elif count > 10000 then
+            invalidArg "count" "Tick count cannot exceed 10,000."
+        else
+            let cats = Scale.bandCategories band |> List.toArray
+
+            if cats.Length = 0 then
+                []
+            else
+                let stride = max 1 (int (Math.Ceiling (float cats.Length / float count)))
+                let halfWidth = Scale.bandwidth band * 0.5
+
+                [ 0 .. stride .. cats.Length - 1 ]
+                |> List.choose (fun i ->
+                    let k = cats[i]
+
+                    match Scale.bandPosition band k with
+                    | Some pos -> Some (k, Math.Clamp (pos + halfWidth, 0.0, 1.0))
+                    | None -> None)
+
     /// <summary>Generates approximately <c>count</c> nice domain-unit tick values along the axis.</summary>
     let ticks (count: int) (axisScale: AxisScale3D) : float list =
         if count <= 0 then
@@ -184,7 +206,7 @@ module AxisScale3D =
                         Scale.ticks count (Scale.linear (ms0, ms1) (0.0, 1.0))
                     else
                         ticks
-            | AxisScale3D.Categorical _ -> []
+            | AxisScale3D.Categorical band -> categoricalTicks count band |> List.map snd
 
 /// <summary>Immutable 3D data-to-world coordinate mapping combining three <c>AxisScale3D</c>s, <c>BoxAspect</c>, and <c>UpAxis</c>.</summary>
 type Scale3D =

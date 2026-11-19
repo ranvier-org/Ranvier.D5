@@ -259,18 +259,63 @@ jobs:
           EOF
           cat > artifacts/fable-consumer/Program.fs <<'EOF'
           open System
+          open System.Numerics
+          open System.Threading.Tasks
+          open Ranvier
           open Ranvier.D5
           open Ranvier.D5.Wgpu
           open Ranvier.Wgpu
 
+          // 1. Scale3D + AxisScale3D.band categorical ticks & Axis3D.build
           let scale = Scale3D.cartesian (-2.0, 2.0) (-2.0, 2.0) (-1.0, 1.0)
           let world = Scale3D.map scale (Point3.create 2.0 2.0 1.0)
           if abs (world.X - 1.0f) > 1e-4f then failwithf "Scale3D JS failed: %A" world
           let back = Scale3D.invert scale world
           if abs (back.Z - 1.0) > 1e-4 then failwithf "Scale3D.invert JS failed: %A" back
+
+          let catX = AxisScale3D.band [ "Q1"; "Q2"; "Q3" ] 0.2 0.1
+          let catY = AxisScale3D.point [ "North"; "South" ] 0.5
+          if (AxisScale3D.ticks 5 catX).Length <> 3 then failwith "AxisScale3D.band ticks JS failed"
+          let catScale = Scale3D.create BoxAspect.ChartDefault UpAxis.ZUp catX catY (AxisScale3D.linear (0.0, 10.0))
+          let cam = Camera3D.orthographic Vector3.Zero 35.0f 25.0f 1.5f 8.0f
+          let frame = Axis3D.build (Axis3D.defaultSpec catScale) 640 480 cam
+          if (Axis3D.panelInstances frame).Length <> 3 || (Axis3D.lineVertices frame).Length = 0 then
+              failwith "Axis3D.build panels/lines JS failed"
+          let xCatTexts =
+              Axis3D.labels frame
+              |> Seq.filter (fun l -> l.Axis = AxisId3D.X && not l.IsTitle)
+              |> Seq.map (fun l -> l.Text)
+              |> Seq.toList
+          if xCatTexts <> [ "Q1"; "Q2"; "Q3" ] then failwithf "Axis3D categorical labels JS failed: %A" xCatTexts
+
+          // 2. ColorRamp.tryMap + ColorShader.packUniforms + ColorShader.disabledUniforms + wgsl + glsl
           let ramp = ColorRamp.turbo (-1.0, 1.0)
           let c = ColorRamp.tryMap ramp 0.25 |> ValueOption.get
           if c.A <= 0.0f then failwith "ColorRamp JS failed"
+          let packedU = ColorShader.packUniforms -1.0f 1.0f ramp
+          if packedU.Length <> 16 || packedU.Span[0].W <> 1.0f then failwith "ColorShader.packUniforms JS failed"
+          let disabledU = ColorShader.disabledUniforms ()
+          if disabledU.Length <> 16 || disabledU.Span[0].W <> 0.0f then failwith "ColorShader.disabledUniforms JS failed"
+          let wgsl = ColorShader.wgsl ()
+          if String.IsNullOrWhiteSpace wgsl || not (wgsl.Contains "d5_sample_ramp" && wgsl.Contains "vs_main" && wgsl.Contains "fs_main") then
+              failwith "ColorShader.wgsl JS failed"
+          let glsl = ColorShader.glsl ()
+          if
+              String.IsNullOrWhiteSpace glsl
+              || not (
+                  glsl.Contains "d5_sample_ramp"
+                  && glsl.Contains "v_d5Data"
+                  && glsl.Contains "#ifdef VS_MAIN"
+                  && glsl.Contains "void vs_main()"
+                  && glsl.Contains "#ifdef FS_MAIN"
+                  && glsl.Contains "vec4 fs_main()"
+                  && glsl.Contains "#ifdef FS_PICK"
+                  && glsl.Contains "uvec4 fs_pick()"
+              )
+          then
+              failwith "ColorShader.glsl JS failed"
+
+          // 3. Surface3D.build
           let grid =
               SurfaceGrid.fromFunction 6 6 (-2.0, 2.0) (-2.0, 2.0) (fun x y -> 0.5 * sin x * cos y) ValueNone
               |> Result.defaultWith (fun e -> failwithf "%A" e)
@@ -286,7 +331,109 @@ jobs:
           let mesh = Surface3D.build spec grid
           if (SurfaceMesh.vertices mesh).Length <> 36 || (SurfaceMesh.indices mesh).Length <> 150 then
               failwith "Surface3D JS failed"
-          printfn "Packed Fable.Ranvier.D5.Wgpu JS smoke passed: %d vertices, %d indices" (SurfaceMesh.vertices mesh).Length (SurfaceMesh.indices mesh).Length
+
+          // 4. Glyph3D.packGlyphs (Orientation3D.alignYToVector + FableCompat3D.Quaternion), Glyph3D.tryBarFromCategories + Glyph3D.packBars, Line3D.tube
+          let qAlign = Orientation3D.alignYToVector (Vector3 (1.0f, 1.0f, 0.0f))
+          let qManual = Quaternion.CreateFromAxisAngle (Vector3.UnitZ, 0.5f)
+          let glyphs =
+              Glyph3D.packGlyphs
+                  scale
+                  (ReadOnlySpan<GlyphDatum3D>
+                      [|
+                          {
+                              Position = Point3.create 0.0 0.0 0.0
+                              Scale = Vector3 (0.2f, 0.4f, 0.2f)
+                              Rotation = qAlign * qManual
+                              Color = RgbaColor.white
+                              Shading = ShadingMode.Unlit
+                              PickId = 7u
+                              Selected = false
+                          }
+                      |])
+          if glyphs.Length <> 1 || glyphs.Span[0].PickId <> 7u then failwith "Glyph3D.packGlyphs JS failed"
+
+          let catBar =
+              Glyph3D.tryBarFromCategories catScale "Q2" "South" 0.0 8.0 (RgbaColor (0.2f, 0.7f, 0.9f, 1.0f)) ShadingMode.Unlit 9u true
+              |> ValueOption.get
+          let packedBars = Glyph3D.packBars catScale (ReadOnlySpan<BarDatum3D> [| catBar |])
+          if packedBars.Length <> 1 || packedBars.Span[0].PickId <> 9u then failwith "Glyph3D.tryBarFromCategories/packBars JS failed"
+
+          let tubeMesh =
+              Line3D.tube
+                  scale
+                  6
+                  (ReadOnlySpan<struct (Point3 * float32 * RgbaColor)>
+                      [|
+                          struct (Point3.create -1.0 0.0 0.0, 0.1f, RgbaColor.white)
+                          struct (Point3.create 1.0 0.0 0.5, 0.1f, RgbaColor.white)
+                      |])
+              |> Result.defaultWith (fun e -> failwithf "Line3D.tube JS failed: %A" e)
+          if tubeMesh.Vertices.Length = 0 || tubeMesh.Indices.Length = 0 then failwith "Line3D.tube JS empty mesh"
+
+          // 5. VolumeGrid.uniform + IsoSurface3D.compute
+          let nx, ny, nz = 5, 5, 5
+          let volData =
+              [|
+                  for iz = 0 to nz - 1 do
+                      let z = -1.0f + 2.0f * float32 iz / float32 (nz - 1)
+                      for iy = 0 to ny - 1 do
+                          let y = -1.0f + 2.0f * float32 iy / float32 (ny - 1)
+                          for ix = 0 to nx - 1 do
+                              let x = -1.0f + 2.0f * float32 ix / float32 (nx - 1)
+                              yield 1.0f - (x * x + y * y + z * z)
+              |]
+          let volGrid =
+              VolumeGrid.uniform nx ny nz (Bounds3.create -1.0 -1.0 -1.0 2.0 2.0 2.0) (ReadOnlySpan<float32> volData) ReadOnlySpan.Empty
+              |> Result.defaultWith (fun e -> failwithf "VolumeGrid.uniform JS failed: %A" e)
+          let isoMesh =
+              IsoSurface3D.compute scale ramp (IsoSurfaceConfig.create 0.25f) volGrid
+              |> Result.defaultWith (fun e -> failwithf "IsoSurface3D.compute JS failed: %A" e)
+          if isoMesh.Vertices.Length = 0 || isoMesh.Indices.Length = 0 then failwith "IsoSurface3D.compute JS empty mesh"
+
+          // 6. PlotCamera3D.orbitBy + PlotCamera3D.withMode OrbitMode3D.Arcball + PlotCamera3D.toCamera3D
+          let pCam0 = PlotCamera3D.defaultValue |> PlotCamera3D.orbitBy 30.0f -15.0f
+          let wCam0 = PlotCamera3D.toCamera3D scale pCam0
+          let pCamArc = PlotCamera3D.withMode OrbitMode3D.Arcball pCam0
+          let wCamArc = PlotCamera3D.toCamera3D scale pCamArc
+          if Vector3.Distance (wCam0.Position, wCamArc.Position) > 1e-3f then
+              failwith "PlotCamera3D.withMode Arcball JS failed to preserve Position"
+
+          // 7. Ranvier owner + KeyedCollection + Reactive3D.domainExtent + Reactive3D.asyncIsoSurface
+          let graph = new Graph ()
+          let isoMemo =
+              graph.Run (fun () ->
+                  let coll = Api.createKeyedCollection (fun struct (k: string, _: float option) -> k)
+                  coll.AddOrUpdate (struct ("a", Some 2.0))
+                  coll.AddOrUpdate (struct ("b", Some 10.0))
+                  let ext = Reactive3D.domainExtent (fun struct (_, v) -> v) coll.Rows
+                  if ext.Value <> Some (2.0, 10.0) then failwithf "Reactive3D.domainExtent JS failed: %A" ext.Value
+                  coll.AddOrUpdate (struct ("c", Some -3.0))
+                  if ext.Value <> Some (-3.0, 10.0) then failwithf "Reactive3D.domainExtent update JS failed: %A" ext.Value
+
+                  let cfgSig = Api.createSignal (IsoSurfaceConfig.create 0.25f)
+                  let m = Reactive3D.asyncIsoSurface (fun () -> scale) (fun () -> ramp) (fun () -> cfgSig.Value) (fun () -> volGrid)
+                  ignore m.TryValue
+                  m)
+
+          let checkSettled : Task =
+              task {
+                  let mutable attempts = 0
+                  while (match graph.Run (fun () -> isoMemo.TryValue) with Ready _ -> false | _ -> true) && attempts < 20 do
+                      do! Task.Delay 5
+                      graph.Pump () |> ignore
+                      attempts <- attempts + 1
+
+                  match graph.Run (fun () -> isoMemo.TryValue) with
+                  | Ready (Ok settledIso) ->
+                      if settledIso.Vertices.Length <> isoMesh.Vertices.Length || settledIso.Indices.Length <> isoMesh.Indices.Length then
+                          failwithf "Reactive3D.asyncIsoSurface JS mismatch: %d vs %d" settledIso.Vertices.Length isoMesh.Vertices.Length
+                      graph.Dispose ()
+                      printfn "Packed Fable.Ranvier.D5.Wgpu JS smoke passed: %d surface verts, %d iso verts, %d cat labels" (SurfaceMesh.vertices mesh).Length settledIso.Vertices.Length xCatTexts.Length
+                  | other ->
+                      graph.Dispose ()
+                      failwithf "Reactive3D.asyncIsoSurface JS did not settle: %A" other
+              }
+          ignore checkSettled
           EOF
           cat > artifacts/fable-consumer/NuGet.Config <<'EOF'
           <configuration>

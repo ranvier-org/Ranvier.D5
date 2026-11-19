@@ -592,4 +592,38 @@ let reactive3DTests =
                     Expect.isLessThan zoomedPersp.NearPlane (perspDist * 0.15f) "zoomed Arcball persp NearPlane stays tight near camera eye"
                     Expect.isGreaterThan zoomedPersp.FarPlane (perspDist + r * 2.0f) "zoomed Arcball persp FarPlane covers full cuboid behind target"
                 )
+
+            testCase "PlotCamera3D.withMode preserves camera world Position across Turntable -> Arcball -> Turntable after orbiting"
+            <| fun () ->
+                let scale = Scale3D.cartesian (-2.0, 2.0) (-2.0, 2.0) (-1.0, 1.0)
+
+                let orbitedTurn =
+                    PlotCamera3D.defaultValue
+                    |> PlotCamera3D.focusOn (Vector3 (0.25f, -0.15f, 0.1f))
+                    |> PlotCamera3D.orbitBy 45.0f -20.0f
+
+                for persp in [ 0.0f; 1.0f ] do
+                    let cTurn0 = { orbitedTurn with Perspectiveness = persp }
+                    let wTurn0 = PlotCamera3D.toCamera3D scale cTurn0
+
+                    let cArc = PlotCamera3D.withMode OrbitMode3D.Arcball cTurn0
+                    Expect.equal cArc.Mode OrbitMode3D.Arcball "switched to Arcball"
+                    let wArc = PlotCamera3D.toCamera3D scale cArc
+                    expectVec3Close 1e-4f wArc.Position wTurn0.Position $"Persp={persp}: Turntable -> Arcball preserves camera world Position"
+                    expectVec3Close 1e-4f wArc.Target wTurn0.Target $"Persp={persp}: Turntable -> Arcball preserves Target"
+
+                    let cArc2 = PlotCamera3D.orbitBy 30.0f 15.0f cArc
+                    let wArc2 = PlotCamera3D.toCamera3D scale cArc2
+
+                    let cTurn2 = PlotCamera3D.withMode OrbitMode3D.Turntable cArc2
+                    Expect.equal cTurn2.Mode OrbitMode3D.Turntable "switched back to Turntable"
+                    let wTurn2 = PlotCamera3D.toCamera3D scale cTurn2
+                    expectVec3Close 1e-4f wTurn2.Position wArc2.Position $"Persp={persp}: Arcball -> Turntable preserves camera world Position"
+                    expectVec3Close 1e-4f wTurn2.Target wArc2.Target $"Persp={persp}: Arcball -> Turntable preserves Target"
+
+                Expect.equal (PlotCamera3D.withMode OrbitMode3D.Turntable orbitedTurn) orbitedTurn "withMode same mode is identity"
+
+                let nanAz = { orbitedTurn with AzimuthRad = Single.NaN }
+                let nanGpu = PlotCamera3D.toCamera3D scale nanAz
+                Expect.isTrue (Single.IsFinite nanGpu.Position.X && Single.IsFinite nanGpu.Position.Y && Single.IsFinite nanGpu.Position.Z) "non-finite AzimuthRad sanitizes cleanly"
         ]

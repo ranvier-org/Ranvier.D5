@@ -21,7 +21,7 @@ type Continuous = private {
 type Piecewise = private { Knots:float array; Outputs:float array }
 
 /// <summary>Immutable category positions and a shared band width, created by Scale.band or Scale.point.</summary>
-type Band<'Key when 'Key: comparison> = private { Positions: Map<'Key,float>; Width: float }
+type Band<'Key when 'Key: comparison> = private { Keys: 'Key array; Positions: Map<'Key,float>; Width: float }
 
 /// <summary>UTC calendar units used to align ticks.</summary>
 [<RequireQualifiedAccess>]
@@ -260,7 +260,7 @@ module Scale =
             keys |> Array.mapi (fun i key ->
                 let index = if finish<start then keys.Length-1-i else i
                 key, offset+float index*step) |> Map.ofArray
-        { Positions=positions; Width=width }
+        { Keys=keys; Positions=positions; Width=width }
 
     /// <summary>Creates centered point positions; padding is the number of half-steps outside the endpoints.</summary>
     let point domain range padding = band domain range 1. padding
@@ -270,6 +270,9 @@ module Scale =
 
     /// <summary>Returns the positive width of a band; point scales have zero width.</summary>
     let bandwidth band = band.Width
+
+    /// <summary>Returns the ordered category keys of a band or point scale.</summary>
+    let bandCategories (band: Band<'Key>) : 'Key list = Array.toList band.Keys
 
     /// <summary>Creates a fixed ordinal domain, cycling the range; unknown categories return None.</summary>
     let ordinal domain range =

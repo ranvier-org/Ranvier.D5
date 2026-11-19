@@ -428,4 +428,152 @@ let scaleAxisTests =
 
                 Expect.throwsT<ArgumentOutOfRangeException> (fun () -> Axis3D.build baseSpec 0 480 cam |> ignore) "rejects zero viewportWidth"
                 Expect.throwsT<ArgumentException> (fun () -> Axis3D.build baseSpec 640 480 { cam with Position = cam.Target } |> ignore) "rejects Position = Target"
+
+            testCase "Categorical AxisScale3D.band and AxisScale3D.point emit ticks, gridlines, tick hairlines, category labels, and Glyph3D.tryBarFromCategories bars"
+            <| fun () ->
+                let revBand = Scale.band [ "Q1"; "Q2"; "Q3" ] (1.0, 0.0) 0.1 0.1
+                Expect.equal (Scale.bandCategories revBand) [ "Q1"; "Q2"; "Q3" ] "Scale.bandCategories preserves input domain order even when range is reversed"
+
+                let bandX = AxisScale3D.band [ "Q1"; "Q2"; "Q3" ] 0.2 0.1
+                let pointY = AxisScale3D.point [ "North"; "South" ] 0.5
+                let bandY = AxisScale3D.band [ "North"; "South" ] 0.2 0.1
+                let pointX = AxisScale3D.point [ "Q1"; "Q2"; "Q3" ] 0.5
+                let linZ = AxisScale3D.linear (0.0, 100.0)
+
+                Expect.equal (AxisScale3D.ticks 5 bandX).Length 3 "AxisScale3D.ticks emits 3 centered ticks for 3-category band"
+                Expect.equal (AxisScale3D.ticks 5 pointX).Length 3 "AxisScale3D.ticks emits 3 centered ticks for 3-category point"
+                Expect.equal (AxisScale3D.ticks 0 bandX) [] "AxisScale3D.ticks count=0 returns []"
+                Expect.equal (AxisScale3D.ticks 2 (AxisScale3D.band [ "A"; "B"; "C"; "D" ] 0.1 0.1)).Length 2 "categorical ticks stride down to <= count"
+
+                let cam = Camera3D.orthographic Vector3.Zero 35.0f 25.0f 1.5f 8.0f
+
+                for label, sx, sy in
+                    [
+                        "Band", bandX, bandY
+                        "Point", pointX, pointY
+                    ] do
+                    let catScale = Scale3D.create BoxAspect.ChartDefault UpAxis.ZUp sx sy linZ
+                    let spec = Axis3D.defaultSpec catScale
+                    let frameWithGrid = Axis3D.build spec 640 480 cam
+                    let noGridSpec =
+                        { spec with
+                            X = { spec.X with ShowGrid = false }
+                            Y = { spec.Y with ShowGrid = false }
+                            Z = { spec.Z with ShowGrid = false }
+                        }
+                    let frameNoGrid = Axis3D.build noGridSpec 640 480 cam
+                    Expect.isGreaterThan (Axis3D.lineVertices frameWithGrid).Length (Axis3D.lineVertices frameNoGrid).Length $"{label}: categorical axes emit back-wall gridlines"
+
+                    let xLabels =
+                        Axis3D.labels frameWithGrid
+                        |> Seq.filter (fun l -> l.Axis = AxisId3D.X && not l.IsTitle)
+                        |> Seq.toList
+
+                    Expect.equal (xLabels |> List.map _.Text) [ "Q1"; "Q2"; "Q3" ] $"{label}: exact X category labels"
+                    Expect.equal (xLabels |> List.map _.Key) [ "axis/x/tick/0"; "axis/x/tick/1"; "axis/x/tick/2" ] $"{label}: stable X tick keys"
+
+                    let yLabels =
+                        Axis3D.labels frameWithGrid
+                        |> Seq.filter (fun l -> l.Axis = AxisId3D.Y && not l.IsTitle)
+                        |> Seq.toList
+
+                    Expect.equal (yLabels |> List.map _.Text) [ "North"; "South" ] $"{label}: exact Y category labels"
+
+                    let tickColorV4 = spec.Theme.TickColor.ToVector4 ()
+                    let tickSegCount =
+                        (Axis3D.lineVertices frameWithGrid).ToArray ()
+                        |> Array.chunkBySize 2
+                        |> Array.filter (fun pair -> (pair[0].Color - tickColorV4).LengthSquared () < 1e-6f)
+                        |> Array.length
+
+                    Expect.isGreaterThanOrEqual tickSegCount 5 $"{label}: tick hairlines emitted for categorical X + Y ticks"
+
+                    let barOpt = Glyph3D.tryBarFromCategories catScale "Q2" "South" 0.0 75.0 (RgbaColor (0.2f, 0.7f, 0.9f, 1.0f)) ShadingMode.Unlit 42u true
+                    Expect.isTrue barOpt.IsSome $"{label}: tryBarFromCategories succeeds for known categories"
+                    let bar = barOpt.Value
+                    Expect.isGreaterThan bar.WidthX 0.0 $"{label}: bar WidthX is positive"
+                    Expect.isGreaterThan bar.WidthY 0.0 $"{label}: bar WidthY is positive"
+
+                    let packed = Glyph3D.packBars catScale (ReadOnlySpan<BarDatum3D> [| bar |])
+                    Expect.equal packed.Length 1 $"{label}: Glyph3D.packBars packs categorical bar"
+                    Expect.equal packed.Span[0].PickId 42u $"{label}: packed bar keeps PickId"
+                    Expect.isGreaterThan (abs packed.Span[0].ModelCol0.X) 0.01f $"{label}: packed bar has positive world X width"
+                    Expect.isGreaterThan (abs packed.Span[0].ModelCol1.Y) 0.01f $"{label}: packed bar has positive world height"
+                    Expect.isGreaterThan (abs packed.Span[0].ModelCol2.Z) 0.01f $"{label}: packed bar has positive world Y depth"
+
+                    Expect.equal (Glyph3D.tryBarFromCategories catScale "Missing" "South" 0.0 10.0 RgbaColor.white ShadingMode.Unlit 0u false) ValueNone $"{label}: unknown X category returns ValueNone"
+                    Expect.equal (Glyph3D.tryBarFromCategories catScale "Q2" "Missing" 0.0 10.0 RgbaColor.white ShadingMode.Unlit 0u false) ValueNone $"{label}: unknown Y category returns ValueNone"
+                    Expect.equal (Glyph3D.tryBarFromCategories catScale "Q2" "South" Double.NaN 10.0 RgbaColor.white ShadingMode.Unlit 0u false) ValueNone $"{label}: NaN z0 returns ValueNone"
+
+                let nonCatScale = Scale3D.cartesian (0.0, 1.0) (0.0, 1.0) (0.0, 1.0)
+                Expect.equal (Glyph3D.tryBarFromCategories nonCatScale "Q1" "North" 0.0 1.0 RgbaColor.white ShadingMode.Unlit 0u false) ValueNone "non-categorical scale returns ValueNone"
+
+            testCase "Axis3D directional Protrusions shift Left, Right, Top, and Bottom titles outward without [20, 30] clamping"
+            <| fun () ->
+                let scale = Scale3D.cartesian (0.0, 10.0) (0.0, 10.0) (0.0, 10.0)
+                let baseSpec = Axis3D.defaultSpec scale
+
+                let titlePos (cam: Camera3D) (protrusions: Protrusions) (axisId: AxisId3D) =
+                    let frame = Axis3D.build { baseSpec with Protrusions = protrusions } 800 600 cam
+                    (Axis3D.labels frame |> Seq.find (fun l -> l.Axis = axisId && l.IsTitle)).ScreenPosition
+
+                let neutral = { Left = 25.0; Right = 25.0; Top = 25.0; Bottom = 25.0 }
+
+                // 1. Left & Bottom: camera in (+X, +Y, +Z) -> Z title projects outward to -X (Left), X title projects downward to +Y (Bottom)
+                let camAbove =
+                    {
+                        Position = Vector3 (3.0f, 3.0f, 5.0f)
+                        Target = Vector3.Zero
+                        Up = Vector3.UnitY
+                        FovYDeg = -2.2f
+                        NearPlane = 0.05f
+                        FarPlane = 50.0f
+                    }
+
+                let zBase = titlePos camAbove neutral AxisId3D.Z
+                let zSmallLeft = titlePos camAbove { neutral with Left = 5.0 } AxisId3D.Z
+                let zLargeLeft = titlePos camAbove { neutral with Left = 60.0 } AxisId3D.Z
+                Expect.isGreaterThan (zBase.X - zLargeLeft.X) 15.0 "Left=60 pushes Z title further left beyond 30px clamp"
+                Expect.isGreaterThan (zSmallLeft.X - zBase.X) 10.0 "Left=5 pulls Z title closer inward below 20px clamp"
+
+                let xBase = titlePos camAbove neutral AxisId3D.X
+                let xSmallBottom = titlePos camAbove { neutral with Bottom = 5.0 } AxisId3D.X
+                let xLargeBottom = titlePos camAbove { neutral with Bottom = 60.0 } AxisId3D.X
+                Expect.isGreaterThan (xLargeBottom.Y - xBase.Y) 15.0 "Bottom=60 pushes X title further down beyond 30px clamp"
+                Expect.isGreaterThan (xBase.Y - xSmallBottom.Y) 10.0 "Bottom=5 pulls X title closer up below 20px clamp"
+
+                // 2. Right: camera from (0.5, 0.1, 5.0) -> Y title outward normal (+1, -1, 0) points right (+X > 0.5)
+                let camRight =
+                    {
+                        Position = Vector3 (0.5f, 0.1f, 5.0f)
+                        Target = Vector3.Zero
+                        Up = Vector3.UnitY
+                        FovYDeg = -2.2f
+                        NearPlane = 0.05f
+                        FarPlane = 50.0f
+                    }
+
+                let yBase = titlePos camRight neutral AxisId3D.Y
+                let ySmallRight = titlePos camRight { neutral with Right = 5.0 } AxisId3D.Y
+                let yLargeRight = titlePos camRight { neutral with Right = 60.0 } AxisId3D.Y
+                Expect.isGreaterThan (yLargeRight.X - yBase.X) 10.0 "Right=60 pushes Y title further right beyond 30px clamp"
+                Expect.isGreaterThan (yBase.X - ySmallRight.X) 5.0 "Right=5 pulls Y title closer left below 20px clamp"
+
+                // 3. Top: camera looking upward from below (0.05, -10, 1) -> Z silhouette edge outward normal points upward (-Y on screen, ~ -0.70)
+                let camBelow =
+                    {
+                        Position = Vector3 (0.05f, -10.0f, 1.0f)
+                        Target = Vector3.Zero
+                        Up = Vector3.UnitY
+                        FovYDeg = -2.2f
+                        NearPlane = 0.05f
+                        FarPlane = 50.0f
+                    }
+
+                let zTopBase = titlePos camBelow neutral AxisId3D.Z
+                let zSmallTop = titlePos camBelow { neutral with Top = 5.0 } AxisId3D.Z
+                let zLargeTop = titlePos camBelow { neutral with Top = 60.0 } AxisId3D.Z
+                Expect.isGreaterThan (zTopBase.Y - zLargeTop.Y) 10.0 "Top=60 pushes Z title further up beyond 30px clamp"
+                Expect.isGreaterThan (zSmallTop.Y - zTopBase.Y) 5.0 "Top=5 pulls Z title closer down below 20px clamp"
+                Expect.isGreaterThan (zSmallTop.Y - zLargeTop.Y) 15.0 "Top=5..60 spans full directional range without clamping"
         ]

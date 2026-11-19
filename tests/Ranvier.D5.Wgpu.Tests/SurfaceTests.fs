@@ -446,4 +446,8 @@ let surfaceTests =
                 Expect.isError (SurfaceGrid.rectilinear (ReadOnlySpan<float> [| 0.0; 2.0; 1.0 |]) (ReadOnlySpan<float> [| 0.0; 1.0 |]) (ReadOnlySpan<float>(Array.zeroCreate 6)) ReadOnlySpan.Empty) "non-monotone xs returns Error"
                 Expect.isError (Surface3D.triangulatePoints spec ([| Point3.create 0.0 0.0 0.0; Point3.create 1.0 0.0 0.0 |] :> System.Collections.Generic.IReadOnlyList<Point3>) ReadOnlySpan.Empty) "< 3 points returns Error"
                 Expect.isError (Surface3D.triangulatePoints spec ([| Point3.create 0.0 0.0 0.0; Point3.create 0.5 0.5 0.0; Point3.create 1.0 1.0 0.0 |] :> System.Collections.Generic.IReadOnlyList<Point3>) ReadOnlySpan.Empty) "collinear points returns Error"
+
+                match SurfaceGrid.fromFunction 20000 20000 (0.0, 1.0) (0.0, 1.0) (fun x _ -> x) ValueNone with
+                | Error [ LayoutError.BudgetExceeded _ ] -> ()
+                | other -> failtestf "Expected BudgetExceeded for oversized 20000x20000 grid indices, got %A" other
         ]

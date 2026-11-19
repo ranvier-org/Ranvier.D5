@@ -207,7 +207,7 @@ module internal MarksKernel =
             && Check3D.isFinite32 q.W
         then
             let lenSq = q.LengthSquared ()
-            if lenSq > 1e-12f then struct (true, Quaternion.Normalize q) else struct (true, Quaternion.Identity)
+            if Check3D.isFinite32 lenSq && lenSq > 1e-12f then struct (true, Quaternion.Normalize q) else struct (true, Quaternion.Identity)
         else
             struct (false, Quaternion.Identity)
 
@@ -480,6 +480,54 @@ module Glyph3D =
                     count <- count + 1
 
             MarksKernel.trimMemory out count
+
+    /// <summary>
+    /// Builds a <c>BarDatum3D</c> centered on <c>xCategory</c> and <c>yCategory</c> from categorical <c>Scale3D</c> X/Y axes,
+    /// returning <c>ValueNone</c> when either axis is not <c>AxisScale3D.Categorical</c>, either category is unknown, or <c>z0</c>/<c>z1</c> is non-finite.
+    /// </summary>
+    let tryBarFromCategories
+        (scale: Scale3D)
+        (xCategory: string)
+        (yCategory: string)
+        (z0: float)
+        (z1: float)
+        (color: RgbaColor)
+        (shading: ShadingMode)
+        (pickId: uint32)
+        (selected: bool)
+        : BarDatum3D voption =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if isNull xCategory || isNull yCategory || not (Check3D.isFinite z0 && Check3D.isFinite z1) then
+            ValueNone
+        else
+            match scale.XScale, scale.YScale with
+            | AxisScale3D.Categorical bandX, AxisScale3D.Categorical bandY ->
+                match Scale.bandPosition bandX xCategory, Scale.bandPosition bandY yCategory with
+                | Some posX, Some posY ->
+                    let bwX = Scale.bandwidth bandX
+                    let bwY = Scale.bandwidth bandY
+                    let wX = if bwX > 0.0 then bwX else 1.0 / float (max 1 (Scale.bandCategories bandX).Length) * 0.6
+                    let wY = if bwY > 0.0 then bwY else 1.0 / float (max 1 (Scale.bandCategories bandY).Length) * 0.6
+                    let cx = posX + bwX * 0.5
+                    let cy = posY + bwY * 0.5
+
+                    ValueSome
+                        {
+                            X = cx
+                            Y = cy
+                            Z0 = z0
+                            Z1 = z1
+                            WidthX = wX
+                            WidthY = wY
+                            Color = color
+                            Shading = shading
+                            PickId = pickId
+                            Selected = selected
+                        }
+                | _ -> ValueNone
+            | _ -> ValueNone
 
     /// <summary>
     /// Packs axis-aligned 3D columns for <c>Primitives.unitBox ()</c> anchored between <c>Z0</c> and <c>Z1</c> under both <c>UpAxis.ZUp</c> and <c>UpAxis.YUp</c>.

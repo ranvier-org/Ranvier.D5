@@ -383,4 +383,16 @@ let channelTests =
                 pass |> WgpuContext.render ctx |> ignore
                 let struct (lr, _, lb, _) = pixelAt ctx 32 32
                 Expect.isGreaterThan lr (lb + 40uy) "Lit mode preserves ColorShader warm red shift"
+
+                // 5. ColorShader.disabledUniforms () disables LUT remapping cleanly
+                let disabled = ColorShader.disabledUniforms ()
+                Expect.equal disabled.Length 16 "disabledUniforms emits 16 Vector4 slots"
+                Expect.equal disabled.Span[0] Vector4.Zero "disabledUniforms slot 0 is zeroed"
+                ctx.SetUserUniforms (disabled.Span)
+                stockBatch.SetSingle (Instance3D.identity expectedCoolColor 0.5f 1u InstanceFlags.Unlit)
+                stockPass |> WgpuContext.render ctx |> ignore
+                let struct (dr, dg, db, _) = pixelAt ctx 32 32
+                Expect.isLessThanOrEqual (abs (int dr - int scr)) 2 "disabledUniforms restores raw instance color R"
+                Expect.isLessThanOrEqual (abs (int dg - int scg)) 2 "disabledUniforms restores raw instance color G"
+                Expect.isLessThanOrEqual (abs (int db - int scb)) 2 "disabledUniforms restores raw instance color B"
         ]

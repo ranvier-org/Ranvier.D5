@@ -7,7 +7,11 @@ open Ranvier.D5
 open Ranvier.Wgpu
 
 #if FABLE_COMPILER
-/// <summary>Browser/Fable compatibility stand-ins for <c>System.Numerics.Quaternion</c> members not lowered by Fickl 0.11.0.</summary>
+/// <summary>
+/// Browser/Fable compatibility stand-ins for <c>System.Numerics.Quaternion</c> members not lowered by Fickl 0.11.0.
+/// Browser/Fable callers referencing <c>Quaternion</c> directly should <c>open System.Numerics</c> before <c>open Ranvier.D5.Wgpu</c>
+/// so <c>FableCompat3D.Quaternion</c> shadows <c>System.Numerics.Quaternion</c> cleanly.
+/// </summary>
 [<AutoOpen>]
 module FableCompat3D =
     /// <summary>Single-precision unit quaternion stand-in matching <c>System.Numerics.Quaternion</c> layout and conventions.</summary>
