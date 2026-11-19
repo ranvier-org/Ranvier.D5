@@ -19,6 +19,7 @@
     <Compile Include="SphericalLayout3D.fs" />
     <Compile Include="EdgeBundling3D.fs" />
     <Compile Include="Manifold3D.fs" />
+    <Compile Include="PoincareBallLift.fs" />
     <Compile Include="Scene3D.fs" />
   </ItemGroup>
   <ItemGroup>
