@@ -82,10 +82,23 @@ let private runNativeAcceptance () =
     let hoverHits = ResizeArray<PickHit voption>()
     let clickHits = ResizeArray<PickHit voption>()
 
-    let camera, surfaceBatch, sphereMesh, probeSink, batchesMem, passSig =
+    let countBrightPixels (threshold: byte) (pixels: byte array) =
+        let mutable count = 0
+
+        for i in 0 .. 4 .. pixels.Length - 4 do
+            if pixels[i] > threshold || pixels[i + 1] > threshold || pixels[i + 2] > threshold then
+                count <- count + 1
+
+        count
+
+    let mutable tickFormatCalls = 0
+
+    let dataStepSig, gridSig, camera, surfaceBatch, sphereMesh, probeSink, batchesMem, passSig =
         graph.Run (fun () ->
+            let stepSig = Api.createSignal 0
+            let gSig = Api.createSignal waveGrid
             let cam = Reactive3D.editableCamera (fun () -> PlotCamera3D.defaultValue)
-            let surf = Reactive3D.bindSurface wgpu (fun () -> surfaceSpec) (fun () -> waveGrid)
+            let surf = Reactive3D.bindSurface wgpu (fun () -> surfaceSpec) (fun () -> gSig.Value)
             let mesh = wgpu.UploadMesh (Glyph3D.unitMesh GlyphShape3D.Sphere)
             Api.onCleanup (fun () -> mesh.Dispose ())
 
@@ -109,9 +122,22 @@ let private runNativeAcceptance () =
             let sink = Reactive3D.bindInstances wgpu 1uy mesh BlendMode.Opaque false false (fun () -> scale) probeRows
             let batches = ReadOnlyMemory<InstanceBatch> [| surf.Batch; sink.Batch |]
 
+            let baseAxis = Axis3D.defaultSpec scale
+
+            let axisSpec =
+                { baseAxis with
+                    X =
+                        { baseAxis.X with
+                            FormatTick =
+                                Some (fun v ->
+                                    tickFormatCalls <- tickFormatCalls + 1
+                                    v.ToString ("F1", System.Globalization.CultureInfo.InvariantCulture))
+                        }
+                }
+
             let pass: PlotPass3D =
                 {
-                    AxisSpec = Axis3D.defaultSpec scale
+                    AxisSpec = axisSpec
                     ClearColor = RgbaColor.darkBackdrop
                     Lighting = ValueSome LightingRig.studioDefault
                     SectionPlane = ValueNone
@@ -122,7 +148,7 @@ let private runNativeAcceptance () =
                 }
 
             let passSig = Api.createSignal pass
-            cam, surf, mesh, sink, batches, passSig)
+            stepSig, gSig, cam, surf, mesh, sink, batches, passSig)
 
     ignore surfaceBatch
     ignore sphereMesh
@@ -147,7 +173,7 @@ let private runNativeAcceptance () =
             (fun errors -> raise (AggregateException errors))
             container
             None
-            (fun ctx -> Program.run (PlotView3D.create win wgpu config (fun () -> passSig.Value)) ctx.Backend)
+            (fun ctx -> Program.run (PlotView3D.create win wgpu config (fun () -> ignore dataStepSig.Value; passSig.Value)) ctx.Backend)
 
     pumpFrames win 3
 
@@ -324,6 +350,107 @@ let private runNativeAcceptance () =
         let camAfterP1Drag = graph.Run (fun () -> camera.Value)
         Expect.notEqual camAfterP1Drag.AzimuthRad camAtP1Down.AzimuthRad "original activePointerId still orbits after chorded secondary pointer"
         Expect.equal camAfterP1Drag.PanOffset camAtP1Down.PanOffset "chorded secondary pointerdown does not flip dragPan on"
+
+    // 6. Data-only wave step with unchanged Axis3DSpec reference (even with FormatTick = Some) and camera:
+    //    updates rendered surface pixels while keeping SVG axis DOM nodes untouched
+    graph.Run (fun () -> camera.Reset ())
+    win.Host.Mouse (0, 2, 2, 0, 0, 0) |> ignore
+    pumpFrames win 3
+
+    let pixelsBeforeDataStep, _, _ = readWindowPixels win
+    let renderCallsBeforeDataStep = wgpu.RenderCalls
+    let tickFormatCallsBeforeStep = tickFormatCalls
+    Expect.isGreaterThan tickFormatCallsBeforeStep 0 "FormatTick ran on initial/orbited Axis3D builds"
+    let titleGroupBeforeStep = container.querySelector "[data-d5-key='axis/x/title']"
+    let titleTextBeforeStep = titleGroupBeforeStep.querySelector "text"
+    let titleXStep = titleTextBeforeStep.getAttribute "x"
+    let titleYStep = titleTextBeforeStep.getAttribute "y"
+    let tickGroupBeforeStep = container.querySelector "[data-d5-key='axis/x/tick/0']"
+    Expect.isNotNull tickGroupBeforeStep "SVG overlay holds [data-d5-key='axis/x/tick/0']"
+    let tickTextBeforeStep = tickGroupBeforeStep.querySelector "text"
+    Expect.isNotNull tickTextBeforeStep "axis/x/tick/0 contains SVG <text> element"
+    let tickXStep = tickTextBeforeStep.getAttribute "x"
+    let tickYStep = tickTextBeforeStep.getAttribute "y"
+    let tickLabelStep = tickTextBeforeStep.textContent
+
+    let waveGrid2 =
+        SurfaceGrid.fromFunction
+            32
+            32
+            (-1.0, 1.0)
+            (-1.0, 1.0)
+            (fun x y -> -1.0 * cos (x * 2.5) * sin (y * 2.5))
+            ValueNone
+        |> unwrapOk "waveGrid2"
+
+    graph.Run (fun () ->
+        Api.batch (fun () ->
+            gridSig.Value <- waveGrid2
+            dataStepSig.Value <- dataStepSig.Value + 1))
+
+    pumpFrames win 3
+
+    Expect.isGreaterThan wgpu.RenderCalls renderCallsBeforeDataStep "data-only wave step schedules a WebGPU re-render"
+    Expect.equal tickFormatCalls tickFormatCallsBeforeStep "data-only wave step reuses cached Axis3D.build without re-invoking FormatTick"
+    let pixelsAfterDataStep, _, _ = readWindowPixels win
+    Expect.isFalse (pixelsBeforeDataStep = pixelsAfterDataStep) "data-only wave step updates rendered surface pixels"
+
+    let titleGroupAfterStep = container.querySelector "[data-d5-key='axis/x/title']"
+    let titleTextAfterStep = titleGroupAfterStep.querySelector "text"
+    let tickGroupAfterStep = container.querySelector "[data-d5-key='axis/x/tick/0']"
+    let tickTextAfterStep = tickGroupAfterStep.querySelector "text"
+    Expect.isTrue (Object.ReferenceEquals (titleGroupBeforeStep, titleGroupAfterStep)) "axis/x/title group DOM node untouched across data-only wave step"
+    Expect.isTrue (Object.ReferenceEquals (titleTextBeforeStep, titleTextAfterStep)) "axis/x/title <text> DOM node untouched across data-only wave step"
+    Expect.equal (titleTextAfterStep.getAttribute "x") titleXStep "axis/x/title x unchanged across data-only wave step"
+    Expect.equal (titleTextAfterStep.getAttribute "y") titleYStep "axis/x/title y unchanged across data-only wave step"
+    Expect.isTrue (Object.ReferenceEquals (tickGroupBeforeStep, tickGroupAfterStep)) "axis/x/tick/0 group DOM node untouched across data-only wave step"
+    Expect.isTrue (Object.ReferenceEquals (tickTextBeforeStep, tickTextAfterStep)) "axis/x/tick/0 <text> DOM node untouched across data-only wave step"
+    Expect.equal (tickTextAfterStep.getAttribute "x") tickXStep "axis/x/tick/0 x unchanged across data-only wave step"
+    Expect.equal (tickTextAfterStep.getAttribute "y") tickYStep "axis/x/tick/0 y unchanged across data-only wave step"
+    Expect.equal tickTextAfterStep.textContent tickLabelStep "axis/x/tick/0 text unchanged across data-only wave step"
+
+    // ExtraOverlayMarks transition [] -> [mark] -> [] reuses cached Axis3D.build while mounting and clearing the mark
+    let hudMark = Mark.text "hud/cache-check" (Point.create 16.0 20.0) "cached"
+
+    graph.Run (fun () ->
+        let cur = passSig.Value
+        passSig.Value <- { cur with ExtraOverlayMarks = [ hudMark ] })
+
+    pumpFrames win 1
+    Expect.isNotNull (container.querySelector "[data-d5-key='hud/cache-check']") "ExtraOverlayMarks mounts HUD mark on cached axis frame"
+    Expect.equal tickFormatCalls tickFormatCallsBeforeStep "adding ExtraOverlayMarks reuses cached Axis3D.build"
+
+    graph.Run (fun () ->
+        let cur = passSig.Value
+        passSig.Value <- { cur with ExtraOverlayMarks = [] })
+
+    pumpFrames win 1
+    Expect.isNull (container.querySelector "[data-d5-key='hud/cache-check']") "clearing ExtraOverlayMarks removes HUD mark cleanly"
+    Expect.equal tickFormatCalls tickFormatCallsBeforeStep "clearing ExtraOverlayMarks reuses cached Axis3D.build"
+
+    // 7. Enabling SectionPlane on PlotPass3D clips the wave while keeping Axis3D cuboid lines visible
+    let brightUnclipped = countBrightPixels 90uy pixelsAfterDataStep
+    Expect.isGreaterThan brightUnclipped 1500 "unclipped wave has >1500 bright surface/axis pixels"
+
+    graph.Run (fun () ->
+        let cur = passSig.Value
+        passSig.Value <- { cur with SectionPlane = ValueSome (SectionPlane.create Vector3.UnitX 0.0f) })
+
+    pumpFrames win 3
+    let pixelsHalfClipped, _, _ = readWindowPixels win
+    let brightHalfClipped = countBrightPixels 90uy pixelsHalfClipped
+    Expect.isFalse (pixelsAfterDataStep = pixelsHalfClipped) "half-space SectionPlane changes rendered pixels"
+    Expect.isLessThan brightHalfClipped brightUnclipped "half-space SectionPlane clips bright wave surface pixels revealing back-wall panel"
+
+    graph.Run (fun () ->
+        let cur = passSig.Value
+        passSig.Value <- { cur with SectionPlane = ValueSome (SectionPlane.create Vector3.UnitY -10.0f) })
+
+    pumpFrames win 3
+    let pixelsFullClipped, _, _ = readWindowPixels win
+    let brightLinesFullClipped = countBrightPixels 90uy pixelsFullClipped
+    Expect.isLessThan brightLinesFullClipped brightHalfClipped "full SectionPlane clips remaining bright wave + probe pixels"
+    Expect.isGreaterThan brightLinesFullClipped 50 "section-exempt Axis3D cuboid spines/gridlines/ticks stay bright and visible"
 
     // Review Focus #5: idempotent double mounted.Dispose(), then graph.Dispose(), wgpu.Dispose(), win.Dispose()
     mounted.Dispose ()

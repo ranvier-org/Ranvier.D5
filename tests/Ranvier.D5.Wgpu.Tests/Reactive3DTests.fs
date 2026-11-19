@@ -449,11 +449,34 @@ let reactive3DTests =
                     let axisFrame = Axis3D.build (Axis3D.defaultSpec scale) 64 64 topCam
                     let spikes = Probe3D.hoverSpikes scale axisFrame RgbaColor.white surfHit.WorldPosition
                     Expect.equal spikes.Length 6 "hoverSpikes emits 6 LineVertex3D endpoints (3 spikes)"
+
+                    for i = 0 to spikes.Length - 1 do
+                        Expect.equal spikes.Span[i].Pad 1.0f $"hoverSpikes vertex {i} sets Pad = 1.0f (ignoreSectionPlane)"
+
                     let struct (bx, fy, bz) = Axis3D.backWallPlanes axisFrame
                     expectVec3Close 1e-5f spikes.Span[0].Position surfHit.WorldPosition "spike 0 starts at worldPos"
                     expectVec3Close 1e-5f spikes.Span[1].Position (Vector3 (bx, surfHit.WorldPosition.Y, surfHit.WorldPosition.Z)) "spike 0 drops to back X wall"
                     expectVec3Close 1e-5f spikes.Span[3].Position (Vector3 (surfHit.WorldPosition.X, fy, surfHit.WorldPosition.Z)) "spike 1 drops to floor Y wall"
                     expectVec3Close 1e-5f spikes.Span[5].Position (Vector3 (surfHit.WorldPosition.X, surfHit.WorldPosition.Y, bz)) "spike 2 drops to back Z wall"
+
+                    // Hover spikes stay visible on GPU even when an active SectionPlane clips the entire cuboid
+                    use spikeBatch = ctx.CreateLineBatch ()
+                    spikeBatch.UpdateVertices spikes.Span
+                    let clipAllPlane = SectionPlane.create Vector3.UnitY -10.0f
+
+                    ScenePass.create topCam
+                    |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                    |> ScenePass.withSection clipAllPlane
+                    |> ScenePass.withLines [| spikeBatch |]
+                    |> WgpuContext.render ctx
+                    |> ignore
+
+                    let spikePixelsVisible =
+                        ctx.RgbaPixels
+                        |> Array.chunkBySize 4
+                        |> Array.exists (fun px -> px[0] > 100uy && px[1] > 100uy && px[2] > 100uy)
+
+                    Expect.isTrue spikePixelsVisible "section-exempt hoverSpikes render visibly under clipping SectionPlane"
 
                     // Updating gridSig updates SurfaceBatch in place
                     let grid2 =
@@ -626,4 +649,137 @@ let reactive3DTests =
                 let nanAz = { orbitedTurn with AzimuthRad = Single.NaN }
                 let nanGpu = PlotCamera3D.toCamera3D scale nanAz
                 Expect.isTrue (Single.IsFinite nanGpu.Position.X && Single.IsFinite nanGpu.Position.Y && Single.IsFinite nanGpu.Position.Z) "non-finite AzimuthRad sanitizes cleanly"
+
+            testCase "KeyedSlotSync handles empty -> add -> empty -> add, preserveOrder RemoveAt, and temporary-NaN slot recovery"
+            <| fun () ->
+                use ctx = new WgpuContext (initialWidth = 96, initialHeight = 96)
+                let scale = Scale3D.cartesian (-2.0, 2.0) (-2.0, 2.0) (-1.0, 1.0)
+                let cam = Camera3D.orthographic Vector3.Zero 0.0f 0.0f 1.5f 5.0f
+
+                let makeGlyph x color : GlyphDatum3D =
+                    {
+                        Position = Point3.create x 0.0 0.0
+                        Scale = Vector3 (0.35f, 0.35f, 0.35f)
+                        Rotation = Quaternion.Identity
+                        Color = color
+                        Shading = ShadingMode.Unlit
+                        PickId = 0u
+                        Selected = false
+                    }
+
+                let pickKeyAt (sink: KeyedInstanceSink<string>) (pass: ScenePass) (xData: float) =
+                    let scr = Camera3D.projectToScreen 96 96 cam (Scale3D.map scale (Point3.create xData 0.0 0.0)) |> ValueOption.get
+                    let hit = pass |> WgpuContext.pick (int (MathF.Round scr.X)) (int (MathF.Round scr.Y)) ctx
+                    hit |> ValueOption.bind (Probe3D.resolveKeyed scale sink) |> ValueOption.map _.Key
+
+                use graph = new Graph ()
+
+                graph.Run (fun () ->
+                    use boxMesh = ctx.UploadMesh (Glyph3D.unitMesh GlyphShape3D.Box)
+
+                    // 1. Empty initial collection -> add -> remove all down to 0 -> add back (both preserveOrder=false and preserveOrder=true)
+                    for preserveOrder in [ false; true ] do
+                        let emptyColl = Api.createKeyedCollection (fun struct (k: string, _: GlyphDatum3D) -> k)
+                        let emptyRows = emptyColl.Rows |> Projection.map (fun struct (_, g) -> g)
+                        let layerId = if preserveOrder then 2uy else 1uy
+                        let sink = Reactive3D.bindInstances ctx layerId boxMesh BlendMode.Opaque false preserveOrder (fun () -> scale) emptyRows
+
+                        Expect.equal sink.ActiveCount 0 $"preserveOrder={preserveOrder}: starts empty with ActiveCount = 0"
+                        Expect.equal sink.Batch.Count 0 $"preserveOrder={preserveOrder}: starts empty with Batch.Count = 0"
+
+                        emptyColl.AddOrUpdate (struct ("a", makeGlyph -1.0 RgbaColor.white))
+                        emptyColl.AddOrUpdate (struct ("b", makeGlyph 1.0 RgbaColor.white))
+                        Expect.equal sink.ActiveCount 2 $"preserveOrder={preserveOrder}: ActiveCount = 2 after adding"
+                        Expect.equal sink.Batch.Count 2 $"preserveOrder={preserveOrder}: Batch.Count = 2 after adding"
+
+                        Expect.isTrue (emptyColl.Remove "a") "remove a"
+                        Expect.isTrue (emptyColl.Remove "b") "remove b"
+                        Expect.equal sink.ActiveCount 0 $"preserveOrder={preserveOrder}: ActiveCount returns to 0"
+                        Expect.equal sink.Batch.Count 0 $"preserveOrder={preserveOrder}: Batch.Count returns to 0"
+                        Expect.equal (sink.TryResolvePick ((uint32 layerId <<< 24) ||| 1u)) ValueNone $"preserveOrder={preserveOrder}: retired slot 0 returns ValueNone"
+
+                        emptyColl.AddOrUpdate (struct ("c", makeGlyph 0.0 RgbaColor.white))
+                        Expect.equal sink.ActiveCount 1 $"preserveOrder={preserveOrder}: ActiveCount = 1 after re-adding"
+                        Expect.equal sink.Batch.Count 1 $"preserveOrder={preserveOrder}: Batch.Count = 1 after re-adding"
+                        Expect.equal (sink.TryResolvePick ((uint32 layerId <<< 24) ||| 1u)) (ValueSome "c") $"preserveOrder={preserveOrder}: re-added item maps to slot 0"
+
+                    // 2. preserveOrder = true RemoveAt middle item preserves exact slot order of trailing items
+                    let removeColl = Api.createKeyedCollection (fun struct (k: string, _: GlyphDatum3D) -> k)
+                    removeColl.AddOrUpdate (struct ("k0", makeGlyph -1.5 RgbaColor.white))
+                    removeColl.AddOrUpdate (struct ("k1", makeGlyph -0.5 RgbaColor.white))
+                    removeColl.AddOrUpdate (struct ("k2", makeGlyph 0.5 RgbaColor.white))
+                    removeColl.AddOrUpdate (struct ("k3", makeGlyph 1.5 RgbaColor.white))
+                    let removeRows = removeColl.Rows |> Projection.map (fun struct (_, g) -> g)
+                    let removeSink = Reactive3D.bindInstances ctx 3uy boxMesh BlendMode.Opaque false true (fun () -> scale) removeRows
+
+                    Expect.isTrue (removeColl.Remove "k1") "remove middle k1"
+                    Expect.equal removeSink.ActiveCount 3 "ActiveCount = 3 after removing middle item"
+                    Expect.equal removeSink.Batch.Count 3 "Batch.Count = 3 after removing middle item"
+                    Expect.equal (removeSink.TryResolvePick ((3u <<< 24) ||| 1u)) (ValueSome "k0") "slot 0 stays k0"
+                    Expect.equal (removeSink.TryResolvePick ((3u <<< 24) ||| 2u)) (ValueSome "k2") "slot 1 shifts to k2 (not tail-swapped k3)"
+                    Expect.equal (removeSink.TryResolvePick ((3u <<< 24) ||| 3u)) (ValueSome "k3") "slot 2 shifts to k3"
+                    Expect.equal (removeSink.TryResolvePick ((3u <<< 24) ||| 4u)) ValueNone "retired slot 3 returns ValueNone"
+
+                    let removePass =
+                        ScenePass.create cam
+                        |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                        |> ScenePass.withBatches [| removeSink.Batch |]
+
+                    Expect.equal (pickKeyAt removeSink removePass -1.5) (ValueSome "k0") "GPU pick resolves k0 after middle RemoveAt"
+                    Expect.equal (pickKeyAt removeSink removePass 0.5) (ValueSome "k2") "GPU pick resolves k2 after middle RemoveAt"
+                    Expect.equal (pickKeyAt removeSink removePass 1.5) (ValueSome "k3") "GPU pick resolves k3 after middle RemoveAt"
+
+                    // 3. preserveOrder = true [k0; k1; k2] where k1 mutates to NaN then recovers without OrderChanged
+                    let nanColl = Api.createKeyedCollection (fun struct (k: string, _: GlyphDatum3D) -> k)
+                    nanColl.AddOrUpdate (struct ("k0", makeGlyph -1.2 (RgbaColor (1.0f, 0.2f, 0.2f, 1.0f))))
+                    nanColl.AddOrUpdate (struct ("k1", makeGlyph 0.0 (RgbaColor (0.2f, 1.0f, 0.2f, 1.0f))))
+                    nanColl.AddOrUpdate (struct ("k2", makeGlyph 1.2 (RgbaColor (0.2f, 0.2f, 1.0f, 1.0f))))
+                    let nanRows = nanColl.Rows |> Projection.map (fun struct (_, g) -> g)
+                    let nanSink = Reactive3D.bindInstances ctx 4uy boxMesh BlendMode.Opaque false true (fun () -> scale) nanRows
+
+                    let nanPass =
+                        ScenePass.create cam
+                        |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                        |> ScenePass.withBatches [| nanSink.Batch |]
+
+                    // Mutate k1 to NaN (OrderChanged = false) -> ActiveCount becomes 2: [k0; k2]
+                    let nanGlyph = { makeGlyph 0.0 (RgbaColor (0.2f, 1.0f, 0.2f, 1.0f)) with Scale = Vector3 (Single.NaN, 0.35f, 0.35f) }
+                    nanColl.AddOrUpdate (struct ("k1", nanGlyph))
+                    Expect.equal nanSink.ActiveCount 2 "ActiveCount drops to 2 when k1 becomes NaN"
+                    Expect.equal nanSink.Batch.Count 2 "Batch.Count drops to 2 when k1 becomes NaN"
+                    Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 1u)) (ValueSome "k0") "slot 0 remains k0 while k1 is NaN"
+                    Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 2u)) (ValueSome "k2") "slot 1 shifts to k2 while k1 is NaN"
+                    Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 3u)) ValueNone "slot 2 is retired while k1 is NaN"
+                    Expect.equal (pickKeyAt nanSink nanPass 0.0) ValueNone "GPU pick at k1 position is ValueNone while NaN"
+                    Expect.equal (pickKeyAt nanSink nanPass 1.2) (ValueSome "k2") "GPU pick resolves k2 at slot 1 while k1 is NaN"
+
+                    // Recover k1 back to finite without OrderChanged -> [k0; k1; k2] exact order restored
+                    nanColl.AddOrUpdate (struct ("k1", makeGlyph 0.0 (RgbaColor (0.2f, 1.0f, 0.2f, 1.0f))))
+                    Expect.equal nanSink.ActiveCount 3 "ActiveCount recovers to 3 when k1 becomes finite"
+                    Expect.equal nanSink.Batch.Count 3 "Batch.Count recovers to 3 when k1 becomes finite"
+                    Expect.equal nanSink.LastUpdatedSlots 2 "recovery uploads only [insertSlot .. activeCount - 1] (slots 1 and 2)"
+                    Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 1u)) (ValueSome "k0") "slot 0 is k0 after recovery"
+                    Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 2u)) (ValueSome "k1") "slot 1 is k1 after recovery"
+                    Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 3u)) (ValueSome "k2") "slot 2 is k2 after recovery"
+                    Expect.equal (pickKeyAt nanSink nanPass -1.2) (ValueSome "k0") "GPU pick resolves k0 at slot 0 after recovery"
+                    Expect.equal (pickKeyAt nanSink nanPass 0.0) (ValueSome "k1") "GPU pick resolves k1 at slot 1 after recovery"
+                    Expect.equal (pickKeyAt nanSink nanPass 1.2) (ValueSome "k2") "GPU pick resolves k2 at slot 2 after recovery"
+
+                    // Multi-key NaN invalidation and batched recovery also preserves exact order [k0; k1; k2]
+                    Api.batch (fun () ->
+                        nanColl.AddOrUpdate (struct ("k0", { makeGlyph -1.2 RgbaColor.white with Scale = Vector3 (Single.NaN, 0.35f, 0.35f) }))
+                        nanColl.AddOrUpdate (struct ("k1", { makeGlyph 0.0 RgbaColor.white with Scale = Vector3 (Single.NaN, 0.35f, 0.35f) })))
+
+                    Expect.equal nanSink.ActiveCount 1 "only k2 remains active"
+                    Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 1u)) (ValueSome "k2") "slot 0 is k2 when k0 and k1 are NaN"
+
+                    Api.batch (fun () ->
+                        nanColl.AddOrUpdate (struct ("k1", makeGlyph 0.0 RgbaColor.white))
+                        nanColl.AddOrUpdate (struct ("k0", makeGlyph -1.2 RgbaColor.white)))
+
+                    Expect.equal nanSink.ActiveCount 3 "batched recovery restores all 3 active slots"
+                    Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 1u)) (ValueSome "k0") "slot 0 = k0 after batched recovery"
+                    Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 2u)) (ValueSome "k1") "slot 1 = k1 after batched recovery"
+                    Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 3u)) (ValueSome "k2") "slot 2 = k2 after batched recovery"
+                )
         ]

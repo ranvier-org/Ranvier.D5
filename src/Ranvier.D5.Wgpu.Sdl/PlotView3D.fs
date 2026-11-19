@@ -25,8 +25,9 @@ type PlotPass3D =
         Lighting: LightingRig voption
         /// <summary>
         /// Optional world-space clipping plane.
-        /// Axis back-wall panels set <c>InstanceFlags.IgnoreSectionPlane</c>, whereas <c>LineBatch</c> segments (<c>Axis3D.lineVertices</c> and hover spikes)
-        /// share this pass <c>SectionPlane</c> in <c>Ranvier.Wgpu 0.3.0</c> and are clipped in the negative half-space.
+        /// <c>Axis3D</c> back-wall panels (<c>InstanceFlags.IgnoreSectionPlane</c>), cuboid spines, gridlines, ticks, and <c>Probe3D</c> hover spikes
+        /// (<c>LineVertex3D</c> <c>ignoreSectionPlane = true</c>) all opt out of <c>SectionPlane</c> clipping, while user data <c>ExtraBatches</c>,
+        /// <c>ExtraLines</c> (unless marked <c>ignoreSectionPlane = true</c>), and <c>ExtraDiscs</c> are clipped in the negative half-space.
         /// </summary>
         SectionPlane: SectionPlane voption
         /// <summary>Additional hardware-instanced mesh batches rendered alongside axis wall panels.</summary>
@@ -61,6 +62,44 @@ type private PlotViewProps3D =
         Config: PlotViewConfig3D
         ReadScene: unit -> PlotPass3D
     }
+
+module private PlotView3DKernel =
+    let syncMergedPrefix<'T when 'T: not struct>
+        (prefix1: 'T)
+        (prefix2Opt: 'T voption)
+        (extra: ReadOnlyMemory<'T>)
+        (cachedExtra: byref<'T array>)
+        (merged: byref<'T array>)
+        =
+        let span = extra.Span
+        let mutable same = span.Length = cachedExtra.Length
+
+        if same then
+            let mutable i = 0
+
+            while same && i < span.Length do
+                if not (Object.ReferenceEquals (span[i], cachedExtra[i])) then
+                    same <- false
+
+                i <- i + 1
+
+        if not same then
+            let prefixCount = if prefix2Opt.IsSome then 2 else 1
+            let nextExtra = Array.zeroCreate<'T> span.Length
+            let nextMerged = Array.zeroCreate<'T> (prefixCount + span.Length)
+            nextMerged[0] <- prefix1
+
+            match prefix2Opt with
+            | ValueSome prefix2 -> nextMerged[1] <- prefix2
+            | ValueNone -> ()
+
+            for i = 0 to span.Length - 1 do
+                let item = span[i]
+                nextExtra[i] <- item
+                nextMerged[prefixCount + i] <- item
+
+            cachedExtra <- nextExtra
+            merged <- nextMerged
 
 [<Sealed>]
 type private PlotViewInstance3D
@@ -102,59 +141,14 @@ type private PlotViewInstance3D
     let mutable mergedBatches: InstanceBatch array = [| panelBatch |]
     let mutable cachedExtraLines: LineBatch array = [||]
     let mutable mergedLines: LineBatch array = [| axisLineBatch; spikeLineBatch |]
-
-    let syncMergedBatches (extra: ReadOnlyMemory<InstanceBatch>) =
-        let span = extra.Span
-        let mutable same = span.Length = cachedExtraBatches.Length
-
-        if same then
-            let mutable i = 0
-
-            while same && i < span.Length do
-                if not (Object.ReferenceEquals (span[i], cachedExtraBatches[i])) then
-                    same <- false
-
-                i <- i + 1
-
-        if not same then
-            let nextExtra = Array.zeroCreate<InstanceBatch> span.Length
-            let nextMerged = Array.zeroCreate<InstanceBatch> (1 + span.Length)
-            nextMerged[0] <- panelBatch
-
-            for i = 0 to span.Length - 1 do
-                let b = span[i]
-                nextExtra[i] <- b
-                nextMerged[1 + i] <- b
-
-            cachedExtraBatches <- nextExtra
-            mergedBatches <- nextMerged
-
-    let syncMergedLines (extra: ReadOnlyMemory<LineBatch>) =
-        let span = extra.Span
-        let mutable same = span.Length = cachedExtraLines.Length
-
-        if same then
-            let mutable i = 0
-
-            while same && i < span.Length do
-                if not (Object.ReferenceEquals (span[i], cachedExtraLines[i])) then
-                    same <- false
-
-                i <- i + 1
-
-        if not same then
-            let nextExtra = Array.zeroCreate<LineBatch> span.Length
-            let nextMerged = Array.zeroCreate<LineBatch> (2 + span.Length)
-            nextMerged[0] <- axisLineBatch
-            nextMerged[1] <- spikeLineBatch
-
-            for i = 0 to span.Length - 1 do
-                let l = span[i]
-                nextExtra[i] <- l
-                nextMerged[2 + i] <- l
-
-            cachedExtraLines <- nextExtra
-            mergedLines <- nextMerged
+    let mutable hasCachedAxis = false
+    let mutable cachedAxisSpec = Unchecked.defaultof<Axis3DSpec>
+    let mutable cachedGpuCam = Unchecked.defaultof<Camera3D>
+    let mutable cachedWidth = -1
+    let mutable cachedHeight = -1
+    let mutable cachedFrame = Unchecked.defaultof<AxisFrame3D>
+    let mutable cachedBaseOverlay = Unchecked.defaultof<Scene>
+    let mutable prevHadExtraMarks = false
 
     let buildScenePass (cam: Camera3D) (pass: PlotPass3D) (includeAxis: bool) =
         let basePass =
@@ -173,8 +167,8 @@ type private PlotViewInstance3D
             | ValueNone -> withLight
 
         if includeAxis then
-            syncMergedBatches pass.ExtraBatches
-            syncMergedLines pass.ExtraLines
+            PlotView3DKernel.syncMergedPrefix panelBatch ValueNone pass.ExtraBatches &cachedExtraBatches &mergedBatches
+            PlotView3DKernel.syncMergedPrefix axisLineBatch (ValueSome spikeLineBatch) pass.ExtraLines &cachedExtraLines &mergedLines
 
             withSec
             |> ScenePass.withBatches mergedBatches
@@ -276,26 +270,48 @@ type private PlotViewInstance3D
                 let plotCam = config.Camera.Value
                 let pass = readScene ()
                 let gpuCam = PlotCamera3D.toCamera3D pass.AxisSpec.Scale plotCam
-                let frame = Axis3D.build pass.AxisSpec config.Width config.Height gpuCam
-                panelBatch.UpdateInstances ((Axis3D.panelInstances frame).Span)
-                axisLineBatch.UpdateVertices ((Axis3D.lineVertices frame).Span)
 
-                let baseOverlay = Axis3D.overlayScene (float config.Width) (float config.Height) frame
+                let axisChanged =
+                    not (
+                        hasCachedAxis
+                        && Object.ReferenceEquals (pass.AxisSpec, cachedAxisSpec)
+                        && gpuCam = cachedGpuCam
+                        && config.Width = cachedWidth
+                        && config.Height = cachedHeight
+                    )
 
-                let overlay =
-                    if List.isEmpty pass.ExtraOverlayMarks then
-                        baseOverlay
-                    else
-                        Scene.create
-                            (float config.Width)
-                            (float config.Height)
-                            (Scene.title baseOverlay)
-                            (Scene.marks baseOverlay @ pass.ExtraOverlayMarks)
+                if axisChanged then
+                    let nextFrame = Axis3D.build pass.AxisSpec config.Width config.Height gpuCam
+                    panelBatch.UpdateInstances ((Axis3D.panelInstances nextFrame).Span)
+                    axisLineBatch.UpdateVertices ((Axis3D.lineVertices nextFrame).Span)
+                    let nextBaseOverlay = Axis3D.overlayScene (float config.Width) (float config.Height) nextFrame
+                    hasCachedAxis <- true
+                    cachedAxisSpec <- pass.AxisSpec
+                    cachedGpuCam <- gpuCam
+                    cachedWidth <- config.Width
+                    cachedHeight <- config.Height
+                    cachedFrame <- nextFrame
+                    cachedBaseOverlay <- nextBaseOverlay
 
-                overlaySig.Value <- overlay
+                let hasExtraMarks = not (List.isEmpty pass.ExtraOverlayMarks)
+
+                if axisChanged || hasExtraMarks || prevHadExtraMarks then
+                    let overlay =
+                        if not hasExtraMarks then
+                            cachedBaseOverlay
+                        else
+                            Scene.create
+                                (float config.Width)
+                                (float config.Height)
+                                (Scene.title cachedBaseOverlay)
+                                (Scene.marks cachedBaseOverlay @ pass.ExtraOverlayMarks)
+
+                    overlaySig.Value <- overlay
+                    prevHadExtraMarks <- hasExtraMarks
+
                 latestCam <- Some gpuCam
                 latestPass <- Some pass
-                latestFrame <- Some frame
+                latestFrame <- Some cachedFrame
                 dirty <- true
                 scheduleFrame ())
 

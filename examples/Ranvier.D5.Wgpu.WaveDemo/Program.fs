@@ -103,6 +103,17 @@ let private evalWave (xs: float array) (ys: float array) (t: float) (heights: fl
 
     struct (Point3.create maxX maxY maxZ, maxV, Point3.create minX minY minZ, minV)
 
+let private makeExtremaMarker (pt: Point3) (col: RgbaColor) : GlyphDatum3D =
+    {
+        Position = pt
+        Scale = Vector3 (0.11f, 0.11f, 0.11f)
+        Rotation = Quaternion.Identity
+        Color = col
+        Shading = ShadingMode.Lit (0.25f, 0.18f)
+        PickId = 0u
+        Selected = false
+    }
+
 type private DemoSession =
     {
         Mounted: Mounting.Mounted
@@ -170,20 +181,9 @@ let private createDemo (hidden: bool) (width: int) (height: int) : DemoSession =
 
             let extrema = Api.createKeyedCollection (fun struct (k: string, _: GlyphDatum3D) -> k)
 
-            let makeMarker (pt: Point3) (col: RgbaColor) : GlyphDatum3D =
-                {
-                    Position = pt
-                    Scale = Vector3 (0.11f, 0.11f, 0.11f)
-                    Rotation = Quaternion.Identity
-                    Color = col
-                    Shading = ShadingMode.Lit (0.25f, 0.18f)
-                    PickId = 0u
-                    Selected = false
-                }
-
             let struct (peakPt, _, troughPt, _) = initialExtrema
-            extrema.AddOrUpdate (struct ("peak", makeMarker peakPt (RgbaColor (1.0f, 0.88f, 0.25f, 1.0f))))
-            extrema.AddOrUpdate (struct ("trough", makeMarker troughPt (RgbaColor (0.35f, 0.90f, 1.0f, 1.0f))))
+            extrema.AddOrUpdate (struct ("peak", makeExtremaMarker peakPt (RgbaColor (1.0f, 0.88f, 0.25f, 1.0f))))
+            extrema.AddOrUpdate (struct ("trough", makeExtremaMarker troughPt (RgbaColor (0.35f, 0.90f, 1.0f, 1.0f))))
 
             let rows = extrema.Rows |> Projection.map (fun struct (_, g) -> g)
             let sink = Reactive3D.bindInstances wgpu 1uy sphereMesh BlendMode.Opaque false false (fun () -> scale) rows
@@ -294,20 +294,9 @@ let private createDemo (hidden: bool) (width: int) (height: int) : DemoSession =
         graph.Run (fun () ->
             surfaceBatch.Update (surfaceSpec, ReadOnlySpan<float>(heights), ReadOnlySpan<float>(velocities))
 
-            let mk (pt: Point3) (col: RgbaColor) : GlyphDatum3D =
-                {
-                    Position = pt
-                    Scale = Vector3 (0.11f, 0.11f, 0.11f)
-                    Rotation = Quaternion.Identity
-                    Color = col
-                    Shading = ShadingMode.Lit (0.25f, 0.18f)
-                    PickId = 0u
-                    Selected = false
-                }
-
             Api.batch (fun () ->
-                extremaColl.AddOrUpdate (struct ("peak", mk peakPt (RgbaColor (1.0f, 0.88f, 0.25f, 1.0f))))
-                extremaColl.AddOrUpdate (struct ("trough", mk troughPt (RgbaColor (0.35f, 0.90f, 1.0f, 1.0f))))
+                extremaColl.AddOrUpdate (struct ("peak", makeExtremaMarker peakPt (RgbaColor (1.0f, 0.88f, 0.25f, 1.0f))))
+                extremaColl.AddOrUpdate (struct ("trough", makeExtremaMarker troughPt (RgbaColor (0.35f, 0.90f, 1.0f, 1.0f))))
                 frameTick.Value <- t))
 
     {
