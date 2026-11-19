@@ -275,7 +275,18 @@ let private runNativeAcceptance () =
     Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float (Vector3.Distance (posAfterM2, posAfterM1))) 0.0 "'M' toggle to Turntable preserves camera world Position"
 
     // 5. Chorded secondary pointerdown while dragging does not steal activePointerId or switch orbit to pan
-    win.Host.SetMaxTouchPoints 2
+    let camAtMouseDown = graph.Run (fun () -> camera.Value)
+    win.Host.Mouse (1, 240, 180, 0, 1, 0) |> ignore
+    win.Host.Mouse (1, 280, 200, 2, 1, 0) |> ignore
+    win.Host.Mouse (0, 290, 160, 0, 0, 0) |> ignore
+    win.Host.Mouse (2, 290, 160, 0, 1, 0) |> ignore
+    win.Host.Mouse (2, 290, 160, 2, 1, 0) |> ignore
+    pumpFrames win 1
+
+    let camAfterChordedMouse = graph.Run (fun () -> camera.Value)
+    Expect.notEqual camAfterChordedMouse.AzimuthRad camAtMouseDown.AzimuthRad "chorded right-button mouse down preserves left-button orbit drag"
+    Expect.equal camAfterChordedMouse.PanOffset camAtMouseDown.PanOffset "chorded right-button mouse down does not flip dragPan on"
+
     let mutable p1Down = PointerSample.Create (2, 10, 1, 240.0, 180.0)
     p1Down.Button <- 0
     let mutable p2Down = PointerSample.Create (2, 20, 1, 280.0, 200.0)
@@ -285,26 +296,34 @@ let private runNativeAcceptance () =
     let p1Move = PointerSample.Create (2, 10, 0, 290.0, 160.0)
     let p1Up = PointerSample.Create (2, 10, 2, 290.0, 160.0)
 
-    win.Host.Pointer [| p1Down |] |> ignore
-    let camAtP1Down = graph.Run (fun () -> camera.Value)
+    let supportsHostPointer =
+        try
+            win.Host.SetMaxTouchPoints 2
+            win.Host.Pointer [| p1Down |] |> ignore
+            true
+        with :? NotSupportedException ->
+            false
 
-    // Secondary pointerdown while p1 is dragging must be ignored, and moves from p2 must not alter camera
-    win.Host.Pointer [| p2Down |] |> ignore
-    win.Host.Pointer [| p2Move |] |> ignore
-    win.Host.Pointer [| p2Up |] |> ignore
-    pumpFrames win 1
+    if supportsHostPointer then
+        let camAtP1Down = graph.Run (fun () -> camera.Value)
 
-    let camAfterChordedP2 = graph.Run (fun () -> camera.Value)
-    Expect.equal camAfterChordedP2 camAtP1Down "chorded secondary pointerdown/move/up does not steal activePointerId or mutate camera"
+        // Secondary pointerdown while p1 is dragging must be ignored, and moves from p2 must not alter camera
+        win.Host.Pointer [| p2Down |] |> ignore
+        win.Host.Pointer [| p2Move |] |> ignore
+        win.Host.Pointer [| p2Up |] |> ignore
+        pumpFrames win 1
 
-    // Original active pointer (id = 10) still orbits and completes cleanly
-    win.Host.Pointer [| p1Move |] |> ignore
-    win.Host.Pointer [| p1Up |] |> ignore
-    pumpFrames win 1
+        let camAfterChordedP2 = graph.Run (fun () -> camera.Value)
+        Expect.equal camAfterChordedP2 camAtP1Down "chorded secondary pointerdown/move/up does not steal activePointerId or mutate camera"
 
-    let camAfterP1Drag = graph.Run (fun () -> camera.Value)
-    Expect.notEqual camAfterP1Drag.AzimuthRad camAtP1Down.AzimuthRad "original activePointerId still orbits after chorded secondary pointer"
-    Expect.equal camAfterP1Drag.PanOffset camAtP1Down.PanOffset "chorded secondary pointerdown does not flip dragPan on"
+        // Original active pointer (id = 10) still orbits and completes cleanly
+        win.Host.Pointer [| p1Move |] |> ignore
+        win.Host.Pointer [| p1Up |] |> ignore
+        pumpFrames win 1
+
+        let camAfterP1Drag = graph.Run (fun () -> camera.Value)
+        Expect.notEqual camAfterP1Drag.AzimuthRad camAtP1Down.AzimuthRad "original activePointerId still orbits after chorded secondary pointer"
+        Expect.equal camAfterP1Drag.PanOffset camAtP1Down.PanOffset "chorded secondary pointerdown does not flip dragPan on"
 
     // Review Focus #5: idempotent double mounted.Dispose(), then graph.Dispose(), wgpu.Dispose(), win.Dispose()
     mounted.Dispose ()
