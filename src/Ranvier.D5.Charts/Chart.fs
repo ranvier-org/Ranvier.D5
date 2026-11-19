@@ -47,3 +47,7 @@ module Chart =
     let beeswarm spec data = AdvancedCharts.beeswarm spec data
     /// <summary>A network as matrix cells; unknown endpoints and duplicate IDs are typed errors.</summary>
     let adjacencyMatrix spec = AdvancedCharts.adjacencyMatrix spec
+    /// <summary>Lex et al. (2014) UpSet set-intersection combination matrix with marginal and intersection cardinality bars.</summary>
+    let upset spec sets = UpSetChart.build spec sets
+    /// <summary>Wilkinson (2012) area-proportional circular Venn and Euler diagram.</summary>
+    let euler spec sets pairwiseOverlaps = EulerChart.build spec sets pairwiseOverlaps
