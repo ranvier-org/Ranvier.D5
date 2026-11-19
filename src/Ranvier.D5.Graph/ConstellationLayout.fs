@@ -29,7 +29,11 @@ type ClusterDisc =
       /// <summary>True when this disc directly hosts a local <c>PoincareDisk</c> node sub-layout rather than child cluster discs.</summary>
       IsLeafCluster: bool
       /// <summary>Total count of descendant graph nodes enclosed within this cluster disc.</summary>
-      MemberCount: int }
+      MemberCount: int
+      /// <summary>Concentric internal hyperbolic guide ring radii inside a leaf cluster disc in viewport units (<c>[]</c> for non-leaf parent discs).</summary>
+      InnerRingRadii: float list
+      /// <summary>Perimeter angular sector arc bands (<c>treeBands</c>) around this disc marking child clusters or subgroups.</summary>
+      SectorArcs: RimArcSegment list }
 
 /// <summary>Configuration for multi-scale constellation layout combining tangent circle packing, local Poincaré disks and LCA spline bundling.</summary>
 type ConstellationConfig =
@@ -74,6 +78,23 @@ type ConstellationOutput =
       OuterCenter: Point
       /// <summary>Radius of the root outer constellation disc.</summary>
       OuterRadius: float }
+
+/// <summary>An internal multi-scale constellation miniature inscribed inside a host node's circular disc ("graph-in-disc" LOD inlay).</summary>
+type DiscInlay =
+    { /// <summary>Identifier of the host node in the outer layout whose disc contains this inlay.</summary>
+      HostNodeId: string
+      /// <summary>Euclidean center of the host disc in outer layout coordinates.</summary>
+      Center: Point
+      /// <summary>Inscribed Euclidean radius of the host disc in outer layout coordinates.</summary>
+      Radius: float
+      /// <summary>Scaled nested cluster discs (including <c>InnerRingRadii</c> and <c>SectorArcs</c>) inside the host disc.</summary>
+      Clusters: ClusterDisc list
+      /// <summary>Scaled internal nodes positioned inside the host disc.</summary>
+      Nodes: PositionedNode list
+      /// <summary>Scaled intra-cluster Poincaré geodesic arcs and inter-cluster LCA bundled splines inside the host disc.</summary>
+      Associations: RoutedAssociation list
+      /// <summary>Optional outer rim status/category gauge arc segments hugging the host disc boundary.</summary>
+      RimGauge: RimArcSegment list }
 
 /// <summary>Multi-scale constellation graph layout packing local Poincaré sub-discs via Apollonius/Welzl disc enclosure and routing intra-cluster geodesics + inter-cluster LCA splines.</summary>
 [<RequireQualifiedAccess>]
@@ -395,34 +416,48 @@ module ConstellationLayout =
             | Ok g -> Some g
             | Error _ -> None
 
-    let private resolveLocalOverlaps (cx: float[]) (cy: float[]) (hw: float[]) (hh: float[]) (pad: float) : unit =
-        let m = cx.Length
-        if m > 1 then
-            let mutable iter = 0
-            let mutable moved = true
-            while iter < 20 && moved do
-                moved <- false
-                for i = 0 to m - 2 do
-                    for j = i + 1 to m - 1 do
-                        let reqX = hw[i] + hw[j] + pad
-                        let reqY = hh[i] + hh[j] + pad
-                        let dx = cx[j] - cx[i]
-                        let dy = cy[j] - cy[i]
-                        let overlapX = reqX - abs dx
-                        let overlapY = reqY - abs dy
-                        if overlapX > 1e-6 && overlapY > 1e-6 then
-                            moved <- true
-                            if overlapX <= overlapY then
-                                let sgn = if dx >= 0. then 1. else -1.
-                                let push = 0.52 * overlapX * sgn
-                                cx[i] <- cx[i] - push
-                                cx[j] <- cx[j] + push
-                            else
-                                let sgn = if dy >= 0. then 1. else -1.
-                                let push = 0.52 * overlapY * sgn
-                                cy[i] <- cy[i] - push
-                                cy[j] <- cy[j] + push
-                iter <- iter + 1
+    // Computes tangent angular sector slots (startAngle, endAngle) around a parent disc for packed child discs.
+    let private computeChildSectorSlots (childKeys: string[]) (offsets: Point[]) (radii: float[]) : (string * float * float)[] =
+        let m = offsets.Length
+        if m = 0 then
+            [||]
+        elif m = 1 then
+            [| childKeys[0], -0.5 * Math.PI, 1.5 * Math.PI - 1e-4 |]
+        else
+            let theta = Array.init m (fun k -> atan2 offsets[k].Y offsets[k].X)
+            let halfCone =
+                Array.init m (fun k ->
+                    let d = Double.Hypot(offsets[k].X, offsets[k].Y)
+                    if d > radii[k] && d > 1e-9 then
+                        asin (min 1. (max 0.05 (radii[k] / d)))
+                    else
+                        0.5 * Math.PI)
+            let order = Array.init m id
+            Array.sortInPlaceWith (fun a b ->
+                let c = compare theta[a] theta[b]
+                if c <> 0 then c else compare a b) order
+
+            let splitAfter = Array.zeroCreate<float> m
+            for pos = 0 to m - 1 do
+                let q = order[pos]
+                let nxt = order[(pos + 1) % m]
+                let mutable delta = (theta[nxt] - theta[q]) % (2. * Math.PI)
+                if delta < 0. then delta <- delta + 2. * Math.PI
+                if delta <= 1e-9 then delta <- 2. * Math.PI / float m
+                let denom = max 1e-9 (halfCone[q] + halfCone[nxt])
+                splitAfter[pos] <- theta[q] + delta * (halfCone[q] / denom)
+
+            let out = Array.zeroCreate<string * float * float> m
+            for pos = 0 to m - 1 do
+                let prevPos = (pos - 1 + m) % m
+                let q = order[pos]
+                let mutable a0 = splitAfter[prevPos]
+                let mutable a1 = splitAfter[pos]
+                while a0 > theta[q] do a0 <- a0 - 2. * Math.PI
+                while a1 < a0 do a1 <- a1 + 2. * Math.PI
+                let pad = min 0.012 (0.16 * (a1 - a0))
+                out[pos] <- (childKeys[q], a0 + pad, a1 - pad)
+            out
 
     let private validateConfig (config: ConstellationConfig) : Result<unit, LayoutError list> =
         let vx = Bounds.x config.Viewport
@@ -450,9 +485,9 @@ module ConstellationLayout =
         else
             Ok()
 
-    /// <summary>Computes a multi-scale constellation layout and its enclosing <c>ClusterDisc</c> hierarchy with cooperative cancellation.</summary>
-    let computeWithCancellation
+    let private computeCore
         (token: System.Threading.CancellationToken)
+        (minNodePx: float)
         (config: ConstellationConfig)
         (graph: DiagramGraph)
         : Result<ConstellationOutput, LayoutError list> =
@@ -467,7 +502,7 @@ module ConstellationLayout =
             let vw = Bounds.width config.Viewport
             let vh = Bounds.height config.Viewport
             let outerCenter = Point.create (vx + vw * 0.5) (vy + vh * 0.5)
-            let availOuterR = max 8. (0.5 * min vw vh - 0.5 * config.ClusterPadding)
+            let availOuterR = max 2. (0.5 * min vw vh - 0.5 * config.ClusterPadding)
 
             if n = 0 then
                 let emptyGroups = GraphKernels.computeGroupBounds eff [||]
@@ -690,6 +725,8 @@ module ConstellationLayout =
 
                     let clusterRelPos = Array.create cCount (Point.create 0. 0.)
                     let clusterLocalR = Array.zeroCreate<float> cCount
+                    let localInnerRings = Array.create cCount ([||] : float[])
+                    let localSectorSlots = Array.create cCount ([||] : (string * float * float)[])
                     let innerPad = max 4. (config.ClusterPadding * 0.4)
 
                     // Bottom-up leaf Poincaré layouts + tangent circle packing + exact Welzl disc enclosure
@@ -722,7 +759,7 @@ module ConstellationLayout =
                                     let d = Double.Hypot(s.Width, s.Height)
                                     if d > maxDiag then maxDiag <- d
 
-                                let targetR = max (maxDiag * 1.05 + 16.) (1.55 * sqrt areaSum + float (min 12 mLen) * 5. + 16.)
+                                let targetR = max (maxDiag * 1.15 + 18.) (1.60 * sqrt areaSum + float (min 14 mLen) * 5.2 + 16.)
                                 let localBox = Bounds.create (-targetR) (-targetR) (2. * targetR) (2. * targetR)
                                 let diskCfg =
                                     { PoincareDiskConfig.create localBox with
@@ -730,8 +767,9 @@ module ConstellationLayout =
                                         CenterBias = config.CenterBias
                                         ConformalExponent = config.ConformalExponent
                                         BarycenterSweeps = config.BarycenterSweeps
-                                        MinNodeScale = 0.30
-                                        Padding = innerPad }
+                                        MinNodeScale = 0.28
+                                        Padding = innerPad
+                                        SplitDenseRings = true }
 
                                 match inducedSubgraph eff csr mems with
                                 | Some subG ->
@@ -741,40 +779,36 @@ module ConstellationLayout =
                                         let byId = Dictionary<string, PositionedNode>(StringComparer.Ordinal)
                                         for pn in subLayout.Nodes do byId[pn.Id] <- pn
 
-                                        let lx = Array.zeroCreate<float> mLen
-                                        let ly = Array.zeroCreate<float> mLen
-                                        let lhw = Array.zeroCreate<float> mLen
-                                        let lhh = Array.zeroCreate<float> mLen
+                                        // Preserve exact (0, 0) Poincaré disk center so concentric hyperbolic rings & orthogonal geodesics stay exact
+                                        let mutable maxReqR = PoincareDisk.diskRadius diskState
                                         for k = 0 to mLen - 1 do
                                             let u = mems[k]
                                             let nd = eff.Nodes[u]
                                             leafOfNode[u] <- cIdx
                                             match byId.TryGetValue nd.Id with
                                             | true, pn ->
-                                                lx[k] <- pn.Center.X
-                                                ly[k] <- pn.Center.Y
-                                                lhw[k] <- 0.5 * Bounds.width pn.Bounds
-                                                lhh[k] <- 0.5 * Bounds.height pn.Bounds
+                                                let hw = 0.5 * Bounds.width pn.Bounds
+                                                let hh = 0.5 * Bounds.height pn.Bounds
+                                                localNodeCx[u] <- pn.Center.X
+                                                localNodeCy[u] <- pn.Center.Y
+                                                localNodeW[u] <- 2. * hw
+                                                localNodeH[u] <- 2. * hh
                                                 localNodeLayer[u] <- Option.defaultValue 0 pn.Layer
+                                                let req = Double.Hypot(pn.Center.X, pn.Center.Y) + Double.Hypot(hw, hh) + innerPad * 0.65
+                                                if req > maxReqR then maxReqR <- req
                                             | _ ->
-                                                lx[k] <- 0.
-                                                ly[k] <- 0.
-                                                lhw[k] <- 0.5 * nd.Size.Width
-                                                lhh[k] <- 0.5 * nd.Size.Height
+                                                localNodeCx[u] <- 0.
+                                                localNodeCy[u] <- 0.
+                                                localNodeW[u] <- nd.Size.Width
+                                                localNodeH[u] <- nd.Size.Height
                                                 localNodeLayer[u] <- 0
 
-                                        resolveLocalOverlaps lx ly lhw lhh 4.0
-                                        let memberDiscs =
-                                            Array.init mLen (fun k ->
-                                                Disc2(lx[k], ly[k], Double.Hypot(lhw[k], lhh[k]) + innerPad))
-                                        let enc = welzlEncloseArray memberDiscs
-                                        for k = 0 to mLen - 1 do
-                                            let u = mems[k]
-                                            localNodeCx[u] <- lx[k] - enc.Cx
-                                            localNodeCy[u] <- ly[k] - enc.Cy
-                                            localNodeW[u] <- 2. * lhw[k]
-                                            localNodeH[u] <- 2. * lhh[k]
-                                        clusterLocalR[cIdx] <- max 12. enc.R
+                                        localInnerRings[cIdx] <-
+                                            PoincareDisk.ringRadii diskState
+                                            |> List.filter (fun r -> r > 0.5 && r < maxReqR - 0.5)
+                                            |> List.distinct
+                                            |> List.toArray
+                                        clusterLocalR[cIdx] <- max 12. maxReqR
                                     | Error _ ->
                                         for k = 0 to mLen - 1 do
                                             let u = mems[k]
@@ -804,8 +838,10 @@ module ConstellationLayout =
 
                             let childRadii = Array.init kLen (fun k -> clusterLocalR[sortedKids[k]])
                             let offsets, encR = packSiblingDiscs childRadii config.ClusterPadding
+                            let childKeys = Array.init kLen (fun k -> specs[sortedKids[k]].Id)
                             for k = 0 to kLen - 1 do
                                 clusterRelPos[sortedKids[k]] <- offsets[k]
+                            localSectorSlots[cIdx] <- computeChildSectorSlots childKeys offsets childRadii
                             clusterLocalR[cIdx] <- encR + config.ClusterPadding
 
                     // Top-down similarity transform fitting root cluster 0 into Viewport
@@ -832,8 +868,8 @@ module ConstellationLayout =
                             let lc = worldCenter[leafIdx]
                             let cx = lc.X + localNodeCx[i] * globalScale
                             let cy = lc.Y + localNodeCy[i] * globalScale
-                            let sw = max 2. (localNodeW[i] * globalScale)
-                            let sh = max 2. (localNodeH[i] * globalScale)
+                            let sw = max minNodePx (localNodeW[i] * globalScale)
+                            let sh = max minNodePx (localNodeH[i] * globalScale)
                             let center = Point.create cx cy
                             let bounds = Bounds.create (cx - sw * 0.5) (cy - sh * 0.5) sw sh
                             { Id = nd.Id
@@ -855,13 +891,36 @@ module ConstellationLayout =
                             let idx = clusterOrder[oi]
                             let sp = specs[idx]
                             let parentId = if sp.ParentIdx >= 0 then Some (specs[sp.ParentIdx].Id) else None
+                            let wc = worldCenter[idx]
+                            let wr = worldRadius[idx]
+                            let innerRings =
+                                localInnerRings[idx]
+                                |> Array.map (fun r -> r * globalScale)
+                                |> Array.filter (fun r -> r > 0.25 && r < wr - 0.25)
+                                |> Array.toList
+                            let rimOff = max 0.8 (min 3.2 (wr * 0.045))
+                            let rimSw = max 0.6 (min 2.4 (wr * 0.032))
+                            let secArcs =
+                                [ for key, a0, a1 in localSectorSlots[idx] do
+                                    if a1 > a0 + 1e-4 then
+                                        let arcR = wr + rimOff
+                                        yield
+                                            { Key = Some key
+                                              Center = wc
+                                              Radius = arcR
+                                              StartAngle = a0
+                                              EndAngle = a1
+                                              StrokeWidth = rimSw
+                                              Path = Hyperbolic2D.circularArcPath wc arcR a0 a1 } ]
                             { Id = sp.Id
                               Parent = parentId
                               Depth = sp.Depth
-                              Center = worldCenter[idx]
-                              Radius = worldRadius[idx]
+                              Center = wc
+                              Radius = wr
                               IsLeafCluster = (sp.Children.Length = 0)
-                              MemberCount = sp.TotalMembers } ]
+                              MemberCount = sp.TotalMembers
+                              InnerRingRadii = innerRings
+                              SectorArcs = secArcs } ]
 
                     // Emit PositionedGroup rectangles matching explicit DiagramGroup discs when present, else tight child bounds
                     let explicitSpecById = Dictionary<string, int>(StringComparer.Ordinal)
@@ -1053,6 +1112,14 @@ module ConstellationLayout =
                           OuterCenter = worldCenter[0]
                           OuterRadius = worldRadius[0] }
 
+    /// <summary>Computes a multi-scale constellation layout and its enclosing <c>ClusterDisc</c> hierarchy with cooperative cancellation.</summary>
+    let computeWithCancellation
+        (token: System.Threading.CancellationToken)
+        (config: ConstellationConfig)
+        (graph: DiagramGraph)
+        : Result<ConstellationOutput, LayoutError list> =
+        computeCore token 2.0 config graph
+
     /// <summary>Computes a multi-scale constellation layout and its enclosing <c>ClusterDisc</c> hierarchy without cancellation.</summary>
     let compute (config: ConstellationConfig) (graph: DiagramGraph) : Result<ConstellationOutput, LayoutError list> =
         computeWithCancellation System.Threading.CancellationToken.None config graph
@@ -1068,3 +1135,72 @@ module ConstellationLayout =
     /// <summary>Computes the 2D diagram layout of a multi-scale constellation without cancellation.</summary>
     let layout (config: ConstellationConfig) (graph: DiagramGraph) : Result<DiagramLayout2D, LayoutError list> =
         layoutWithCancellation System.Threading.CancellationToken.None config graph
+
+    /// <summary>Embeds internal multi-scale constellation miniatures (and optional outer rim progress gauges) directly inside the inscribed discs of matching nodes in <c>hostLayout</c> with cooperative cancellation.</summary>
+    let inlaySubgraphsWithCancellation
+        (token: System.Threading.CancellationToken)
+        (config: ConstellationConfig)
+        (rimShares: Map<string, (string * float) list>)
+        (subgraphs: Map<string, DiagramGraph>)
+        (hostLayout: DiagramLayout2D)
+        : Result<DiscInlay list, LayoutError list> =
+        token.ThrowIfCancellationRequested()
+        let out = ResizeArray<DiscInlay>()
+        let mutable firstErr : LayoutError list option = None
+        for hostNode in hostLayout.Nodes do
+            if firstErr.IsNone then
+                token.ThrowIfCancellationRequested()
+                let subOpt = Map.tryFind hostNode.Id subgraphs
+                let sharesOpt = Map.tryFind hostNode.Id rimShares
+                if subOpt.IsSome || sharesOpt.IsSome then
+                    let discR = 0.5 * min (Bounds.width hostNode.Bounds) (Bounds.height hostNode.Bounds)
+                    if discR > 1e-3 then
+                        let gaugeSw = max 0.8 (min 4.5 (discR * 0.11))
+                        let gaugeOff = max 1.2 (min 8.0 (discR * 0.16)) + 0.5 * gaugeSw
+                        let gauge =
+                            match sharesOpt with
+                            | Some sh when not sh.IsEmpty -> Hyperbolic2D.rimGaugeArcs hostNode.Center discR gaugeOff gaugeSw sh
+                            | _ -> []
+                        match subOpt with
+                        | None ->
+                            out.Add
+                                { HostNodeId = hostNode.Id
+                                  Center = hostNode.Center
+                                  Radius = discR
+                                  Clusters = []
+                                  Nodes = []
+                                  Associations = []
+                                  RimGauge = gauge }
+                        | Some subG ->
+                            let insetR = max 1.5 (discR * 0.92)
+                            let localBox = Bounds.create (hostNode.Center.X - insetR) (hostNode.Center.Y - insetR) (2. * insetR) (2. * insetR)
+                            // Canonicalize internal node sizes inside miniature inlays so 50+ functions never bloat local boxes
+                            let localPad = max 1.2 (min config.ClusterPadding (insetR * 0.12))
+                            let minPx = min 2.0 (max 0.55 (insetR * 0.04))
+                            let localCfg =
+                                { config with
+                                    Viewport = localBox
+                                    ClusterPadding = localPad }
+                            match computeCore token minPx localCfg subG with
+                            | Error errs -> firstErr <- Some errs
+                            | Ok subOut ->
+                                out.Add
+                                    { HostNodeId = hostNode.Id
+                                      Center = hostNode.Center
+                                      Radius = discR
+                                      Clusters = subOut.Clusters
+                                      Nodes = subOut.Layout.Nodes
+                                      Associations = subOut.Layout.Associations
+                                      RimGauge = gauge }
+        match firstErr with
+        | Some errs -> Error errs
+        | None -> Ok(Seq.toList out)
+
+    /// <summary>Embeds internal multi-scale constellation miniatures (and optional outer rim progress gauges) directly inside the inscribed discs of matching nodes in <c>hostLayout</c> without cancellation.</summary>
+    let inlaySubgraphs
+        (config: ConstellationConfig)
+        (rimShares: Map<string, (string * float) list>)
+        (subgraphs: Map<string, DiagramGraph>)
+        (hostLayout: DiagramLayout2D)
+        : Result<DiscInlay list, LayoutError list> =
+        inlaySubgraphsWithCancellation System.Threading.CancellationToken.None config rimShares subgraphs hostLayout

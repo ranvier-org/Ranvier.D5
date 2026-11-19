@@ -12,6 +12,23 @@ type PoincarePoint =
       /// <summary>Vertical Euclidean coordinate inside the open unit disk <c>(-1, 1)</c>.</summary>
       Y: float }
 
+/// <summary>A circular arc segment positioned around a disc rim, used for outer progress/category gauges and perimeter file/cluster sector bands.</summary>
+type RimArcSegment =
+    { /// <summary>Optional category, group or cluster identifier (<c>None</c> for an unallocated remainder track).</summary>
+      Key: string option
+      /// <summary>Euclidean center of the concentric arc circle.</summary>
+      Center: Point
+      /// <summary>Positive Euclidean radius of the concentric arc circle.</summary>
+      Radius: float
+      /// <summary>Start polar angle in radians (<c>-pi/2</c> corresponds to 12 o'clock).</summary>
+      StartAngle: float
+      /// <summary>End polar angle in radians (<c>EndAngle &gt; StartAngle</c>).</summary>
+      EndAngle: float
+      /// <summary>Recommended stroke width in layout units.</summary>
+      StrokeWidth: float
+      /// <summary>SVG circular arc <c>Path</c> ready for <c>Mark.path</c>.</summary>
+      Path: Path }
+
 /// <summary>Exact 2D Poincaré disk hyperbolic geometry, Lamping-Rao-Pirolli Möbius focus automorphisms and orthogonal boundary geodesic arcs.</summary>
 [<RequireQualifiedAccess>]
 module Hyperbolic2D =
@@ -207,6 +224,90 @@ module Hyperbolic2D =
                                         let rad = rp + (rq - rp) * t
                                         Point.create (arcCx + rad * cos ang) (arcCy + rad * sin ang) ]
                             path, wps
+
+    let internal circularArcPath (center: Point) (radius: float) (startAngle: float) (endAngle: float) : Path =
+        let r = max 0. radius
+        let rawSpan = endAngle - startAngle
+        if not (Double.IsFinite center.X && Double.IsFinite center.Y && Double.IsFinite r && Double.IsFinite startAngle && Double.IsFinite endAngle)
+           || r <= 1e-9
+           || abs rawSpan <= 1e-7 then
+            let a0 = if Double.IsFinite startAngle then startAngle else 0.
+            let p = Point.create (center.X + r * cos a0) (center.Y + r * sin a0)
+            Path.ofCommands [ MoveTo p ]
+        else
+            let sweepPos = rawSpan > 0.
+            let span = min (2. * Math.PI - 1e-5) (abs rawSpan)
+            let sgn = if sweepPos then 1. else -1.
+            let p0 = Point.create (center.X + r * cos startAngle) (center.Y + r * sin startAngle)
+            if span <= Math.PI then
+                let a1 = startAngle + sgn * span
+                let p1 = Point.create (center.X + r * cos a1) (center.Y + r * sin a1)
+                Path.ofCommands [ MoveTo p0; ArcTo(r, r, 0., false, sweepPos, p1) ]
+            else
+                let aMid = startAngle + 0.5 * sgn * span
+                let aEnd = startAngle + sgn * span
+                let pMid = Point.create (center.X + r * cos aMid) (center.Y + r * sin aMid)
+                let pEnd = Point.create (center.X + r * cos aEnd) (center.Y + r * sin aEnd)
+                Path.ofCommands
+                    [ MoveTo p0
+                      ArcTo(r, r, 0., false, sweepPos, pMid)
+                      ArcTo(r, r, 0., false, sweepPos, pEnd) ]
+
+    /// <summary>Builds segmented concentric rim gauge arcs around <c>(center, discRadius + radialOffset)</c> starting at <c>-pi/2</c>, inserting micro-gaps and an optional remainder track (<c>Key = None</c>).</summary>
+    let rimGaugeArcs
+        (center: Point)
+        (discRadius: float)
+        (radialOffset: float)
+        (strokeWidth: float)
+        (shares: (string * float) list)
+        : RimArcSegment list =
+        let arcR = max 1. (discRadius + (if Double.IsFinite radialOffset then radialOffset else 0.))
+        let sw = max 0.5 (if Double.IsFinite strokeWidth then strokeWidth else 2.)
+        if not (Double.IsFinite center.X && Double.IsFinite center.Y && Double.IsFinite discRadius) || discRadius <= 0. then
+            []
+        else
+            let valid =
+                shares
+                |> List.choose (fun (k, v) ->
+                    if Double.IsFinite v && v > 1e-6 then Some(k, v) else None)
+            let rawSum = valid |> List.sumBy snd
+            let normScale = if rawSum > 1. then 1. / rawSum else 1.
+            let gapUnit = min 0.14 (1. / max 8. arcR)
+            let out = ResizeArray<RimArcSegment>(valid.Length + 1)
+            let mutable cursor = -0.5 * Math.PI
+            for k, v in valid do
+                let share = v * normScale
+                let span = share * 2. * Math.PI
+                let pad = min gapUnit (span / 3.)
+                let a0 = cursor + 0.5 * pad
+                let a1 = cursor + span - 0.5 * pad
+                if a1 > a0 + 1e-6 then
+                    out.Add
+                        { Key = Some k
+                          Center = center
+                          Radius = arcR
+                          StartAngle = a0
+                          EndAngle = a1
+                          StrokeWidth = sw
+                          Path = circularArcPath center arcR a0 a1 }
+                cursor <- cursor + span
+
+            let fullEnd = 1.5 * Math.PI
+            if fullEnd - cursor > gapUnit then
+                let remPad = if out.Count > 0 then gapUnit else 0.
+                let r0 = cursor + 0.5 * remPad
+                let r1 = fullEnd - 0.5 * remPad
+                if r1 > r0 + 1e-6 then
+                    out.Add
+                        { Key = None
+                          Center = center
+                          Radius = arcR
+                          StartAngle = r0
+                          EndAngle = r1
+                          StrokeWidth = max 0.4 (0.4 * sw)
+                          Path = circularArcPath center arcR r0 r1 }
+
+            Seq.toList out
 
 /// <summary>Shared iterative Tarjan SCC condensation + chunked 32-bit bitset transitive reach and DAG longest-path kernel.</summary>
 module internal TransitiveReachKernel =
@@ -444,12 +545,18 @@ type PoincareDiskConfig =
       /// <summary>Lower bound in <c>(0, 1]</c> on peripheral node conformal scale factor.</summary>
       MinNodeScale: float
       /// <summary>Nonnegative inset margin between the disk boundary circle and <c>Viewport</c>.</summary>
-      Padding: float }
+      Padding: float
+      /// <summary>When <c>true</c>, splits crowded rings into multiple <c>sinh(d)</c>-weighted concentric sub-rows staggered by the golden angle <c>pi*(3 - sqrt 5)</c>.</summary>
+      SplitDenseRings: bool
+      /// <summary>When positive and smaller than node count, promotes the top <c>HubCount</c> highest-reach hubs into innermost ring 0.</summary>
+      HubCount: int
+      /// <summary>Angular gap in radians (<c>[0, 0.4]</c>) inserted between distinct <c>ParentGroup</c> perimeter sectors.</summary>
+      GroupSectorGap: float }
 
 /// <summary>Constructors for <c>PoincareDiskConfig</c>.</summary>
 [<RequireQualifiedAccess>]
 module PoincareDiskConfig =
-    /// <summary>Creates default Poincaré disk settings: <c>LongestPath</c> rings, <c>FoundationsInner</c>, conformal exponent 0.65, 8 sweeps, min scale 0.22 and 16-unit padding.</summary>
+    /// <summary>Creates default Poincaré disk settings: <c>LongestPath</c> rings, <c>FoundationsInner</c>, conformal exponent 0.65, 8 sweeps, min scale 0.22, 16-unit padding and golden-angle sub-ring splitting.</summary>
     let create (viewport: Bounds) : PoincareDiskConfig =
         { Viewport = viewport
           RingLayering = PoincareRingLayering.LongestPath
@@ -457,7 +564,10 @@ module PoincareDiskConfig =
           ConformalExponent = 0.65
           BarycenterSweeps = 8
           MinNodeScale = 0.22
-          Padding = 16. }
+          Padding = 16.
+          SplitDenseRings = true
+          HubCount = 0
+          GroupSectorGap = 0.035 }
 
 /// <summary>Unit-disk hyperbolic coordinate, ring metadata and unscaled dimensions of a node in a <c>PoincareDiskState</c>.</summary>
 type PoincareNodeCoord =
@@ -465,8 +575,10 @@ type PoincareNodeCoord =
       Id: string
       /// <summary>Current open unit-disk coordinate under the active Möbius focus.</summary>
       DiskPosition: PoincarePoint
-      /// <summary>Zero-based concentric ring index (<c>0</c> = innermost).</summary>
+      /// <summary>Zero-based logical concentric ring index (<c>0</c> = innermost).</summary>
       Ring: int
+      /// <summary>Zero-based staggered sub-row index within <c>Ring</c> (<c>0</c> when unsplit).</summary>
+      SubRing: int
       /// <summary>Polar angle <c>atan2(Y, X)</c> in radians around the disk center.</summary>
       Angle: float
       /// <summary>Unscaled node width in layout units.</summary>
@@ -487,6 +599,7 @@ type PoincareDiskState =
           CanonicalDisk: PoincarePoint[]
           CurrentDisk: PoincarePoint[]
           Rings: int[]
+          SubRings: int[]
           CanonicalAngles: float[]
           CurrentAngles: float[]
           Reach: int[]
@@ -496,6 +609,8 @@ type PoincareDiskState =
 /// <summary>2D Poincaré disk concentric hyperbolic layout engine with Lamping-Rao-Pirolli Möbius Focus+Context navigation.</summary>
 [<RequireQualifiedAccess>]
 module PoincareDisk =
+    let private goldenAngle = Math.PI * (3. - sqrt 5.)
+
     let private validateConfig (config: PoincareDiskConfig) : Result<unit, LayoutError list> =
         let vx = Bounds.x config.Viewport
         let vy = Bounds.y config.Viewport
@@ -512,13 +627,17 @@ module PoincareDisk =
             Error [ InvalidObservation "PoincareDisk MinNodeScale must be finite and in (0.0, 1.0]." ]
         elif config.BarycenterSweeps < 0 || config.BarycenterSweeps > 500 then
             Error [ InvalidObservation "PoincareDisk BarycenterSweeps must be in [0, 500]." ]
+        elif config.HubCount < 0 then
+            Error [ InvalidObservation "PoincareDisk HubCount must be nonnegative." ]
+        elif not (Double.IsFinite config.GroupSectorGap) || config.GroupSectorGap < 0. || config.GroupSectorGap > 0.5 then
+            Error [ InvalidObservation "PoincareDisk GroupSectorGap must be finite and in [0.0, 0.5]." ]
         else
             Ok()
 
-    let private buildGroupSectorKey (eff: EffectiveDiagram) : string[] =
+    let private buildGroupChain (eff: EffectiveDiagram) : string[] * string[] =
         let n = eff.Nodes.Length
         if eff.Groups.Length = 0 then
-            Array.init n (fun i -> eff.Nodes[i].Id)
+            Array.create n "", Array.init n (fun i -> eff.Nodes[i].Id)
         else
 #if FABLE_COMPILER
             let gParent = Dictionary<string, string option>(StringComparer.Ordinal)
@@ -532,16 +651,30 @@ module PoincareDisk =
                 match gParent.TryGetValue gid with
                 | true, Some pid -> chainOf pid (pid + "/" + acc)
                 | _ -> acc
-            Array.init n (fun i ->
+            let grpTag = Array.zeroCreate<string> n
+            let secKey = Array.zeroCreate<string> n
+            for i = 0 to n - 1 do
                 let nd = eff.Nodes[i]
                 match nd.ParentGroup with
-                | Some gid -> "0/" + chainOf gid gid + "/" + nd.Id
-                | None -> "1/" + nd.Id)
+                | Some gid ->
+                    let ch = chainOf gid gid
+                    grpTag[i] <- ch
+                    secKey[i] <- "0/" + ch + "/" + nd.Id
+                | None ->
+                    grpTag[i] <- "~ungrouped"
+                    secKey[i] <- "1/" + nd.Id
+            grpTag, secKey
 
     let private wrapAnglePi (a: float) : float =
         let mutable x = a
         while x <= -Math.PI do x <- x + 2. * Math.PI
         while x > Math.PI do x <- x - 2. * Math.PI
+        x
+
+    let private wrap0To2Pi (a: float) : float =
+        let twoPi = 2. * Math.PI
+        let mutable x = a % twoPi
+        if x < 0. then x <- x + twoPi
         x
 
     let private placeProportionalAngles
@@ -612,6 +745,7 @@ module PoincareDisk =
                       CanonicalDisk = [||]
                       CurrentDisk = [||]
                       Rings = [||]
+                      SubRings = [||]
                       CanonicalAngles = [||]
                       CurrentAngles = [||]
                       Reach = [||]
@@ -627,6 +761,7 @@ module PoincareDisk =
                       CanonicalDisk = [| Hyperbolic2D.origin |]
                       CurrentDisk = [| Hyperbolic2D.origin |]
                       Rings = [| 0 |]
+                      SubRings = [| 0 |]
                       CanonicalAngles = [| 0. |]
                       CurrentAngles = [| 0. |]
                       Reach = [| 0 |]
@@ -653,6 +788,23 @@ module PoincareDisk =
                         let maxT = tiers |> Array.max
                         Array.init n (fun i -> maxT - tiers[i])
 
+                // Optional hub promotion (promotes top HubCount highest-reach/degree hubs into innermost ring 0)
+                if config.HubCount > 0 && n > config.HubCount then
+                    let rankOrder = Array.init n id
+                    Array.sortInPlaceWith (fun a b ->
+                        let c1 = compare reachArr[b] reachArr[a]
+                        if c1 <> 0 then c1
+                        else
+                            let degA = csr.UndirOffsets[a + 1] - csr.UndirOffsets[a]
+                            let degB = csr.UndirOffsets[b + 1] - csr.UndirOffsets[b]
+                            let c2 = compare degB degA
+                            if c2 <> 0 then c2 else compare a b) rankOrder
+                    let isHub = Array.zeroCreate<bool> n
+                    for k = 0 to config.HubCount - 1 do
+                        isHub[rankOrder[k]] <- true
+                    for i = 0 to n - 1 do
+                        rawRing[i] <- if isHub[i] then 0 else rawRing[i] + 1
+
                 // Compress occupied rings into dense 0 .. numRings - 1
                 let distinctRings = rawRing |> Array.distinct
                 Array.sortInPlaceWith compare distinctRings
@@ -671,14 +823,83 @@ module PoincareDisk =
                         Double.Hypot(s.Width, s.Height))
                 let baseSpan = Array.init n (fun i -> diagArr[i] + 4.)
 
-                // Hierarchical ParentGroup sector initialization
-                let sectorKeys = buildGroupSectorKey eff
-                let globalSectorOrder = Array.init n id
-                Array.sortInPlaceWith (fun a b -> String.CompareOrdinal(sectorKeys[a], sectorKeys[b])) globalSectorOrder
+                // Dominant-parent spanning-forest angular wedge allocation + group sector gaps (radial fan bouquets)
+                let grpTags, sectorKeys = buildGroupChain eff
+                let domParent = Array.create n -1
+                let treeChildren = Array.init n (fun _ -> ResizeArray<int>())
+                for r = 1 to numRings - 1 do
+                    let mems = ringMembers[r]
+                    for k = 0 to mems.Length - 1 do
+                        let u = mems[k]
+                        let mutable bestP = -1
+                        let mutable bestReach = -1
+                        let mutable bestRing = Int32.MaxValue
+                        for idx = csr.UndirOffsets[u] to csr.UndirOffsets[u + 1] - 1 do
+                            let v = csr.UndirTargets[idx]
+                            let rv = rings[v]
+                            if rv < r then
+                                let rch = reachArr[v]
+                                if rch > bestReach || (rch = bestReach && (rv < bestRing || (rv = bestRing && v < bestP))) then
+                                    bestP <- v
+                                    bestReach <- rch
+                                    bestRing <- rv
+                        if bestP >= 0 then
+                            domParent[u] <- bestP
+                            treeChildren[bestP].Add u
+
+                let subtreeWeight = Array.create n 1.0
+                for r = numRings - 1 downto 0 do
+                    let mems = ringMembers[r]
+                    for k = 0 to mems.Length - 1 do
+                        let u = mems[k]
+                        let kids = treeChildren[u]
+                        let mutable w = 1.0
+                        for c = 0 to kids.Count - 1 do
+                            w <- w + subtreeWeight[kids[c]]
+                        subtreeWeight[u] <- w
+
                 let initAngle = Array.zeroCreate<float> n
-                for pos = 0 to n - 1 do
-                    let u = globalSectorOrder[pos]
-                    initAngle[u] <- wrapAnglePi (-Math.PI + 2. * Math.PI * ((float pos + 0.5) / float n))
+                let inline sortBySector (arr: int[]) =
+                    Array.sortInPlaceWith (fun a b ->
+                        let c = String.CompareOrdinal(sectorKeys[a], sectorKeys[b])
+                        if c <> 0 then c else compare a b) arr
+
+                let rec assignSubtreeWedges (items: int[]) (theta0: float) (theta1: float) (topLevel: bool) =
+                    let m = items.Length
+                    if m > 0 then
+                        sortBySector items
+                        let mutable transitions = 0
+                        if topLevel && m > 1 && config.GroupSectorGap > 0. then
+                            for k = 0 to m - 1 do
+                                let prev = if k = 0 then m - 1 else k - 1
+                                if not (String.Equals(grpTags[items[prev]], grpTags[items[k]], StringComparison.Ordinal)) then
+                                    transitions <- transitions + 1
+                        let span = max 1e-6 (theta1 - theta0)
+                        let gapEach =
+                            if transitions > 0 then
+                                min config.GroupSectorGap (0.25 * span / float transitions)
+                            else
+                                0.
+                        let usableSpan = max (0.25 * span) (span - float transitions * gapEach)
+                        let mutable wSum = 0.
+                        for k = 0 to m - 1 do wSum <- wSum + subtreeWeight[items[k]]
+                        let invW = if wSum > 1e-9 then usableSpan / wSum else usableSpan / float m
+                        let mutable cur = theta0
+                        for k = 0 to m - 1 do
+                            let u = items[k]
+                            if transitions > 0 then
+                                let prev = if k = 0 then m - 1 else k - 1
+                                if not (String.Equals(grpTags[items[prev]], grpTags[u], StringComparison.Ordinal)) then
+                                    cur <- cur + (if k = 0 then 0.5 * gapEach else gapEach)
+                            let wShare = if wSum > 1e-9 then subtreeWeight[u] * invW else invW
+                            let mid = cur + 0.5 * wShare
+                            initAngle[u] <- wrapAnglePi mid
+                            if treeChildren[u].Count > 0 then
+                                assignSubtreeWedges (treeChildren[u].ToArray()) cur (cur + wShare) false
+                            cur <- cur + wShare
+
+                let roots = [| for i in 0 .. n - 1 do if domParent[i] < 0 then yield i |]
+                assignSubtreeWedges roots (-0.5 * Math.PI) (1.5 * Math.PI) true
 
                 let angles = Array.copy initAngle
                 let targetAngles = Array.copy initAngle
@@ -703,8 +924,8 @@ module PoincareDisk =
                         if mems.Length >= 2 then
                             for k = 0 to mems.Length - 1 do
                                 let u = mems[k]
-                                let mutable sumSin = 0.08 * sin initAngle[u] + 0.04 * sin angles[u]
-                                let mutable sumCos = 0.08 * cos initAngle[u] + 0.04 * cos angles[u]
+                                let mutable sumSin = 0.14 * sin initAngle[u] + 0.05 * sin angles[u]
+                                let mutable sumCos = 0.14 * cos initAngle[u] + 0.05 * cos angles[u]
                                 for idx = csr.UndirOffsets[u] to csr.UndirOffsets[u + 1] - 1 do
                                     let v = csr.UndirTargets[idx]
                                     let rv = rings[v]
@@ -721,9 +942,9 @@ module PoincareDisk =
                 if singleCenter then
                     angles[ringMembers[0][0]] <- 0.
 
-                // Binary-search hyperbolic ring spacing so every ring fits inside <= 0.90 * diskRadius without overlap when feasible
+                // Hyperbolic ring sizing + optional sinh(d) multi-row sub-ring splitting & golden-angle staggering
                 let dMaxCap = 2. * Hyperbolic2D.atanhSafe 0.90
-                let inline ringNeed (r: int) (dHyp: float) : float * float =
+                let inline ringNeedAt (r: int) (dHyp: float) : float * float =
                     let rho = min 0.90 (tanh (0.5 * dHyp))
                     let euclidR = diskRadius * rho
                     let s = max config.MinNodeScale (Math.Pow(max 0. (1. - rho * rho), config.ConformalExponent))
@@ -733,70 +954,170 @@ module PoincareDisk =
                     else
                         let mutable need = 0.
                         for k = 0 to mems.Length - 1 do
-                            need <- need + diagArr[mems[k]] * s + 4.
+                            need <- need + diagArr[mems[k]] * s + 3.5
                         euclidR, need
 
                 let d0 =
                     if singleCenter then
                         0.
                     else
-                        let hi0 = if numRings = 1 then dMaxCap * 0.72 else min 1.15 (dMaxCap * 0.42)
-                        let lo0 = 0.22
+                        let hi0 = if numRings = 1 then dMaxCap * 0.65 else min 1.10 (dMaxCap * 0.40)
+                        let lo0 = 0.20
                         let mutable a = lo0
                         let mutable b = max lo0 hi0
                         for _it = 0 to 27 do
                             let mid = 0.5 * (a + b)
-                            let euclidR, need = ringNeed 0 mid
+                            let euclidR, need = ringNeedAt 0 mid
                             if 2. * Math.PI * euclidR >= need then b <- mid else a <- mid
-                        let comfortable0 = if numRings = 1 then max b (min hi0 0.95) else max b (min hi0 0.42)
-                        comfortable0
+                        if numRings = 1 then max b (min hi0 0.78) else max b (min hi0 0.40)
 
-                let stepD =
-                    if numRings <= 1 then
-                        0.
-                    else
-                        let maxStep = max 0.18 (min 3.2 ((dMaxCap - d0) / float (numRings - 1)))
-                        let minStep = min 0.18 maxStep
-                        let feasible (st: float) =
-                            let mutable ok = true
-                            let mutable prevR = if singleCenter then 0. else diskRadius * tanh (0.5 * d0)
-                            let mutable r = 1
-                            while ok && r < numRings do
-                                let d = min dMaxCap (d0 + float r * st)
-                                let euclidR, need = ringNeed r d
-                                if 2. * Math.PI * euclidR < need || euclidR - prevR < 6. then
-                                    ok <- false
-                                prevR <- euclidR
-                                r <- r + 1
-                            ok
-
-                        let mutable lo = minStep
-                        let mutable hi = maxStep
-                        if not (feasible hi) then
-                            hi
-                        else
-                            for _it = 0 to 31 do
-                                let mid = 0.5 * (lo + hi)
-                                if feasible mid then hi <- mid else lo <- mid
-                            let targetRho = min 0.86 (0.36 + 0.15 * float (numRings - 1))
-                            let targetD = 2. * Hyperbolic2D.atanhSafe targetRho
-                            let aestheticFloor = min maxStep (max 0.48 ((targetD - d0) / float (numRings - 1)))
-                            max hi aestheticFloor
-
-                let ringHypD =
-                    Array.init numRings (fun r ->
-                        if r = 0 && singleCenter then 0.
-                        else min dMaxCap (d0 + float r * stepD))
-
-                let ringRadii = Array.init numRings (fun r -> diskRadius * min 0.90 (tanh (0.5 * ringHypD[r])))
-
-                let canonicalDisk =
-                    Array.init n (fun i ->
-                        let r = rings[i]
+                // Simulate logical ring band layout for a candidate hyperbolic unit delta
+                let simulateBands (unitD: float) : float[][] * float =
+                    let subStep = max 0.08 (0.52 * unitD)
+                    let bands = Array.zeroCreate<float[]> numRings
+                    let mutable curD = d0
+                    for r = 0 to numRings - 1 do
+                        let mems = ringMembers[r]
                         if r = 0 && singleCenter then
-                            Hyperbolic2D.origin
+                            bands[r] <- [| 0. |]
                         else
-                            Hyperbolic2D.ofPolar ringHypD[r] angles[i])
+                            if r > 0 then
+                                curD <- if r = 1 && singleCenter then max unitD d0 else curD + unitD
+                            let euclidR0, need0 = ringNeedAt r curD
+                            if (not config.SplitDenseRings) || mems.Length <= 3 || 2. * Math.PI * euclidR0 >= need0 then
+                                bands[r] <- [| curD |]
+                            else
+                                let maxSub = min 12 (max 2 ((mems.Length + 2) / 3))
+                                let rows = ResizeArray<float>(maxSub)
+                                rows.Add curD
+                                let inline subCap (dVal: float) =
+                                    let er, nd = ringNeedAt r dVal
+                                    let avgArc = max 2.5 (nd / float mems.Length)
+                                    max 1 (int (floor (2. * Math.PI * max 2. er / avgArc)))
+                                let mutable capSum = subCap curD
+                                let mutable g = 1
+                                while capSum < mems.Length && g < maxSub do
+                                    let dg = curD + float g * subStep
+                                    rows.Add dg
+                                    capSum <- capSum + subCap dg
+                                    g <- g + 1
+                                let arr = rows.ToArray()
+                                bands[r] <- arr
+                                curD <- arr[arr.Length - 1]
+                    bands, curD
+
+                let bestBands =
+                    if numRings = 1 && singleCenter then
+                        [| [| 0. |] |]
+                    else
+                        let mutable lo = 0.06
+                        let mutable hi = 2.6
+                        for _it = 0 to 35 do
+                            let mid = 0.5 * (lo + hi)
+                            let _, endD = simulateBands mid
+                            if endD <= dMaxCap then lo <- mid else hi <- mid
+                        let targetRho = min 0.86 (0.36 + 0.15 * float (max 1 (numRings - 1)))
+                        let targetD = 2. * Hyperbolic2D.atanhSafe targetRho
+                        let chosenUnit =
+                            let _, endAtLo = simulateBands lo
+                            if endAtLo < targetD && numRings > 1 then
+                                min lo (max (lo * 0.65) ((targetD - d0) / float (max 1 (numRings - 1))))
+                            else
+                                lo
+                        let rawBands, maxEnd = simulateBands chosenUnit
+                        // Compress proportionally into dMaxCap only if extreme density exceeded dMaxCap at minimum step
+                        if maxEnd > dMaxCap && maxEnd > 1e-9 then
+                            let scaleD = dMaxCap / maxEnd
+                            rawBands |> Array.map (fun rowDs -> rowDs |> Array.map (fun d -> d * scaleD))
+                        else
+                            rawBands
+
+                let subRings = Array.zeroCreate<int> n
+                let finalAngles = Array.copy angles
+                let canonicalDisk = Array.zeroCreate<PoincarePoint> n
+                let allRadii = ResizeArray<float>(numRings * 2)
+
+                for r = 0 to numRings - 1 do
+                    let mems = ringMembers[r]
+                    let rowDs = bestBands[r]
+                    for j = 0 to rowDs.Length - 1 do
+                        let rad = diskRadius * min 0.92 (tanh (0.5 * rowDs[j]))
+                        allRadii.Add rad
+
+                    if r = 0 && singleCenter then
+                        let u = mems[0]
+                        subRings[u] <- 0
+                        finalAngles[u] <- 0.
+                        canonicalDisk[u] <- Hyperbolic2D.origin
+                    elif rowDs.Length <= 1 || mems.Length <= 1 then
+                        let dVal = rowDs[0]
+                        for k = 0 to mems.Length - 1 do
+                            let u = mems[k]
+                            subRings[u] <- 0
+                            canonicalDisk[u] <- Hyperbolic2D.ofPolar dVal finalAngles[u]
+                    else
+                        // Multi-row sinh(d) apportionment + golden-angle phyllotactic staggering (matching &Atlas We)
+                        let gCount = rowDs.Length
+                        let m = mems.Length
+                        let sortedMems = Array.copy mems
+                        Array.sortInPlaceWith (fun a b ->
+                            let aa = wrap0To2Pi (angles[a] + 0.5 * Math.PI)
+                            let ab = wrap0To2Pi (angles[b] + 0.5 * Math.PI)
+                            let c = compare aa ab
+                            if c <> 0 then c else compare a b) sortedMems
+
+                        let sinhW = Array.init gCount (fun j -> sinh (max 0.08 rowDs[j]))
+                        let mutable wTot = 0.
+                        for j = 0 to gCount - 1 do wTot <- wTot + sinhW[j]
+                        let exactQuotas = Array.init gCount (fun j -> float m * sinhW[j] / max 1e-9 wTot)
+                        let counts = Array.init gCount (fun j -> int (floor exactQuotas[j]))
+                        let mutable assigned = 0
+                        for j = 0 to gCount - 1 do assigned <- assigned + counts[j]
+                        let remOrder = Array.init gCount id
+                        Array.sortInPlaceWith (fun a b ->
+                            let ra = exactQuotas[a] - float counts[a]
+                            let rb = exactQuotas[b] - float counts[b]
+                            let c = compare rb ra
+                            if c <> 0 then c else compare a b) remOrder
+                        let mutable rIdx = 0
+                        while assigned < m do
+                            counts[remOrder[rIdx % gCount]] <- counts[remOrder[rIdx % gCount]] + 1
+                            assigned <- assigned + 1
+                            rIdx <- rIdx + 1
+
+                        let slots = ResizeArray<struct(int * float)>(m)
+                        for j = 0 to gCount - 1 do
+                            let cj = counts[j]
+                            if cj > 0 then
+                                let phase = float j * goldenAngle
+                                for k = 0 to cj - 1 do
+                                    let at = wrap0To2Pi (((float k + 0.5) * 2. * Math.PI / float cj) + phase)
+                                    slots.Add(struct(j, at))
+
+                        let slotArr = slots.ToArray()
+                        Array.sortInPlaceWith (fun struct(ja, aa) struct(jb, ab) ->
+                            let c = compare aa ab
+                            if c <> 0 then c else compare ja jb) slotArr
+
+                        let mutable cosSum = 0.
+                        let mutable sinSum = 0.
+                        for k = 0 to m - 1 do
+                            let u = sortedMems[k]
+                            let struct(_, slotAt) = slotArr[k]
+                            let diff = angles[u] - slotAt
+                            cosSum <- cosSum + cos diff
+                            sinSum <- sinSum + sin diff
+                        let rot = if abs sinSum > 1e-12 || abs cosSum > 1e-12 then atan2 sinSum cosSum else 0.
+
+                        for k = 0 to m - 1 do
+                            let u = sortedMems[k]
+                            let struct(subJ, slotAt) = slotArr[k]
+                            let ang = wrapAnglePi (rot + slotAt)
+                            subRings[u] <- subJ
+                            finalAngles[u] <- ang
+                            canonicalDisk[u] <- Hyperbolic2D.ofPolar rowDs[subJ] ang
+
+                let ringRadii = allRadii.ToArray()
 
                 Ok
                     { Config = config
@@ -807,8 +1128,9 @@ module PoincareDisk =
                       CanonicalDisk = canonicalDisk
                       CurrentDisk = Array.copy canonicalDisk
                       Rings = rings
-                      CanonicalAngles = angles
-                      CurrentAngles = Array.copy angles
+                      SubRings = subRings
+                      CanonicalAngles = finalAngles
+                      CurrentAngles = Array.copy finalAngles
                       Reach = reachArr
                       RingRadii = ringRadii
                       Focus = Hyperbolic2D.origin }
@@ -856,10 +1178,91 @@ module PoincareDisk =
             { Id = nd.Id
               DiskPosition = state.CurrentDisk[i]
               Ring = state.Rings[i]
+              SubRing = state.SubRings[i]
               Angle = state.CurrentAngles[i]
               BaseWidth = nd.Size.Width
               BaseHeight = nd.Size.Height
               Reach = state.Reach[i] } ]
+
+    /// <summary>Computes perimeter group/module sector arc bands (<c>treeBands</c>) around <c>(diskCenter, diskRadius + radialOffset)</c> ordered around the disk rim.</summary>
+    let sectorArcs (radialOffset: float) (strokeWidth: float) (state: PoincareDiskState) : RimArcSegment list =
+        let eff = state.Eff
+        let n = eff.Nodes.Length
+        if n = 0 || eff.Groups.Length = 0 then
+            []
+        else
+            let arcR = max 1. (state.DiskRadius + (if Double.IsFinite radialOffset then radialOffset else 4.))
+            let sw = max 0.5 (if Double.IsFinite strokeWidth then strokeWidth else 2.)
+            let buckets = Dictionary<string, ResizeArray<float>>(StringComparer.Ordinal)
+            for i = 0 to n - 1 do
+                match eff.Nodes[i].ParentGroup with
+                | Some gid ->
+                    let w = state.CurrentDisk[i]
+                    if w.X * w.X + w.Y * w.Y > 1e-8 then
+                        match buckets.TryGetValue gid with
+                        | true, b -> b.Add(state.CurrentAngles[i])
+                        | _ ->
+                            let b = ResizeArray<float>()
+                            b.Add(state.CurrentAngles[i])
+                            buckets[gid] <- b
+                | None -> ()
+            if buckets.Count = 0 then
+                []
+            else
+                let entries =
+                    [| for kv in buckets ->
+                        let angs = kv.Value
+                        let mutable sSin = 0.
+                        let mutable sCos = 0.
+                        for k = 0 to angs.Count - 1 do
+                            sSin <- sSin + sin angs[k]
+                            sCos <- sCos + cos angs[k]
+                        let meanA = atan2 sSin sCos
+                        kv.Key, angs.Count, wrap0To2Pi (meanA + 0.5 * Math.PI) |]
+                Array.sortInPlaceWith (fun (_, _, a) (_, _, b) -> compare a b) entries
+                let m = entries.Length
+                let mutable totCnt = 0
+                for k = 0 to m - 1 do
+                    let _, c, _ = entries[k]
+                    totCnt <- totCnt + c
+                let gap = if m > 1 then min (max 0.012 state.Config.GroupSectorGap) (0.28 * 2. * Math.PI / float m) else 0.
+                let usable = max (0.5 * Math.PI) (2. * Math.PI - float m * gap)
+                // Align partition rotation to the circular mean angles of the groups
+                let relMids = Array.zeroCreate<float> m
+                let spans = Array.zeroCreate<float> m
+                let mutable cur = 0.
+                let mutable rSin = 0.
+                let mutable rCos = 0.
+                for k = 0 to m - 1 do
+                    let _, c, targetPos = entries[k]
+                    let sp = usable * float c / float (max 1 totCnt)
+                    spans[k] <- sp
+                    let mid = cur + 0.5 * sp
+                    relMids[k] <- mid
+                    let diff = (targetPos - 0.5 * Math.PI) - mid
+                    rSin <- rSin + float c * sin diff
+                    rCos <- rCos + float c * cos diff
+                    cur <- cur + sp + gap
+                let rot = if abs rSin > 1e-12 || abs rCos > 1e-12 then atan2 rSin rCos else -0.5 * Math.PI
+                let out = ResizeArray<RimArcSegment>(m)
+                let mutable aCur = rot
+                for k = 0 to m - 1 do
+                    let gid, _, _ = entries[k]
+                    let sp = spans[k]
+                    let pad = min 0.01 (0.18 * sp)
+                    let a0 = aCur + pad
+                    let a1 = aCur + sp - pad
+                    if a1 > a0 + 1e-5 then
+                        out.Add
+                            { Key = Some gid
+                              Center = state.DiskCenter
+                              Radius = arcR
+                              StartAngle = a0
+                              EndAngle = a1
+                              StrokeWidth = sw
+                              Path = Hyperbolic2D.circularArcPath state.DiskCenter arcR a0 a1 }
+                    aCur <- aCur + sp + gap
+                Seq.toList out
 
     /// <summary>Returns the Euclidean center of the Poincaré disk in viewport coordinates.</summary>
     let diskCenter (state: PoincareDiskState) : Point = state.DiskCenter
@@ -867,7 +1270,7 @@ module PoincareDisk =
     /// <summary>Returns the Euclidean boundary radius of the Poincaré disk in layout units.</summary>
     let diskRadius (state: PoincareDiskState) : float = state.DiskRadius
 
-    /// <summary>Returns the canonical concentric Euclidean ring radii from innermost ring 0 outward.</summary>
+    /// <summary>Returns the canonical concentric Euclidean ring radii (including staggered sub-rows) from innermost ring outward.</summary>
     let ringRadii (state: PoincareDiskState) : float list = Array.toList state.RingRadii
 
     /// <summary>Returns the source <c>DiagramGraph</c> associated with <c>state</c>.</summary>

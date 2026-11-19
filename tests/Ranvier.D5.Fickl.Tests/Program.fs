@@ -356,6 +356,16 @@ let main _ =
         |> ok "ConstellationLayout.compute"
     check (constOut.Layout.Nodes.Length = 30 && not constOut.Clusters.IsEmpty) "ConstellationLayout.compute in JS"
 
+    let rimGauge = Hyperbolic2D.rimGaugeArcs (Point.create 100. 100.) 50. 4. 2.5 [ "verified", 0.5; "progress", 0.2 ]
+    let inlaysJs =
+        ConstellationLayout.inlaySubgraphs
+            (ConstellationConfig.create vp2D)
+            (Map.ofList [ ("t0", [ ("verified", 0.6) ]) ])
+            (Map.ofList [ ("t0", groupedMesh) ])
+            (PoincareDisk.project pdState)
+        |> ok "ConstellationLayout.inlaySubgraphs"
+    check (rimGauge.Length = 3 && inlaysJs.Length = 1 && inlaysJs.Head.Nodes.Length = 30) "Intra-disc rimGaugeArcs and inlaySubgraphs in JS"
+
     let pavaXs = Pava.solveWeighted [ 90.; 40.; 70.; 50. ] [ 1.; 2.; 1.; 2. ] [ 12.; 15.; 10. ] 10. 180. |> ok "Pava.solveWeighted"
     check (pavaXs.Length = 4 && (pavaXs[1]) - (pavaXs[0]) >= 12. - 1e-8) "Pava.solveWeighted in JS"
 

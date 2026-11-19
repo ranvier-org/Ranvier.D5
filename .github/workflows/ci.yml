@@ -17,7 +17,7 @@ jobs:
         os: [windows-latest, ubuntu-24.04, macos-latest]
         traced: [false, true]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -246,6 +246,8 @@ jobs:
           if (Ranvier.D5.Graph.PoincareDisk.project pdState).Nodes.Length <> 2 then failwith "Packed PoincareDisk failed"
           let constOut = Ranvier.D5.Graph.ConstellationLayout.compute (Ranvier.D5.Graph.ConstellationConfig.create (Bounds.create 0. 0. 300. 300.)) diagram |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           if constOut.Layout.Nodes.Length <> 2 then failwith "Packed ConstellationLayout failed"
+          let inlays = Ranvier.D5.Graph.ConstellationLayout.inlaySubgraphs (Ranvier.D5.Graph.ConstellationConfig.create (Bounds.create 0. 0. 300. 300.)) (Map.ofList [("n1", [("verified", 0.5)])]) (Map.ofList [("n1", diagram)]) constOut.Layout |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if inlays.Length <> 1 || inlays.Head.Nodes.Length <> 2 then failwith "Packed inlaySubgraphs failed"
           let isoOut = Ranvier.D5.Graph.IsotonicLayers.compute (Ranvier.D5.Graph.IsotonicLayersConfig.create (Bounds.create 0. 0. 300. 300.)) diagram |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           if isoOut.Layout.Nodes.Length <> 2 then failwith "Packed IsotonicLayers failed"
           let pblOut = Ranvier.D5.Graph3D.PoincareBallLift.morph 0.35 (Ranvier.D5.Graph3D.PoincareBallLiftConfig.create (Point3.create 0. 0. 0.) 120.) pdState

@@ -231,13 +231,63 @@ let private renderDiskSubpanel (prefix: string) (vpBounds: Bounds) (state: Poinc
     let nodeRadii =
         proj.Nodes
         |> List.map (fun pn ->
-            let r = Math.Clamp(min (Bounds.width pn.Bounds) (Bounds.height pn.Bounds) * 0.46, 2.3, 6.8)
+            let baseBoost = if highlightId = Some pn.Id then 13.5 elif Set.contains pn.Id foundationIds then 9.2 else 6.8
+            let r =
+                if highlightId = Some pn.Id then 13.5
+                elif Set.contains pn.Id foundationIds then Math.Clamp(min (Bounds.width pn.Bounds) (Bounds.height pn.Bounds) * 0.72, 4.0, baseBoost)
+                else Math.Clamp(min (Bounds.width pn.Bounds) (Bounds.height pn.Bounds) * 0.46, 2.3, baseBoost)
             pn, r)
+
+    // Build synthetic host layout with circular disc bounds so ConstellationLayout.inlaySubgraphs inscribes internal constellations + rim gauges!
+    let miniPkgGraph =
+        let mGroups = [ DiagramGroup.create "core"; DiagramGroup.create "io"; DiagramGroup.create "codec" ]
+        let mNodes =
+            [ for gi, g in List.indexed mGroups do
+                for k in 0 .. 4 ->
+                    DiagramNode.sized (sprintf "m%d_%d" gi k) 6. 6. |> DiagramNode.inGroup g.Id ]
+        let mEdges =
+            [ for gi in 0 .. 2 do
+                for k in 1 .. 4 do
+                    yield Association.create (sprintf "me_%d_%d" gi k) (sprintf "m%d_%d" gi k) (sprintf "m%d_0" gi)
+              yield Association.create "mx_0" "m1_2" "m0_0"
+              yield Association.create "mx_1" "m2_3" "m1_0" ]
+        DiagramGraph.create mNodes mGroups mEdges |> ok
+
+    let inlayHostLayout =
+        { proj with
+            Nodes =
+                nodeRadii
+                |> List.map (fun (pn, r) ->
+                    { pn with Bounds = Bounds.create (pn.Center.X - r) (pn.Center.Y - r) (2. * r) (2. * r) }) }
+
+    let inlaySubMap =
+        nodeRadii
+        |> List.choose (fun (pn, r) -> if r >= 6.8 then Some(pn.Id, miniPkgGraph) else None)
+        |> Map.ofList
+
+    let rimShareMap =
+        Map.ofList
+            [ "libc", [ "verified", 0.68; "progress", 0.18 ]
+              "zlib", [ "verified", 0.76; "progress", 0.12 ]
+              "crypto", [ "verified", 0.54; "progress", 0.24 ]
+              "tls", [ "verified", 0.62; "progress", 0.22 ]
+              "http", [ "verified", 0.48; "progress", 0.20 ]
+              "sqlite", [ "verified", 0.58; "progress", 0.16 ] ]
+
+    let inlays =
+        ConstellationLayout.inlaySubgraphs
+            { ConstellationConfig.create vpBounds with ClusterMode = ConstellationClusterMode.ExplicitGroups; BundleBeta = 0.82 }
+            rimShareMap
+            inlaySubMap
+            inlayHostLayout
+        |> ok
+
+    let inlayByHost = inlays |> List.map (fun il -> il.HostNodeId, il) |> Map.ofList
 
     let obstacles =
         nodeRadii
         |> List.map (fun (pn, r) ->
-            Bounds.create (pn.Center.X - r) (pn.Center.Y - r) (2. * r) (2. * r))
+            Bounds.create (pn.Center.X - r - 2.) (pn.Center.Y - r - 2.) (2. * r + 4.) (2. * r + 4.))
 
     let labelCandidates =
         nodeRadii
@@ -256,10 +306,10 @@ let private renderDiskSubpanel (prefix: string) (vpBounds: Bounds) (state: Poinc
               Height = hEst
               Priority = boost + reach * 4. + r * 10.
               OffsetCandidates =
-                [ Point.create 0. -(r + 7.2)
-                  Point.create 0. (r + 7.2)
-                  Point.create (r + wEst * 0.5 + 2.8) 0.
-                  Point.create -(r + wEst * 0.5 + 2.8) 0. ] })
+                [ Point.create 0. -(r + 8.5)
+                  Point.create 0. (r + 8.5)
+                  Point.create (r + wEst * 0.5 + 3.2) 0.
+                  Point.create -(r + wEst * 0.5 + 3.2) 0. ] })
 
     let culled = LabelCull.select vpBounds 1.4 obstacles labelCandidates
 
@@ -268,17 +318,70 @@ let private renderDiskSubpanel (prefix: string) (vpBounds: Bounds) (state: Poinc
         | Some hid ->
             match nodeRadii |> List.tryFind (fun (pn, _) -> pn.Id = hid) with
             | Some(pn, r) ->
-                [ Leaf(ringOutline (prefix + ":focus-halo") pn.Center (r + 4.2) (Paint.rgb 245 158 11) 1.8 0.92) ]
+                [ Leaf(ringOutline (prefix + ":focus-halo") pn.Center (r + 4.8) (Paint.rgb 245 158 11) 1.6 0.90) ]
             | None -> []
         | None -> []
 
     let nodeMarks =
         nodeRadii
-        |> List.map (fun (pn, r) ->
-            let fill =
-                if highlightId = Some pn.Id then Paint.rgb 234 88 12
-                else tierColor pn.Id
-            Leaf(discMark (prefix + ":nd:" + pn.Id) pn.Center r fill (Paint.rgb 255 255 255) 1.0))
+        |> List.collect (fun (pn, r) ->
+            let strokeCol = tierColor pn.Id
+            match Map.tryFind pn.Id inlayByHost with
+            | Some il when not il.Nodes.IsEmpty ->
+                // Dark slate disc interior revealing the inlaid internal call-graph constellation + rim verification gauge!
+                let bgDisc = discMark (prefix + ":nd:" + pn.Id) pn.Center r (Paint.rgb 15 23 42) strokeCol 1.15
+                let gaugeMarks =
+                    il.RimGauge
+                    |> List.mapi (fun gi seg ->
+                        let gCol =
+                            match seg.Key with
+                            | Some "verified" -> Paint.rgb 16 185 129
+                            | Some "progress" -> Paint.rgb 245 158 11
+                            | _ -> Paint.rgb 148 163 184
+                        Leaf(
+                            Mark.path (sprintf "%s:rg:%s:%d" prefix pn.Id gi) seg.Path
+                            |> Mark.withFill Paint.none
+                            |> Mark.withStroke gCol (max 1.1 (min 1.9 seg.StrokeWidth))
+                        ))
+                let subDiscRims =
+                    il.Clusters
+                    |> List.filter (fun c -> c.IsLeafCluster)
+                    |> List.mapi (fun ci c ->
+                        Leaf(ringOutline (sprintf "%s:ilc:%s:%d" prefix pn.Id ci) c.Center c.Radius (Paint.rgb 148 163 184) 0.55 0.55))
+                let subEdges =
+                    il.Associations
+                    |> List.mapi (fun ei ea ->
+                        Leaf(
+                            Mark.path (sprintf "%s:ile:%s:%d" prefix pn.Id ei) ea.Path
+                            |> Mark.withFill Paint.none
+                            |> Mark.withStroke (Paint.rgb 125 211 252) 0.55
+                            |> Mark.withOpacity 0.65
+                        ))
+                let subDots =
+                    il.Nodes
+                    |> List.mapi (fun ni sn ->
+                        let dotCol = if ni % 3 = 0 then Paint.rgb 52 211 153 elif ni % 4 = 1 then Paint.rgb 251 191 36 else Paint.rgb 226 232 240
+                        let dr0 = max 0.65 (min 1.35 (r * 0.09))
+                        Leaf(discMark (sprintf "%s:ild:%s:%d" prefix pn.Id ni) sn.Center dr0 dotCol Paint.none 0.))
+                [ Leaf bgDisc ] @ gaugeMarks @ subDiscRims @ subEdges @ subDots
+            | Some il ->
+                let baseDisc = Leaf(discMark (prefix + ":nd:" + pn.Id) pn.Center r strokeCol (Paint.rgb 255 255 255) 0.95)
+                let gaugeMarks =
+                    il.RimGauge
+                    |> List.mapi (fun gi seg ->
+                        let gCol =
+                            match seg.Key with
+                            | Some "verified" -> Paint.rgb 16 185 129
+                            | Some "progress" -> Paint.rgb 245 158 11
+                            | _ -> Paint.rgb 148 163 184
+                        Leaf(
+                            Mark.path (sprintf "%s:rg:%s:%d" prefix pn.Id gi) seg.Path
+                            |> Mark.withFill Paint.none
+                            |> Mark.withStroke gCol 1.15
+                        ))
+                baseDisc :: gaugeMarks
+            | None ->
+                [ Leaf(discMark (prefix + ":nd:" + pn.Id) pn.Center r strokeCol (Paint.rgb 255 255 255) 0.95) ])
 
     let labelMarks =
         culled
@@ -356,83 +459,116 @@ let private constellationGraph =
           DiagramGroup.create "Tls" |> DiagramGroup.inGroup "Protocol"
           DiagramGroup.create "Http" |> DiagramGroup.inGroup "Protocol" ]
     let leafSpecs =
-        [| "Memory", 7; "Arena", 5; "Thread", 5
-           "Lexer", 5; "Parser", 7; "Codegen", 6
-           "Socket", 5; "Tls", 6; "Http", 6 |]
+        [| "Memory", 15; "Arena", 11; "Thread", 10
+           "Lexer", 11; "Parser", 16; "Codegen", 12
+           "Socket", 10; "Tls", 12; "Http", 11 |]
     let nodes =
         [ for m in 0 .. leafSpecs.Length - 1 do
             let modName, fnCount = leafSpecs[m]
             for f in 0 .. fnCount - 1 ->
-                DiagramNode.sized (sprintf "%s_%d" modName f) 10. 9.
+                DiagramNode.sized (sprintf "%s_%d" modName f) 14. 12.
                 |> DiagramNode.inGroup modName ]
     let intra =
         [ for m in 0 .. leafSpecs.Length - 1 do
             let modName, fnCount = leafSpecs[m]
             for f in 1 .. fnCount - 1 do
-                yield Association.create (sprintf "in_%d_%d_a" m f) (sprintf "%s_%d" modName f) (sprintf "%s_%d" modName ((f - 1) / 2))
-                if f >= 3 then
-                    yield Association.create (sprintf "in_%d_%d_b" m f) (sprintf "%s_%d" modName f) (sprintf "%s_%d" modName ((f - 2) / 2)) ]
+                yield Association.create (sprintf "in_%d_%d_a" m f) (sprintf "%s_%d" modName f) (sprintf "%s_%d" modName ((f - 1) / 3))
+                if f >= 4 && f % 2 = 0 then
+                    yield Association.create (sprintf "in_%d_%d_b" m f) (sprintf "%s_%d" modName f) (sprintf "%s_%d" modName ((f - 2) / 3)) ]
     let inter =
         [ // Intra-subsystem calls (violet LCA curves)
-          Association.create "sib_0" "Arena_4" "Memory_0"
-          Association.create "sib_1" "Thread_4" "Memory_1"
-          Association.create "sib_2" "Parser_6" "Lexer_0"
-          Association.create "sib_3" "Codegen_5" "Parser_0"
-          Association.create "sib_4" "Http_5" "Tls_0"
-          Association.create "sib_5" "Tls_5" "Socket_0"
+          Association.create "sib_0" "Arena_8" "Memory_0"
+          Association.create "sib_1" "Thread_7" "Memory_1"
+          Association.create "sib_2" "Parser_12" "Lexer_0"
+          Association.create "sib_3" "Codegen_9" "Parser_0"
+          Association.create "sib_4" "Http_9" "Tls_0"
+          Association.create "sib_5" "Tls_9" "Socket_0"
           // Cross-subsystem calls (amber 2-level LCA highways)
-          Association.create "xsub_0" "Parser_5" "Memory_0"
-          Association.create "xsub_1" "Codegen_4" "Arena_0"
-          Association.create "xsub_2" "Http_4" "Memory_0"
-          Association.create "xsub_3" "Tls_4" "Thread_0"
-          Association.create "xsub_4" "Http_3" "Parser_1"
-          Association.create "xsub_5" "Codegen_3" "Socket_0" ]
+          Association.create "xsub_0" "Parser_14" "Memory_0"
+          Association.create "xsub_1" "Codegen_10" "Arena_0"
+          Association.create "xsub_2" "Http_8" "Memory_0"
+          Association.create "xsub_3" "Tls_8" "Thread_0"
+          Association.create "xsub_4" "Http_6" "Parser_1"
+          Association.create "xsub_5" "Codegen_7" "Socket_0" ]
     DiagramGraph.create nodes groups (intra @ inter) |> ok
 
 let private renderConstellationCard (phase: float) : SceneNode list * Point =
-    let constBounds = Bounds.create 10. 4. 360. 180.
+    let constBounds = Bounds.create 14. 6. 352. 176.
     let beta = Math.Clamp(0.84 + 0.10 * sin phase, 0.70, 0.96)
     let out =
         ConstellationLayout.compute
             { ConstellationConfig.create constBounds with
                 ClusterMode = ConstellationClusterMode.ExplicitGroups
-                ClusterPadding = 8.
+                ClusterPadding = 7.5
                 BundleBeta = beta }
             constellationGraph
         |> ok
 
     let outerDisc =
-        ringOutline "const:outer" out.OuterCenter out.OuterRadius (Paint.rgb 203 213 225) 1.0 0.75
+        discMark "const:outer" out.OuterCenter out.OuterRadius (Paint.rgb 15 23 42) (Paint.rgb 100 116 139) 1.2
+
+    // Outer verification progress rim gauge around the constellation disc (matching &Atlas project drill-down)
+    let outerGaugeMarks =
+        Hyperbolic2D.rimGaugeArcs out.OuterCenter out.OuterRadius 3.6 2.3 [ "verified", 0.58; "progress", 0.21 ]
+        |> List.mapi (fun idx seg ->
+            let col =
+                match seg.Key with
+                | Some "verified" -> Paint.rgb 16 185 129
+                | Some "progress" -> Paint.rgb 245 158 11
+                | _ -> Paint.rgb 148 163 184
+            Leaf(
+                Mark.path (sprintf "const:gauge:%d" idx) seg.Path
+                |> Mark.withFill Paint.none
+                |> Mark.withStroke col seg.StrokeWidth
+                |> Mark.withOpacity (if seg.Key.IsSome then 0.95 else 0.45)
+            ))
 
     let subsysOf (m: string) =
         match m with
-        | "Memory" | "Arena" | "Thread" -> "Runtime"
-        | "Lexer" | "Parser" | "Codegen" -> "Compiler"
+        | "Memory" | "Arena" | "Thread" | "Runtime" -> "Runtime"
+        | "Lexer" | "Parser" | "Codegen" | "Compiler" -> "Compiler"
         | _ -> "Protocol"
 
     let discPalette (cid: string) (isLeaf: bool) =
         if not isLeaf then
-            Paint.rgb 241 245 249, Paint.rgb 148 163 184, 0.58
+            Paint.rgb 30 41 59, Paint.rgb 100 116 139, 0.55
         else
             match subsysOf cid with
-            | "Runtime" -> Paint.rgb 224 242 254, Paint.rgb 2 132 199, 0.76
-            | "Compiler" -> Paint.rgb 224 231 255, Paint.rgb 79 70 229, 0.76
-            | _ -> Paint.rgb 204 251 241, Paint.rgb 13 148 136, 0.76
+            | "Runtime" -> Paint.rgb 12 74 110, Paint.rgb 56 189 248, 0.72
+            | "Compiler" -> Paint.rgb 49 46 129, Paint.rgb 129 140 248, 0.72
+            | _ -> Paint.rgb 19 78 74, Paint.rgb 45 212 191, 0.72
 
     let clusterMarks =
         out.Clusters
+        |> List.filter (fun c -> c.Depth > 0)
         |> List.sortBy (fun c -> c.Depth)
         |> List.collect (fun cd ->
             let fill, stroke, op = discPalette cd.Id cd.IsLeafCluster
             let mainDisc =
-                discMark ("const:disc:" + cd.Id) cd.Center cd.Radius fill stroke (if cd.IsLeafCluster then 1.25 else 1.0)
+                discMark ("const:disc:" + cd.Id) cd.Center cd.Radius fill stroke (if cd.IsLeafCluster then 1.1 else 0.9)
                 |> Mark.withOpacity op
-            if cd.IsLeafCluster && cd.Radius > 14. then
-                let g1 = ringOutline ("const:g1:" + cd.Id) cd.Center (cd.Radius * 0.42) stroke 0.65 0.35
-                let g2 = ringOutline ("const:g2:" + cd.Id) cd.Center (cd.Radius * 0.74) stroke 0.65 0.30
-                [ Leaf mainDisc; Leaf g1; Leaf g2 ]
-            else
-                [ Leaf mainDisc ])
+            let ringGuides =
+                cd.InnerRingRadii
+                |> List.mapi (fun ri r ->
+                    Leaf(ringOutline (sprintf "const:ir:%s:%d" cd.Id ri) cd.Center r stroke 0.55 0.34))
+            let sectorBands =
+                cd.SectorArcs
+                |> List.mapi (fun si sa ->
+                    let sCol =
+                        match sa.Key with
+                        | Some k ->
+                            match subsysOf k with
+                            | "Runtime" -> Paint.rgb 56 189 248
+                            | "Compiler" -> Paint.rgb 129 140 248
+                            | _ -> Paint.rgb 45 212 191
+                        | None -> stroke
+                    Leaf(
+                        Mark.path (sprintf "const:sec:%s:%d" cd.Id si) sa.Path
+                        |> Mark.withFill Paint.none
+                        |> Mark.withStroke sCol (max 1.0 sa.StrokeWidth)
+                        |> Mark.withOpacity 0.68
+                    ))
+            [ Leaf mainDisc ] @ ringGuides @ sectorBands)
 
     let modOf (nid: string) = nid.Split('_')[0]
 
@@ -443,11 +579,11 @@ let private renderConstellationCard (phase: float) : SceneNode list * Point =
             let mV = modOf ra.Target.NodeId
             let stroke, sw, op =
                 if mU = mV then
-                    (if subsysOf mU = "Compiler" then Paint.rgb 67 56 202 elif subsysOf mU = "Runtime" then Paint.rgb 3 105 161 else Paint.rgb 15 118 110), 1.05, 0.65
+                    (if subsysOf mU = "Compiler" then Paint.rgb 165 180 252 elif subsysOf mU = "Runtime" then Paint.rgb 125 211 252 else Paint.rgb 94 234 212), 0.85, 0.58
                 elif subsysOf mU = subsysOf mV then
-                    Paint.rgb 124 58 237, 1.45, 0.78
+                    Paint.rgb 192 132 252, 1.35, 0.78
                 else
-                    Paint.rgb 217 119 6, 1.55, 0.82
+                    Paint.rgb 251 191 36, 1.45, 0.84
             Leaf(
                 Mark.path ("const:edge:" + ra.Id) ra.Path
                 |> Mark.withFill Paint.none
@@ -455,67 +591,70 @@ let private renderConstellationCard (phase: float) : SceneNode list * Point =
                 |> Mark.withOpacity op
             ))
 
-    let nodeFillFor (m: string) =
-        match subsysOf m with
-        | "Runtime" -> Paint.rgb 3 105 161
-        | "Compiler" -> Paint.rgb 67 56 202
-        | _ -> Paint.rgb 15 118 110
+    let nodeFillFor (nid: string) =
+        let h = abs (nid.GetHashCode())
+        if h % 5 = 0 then Paint.rgb 52 211 153
+        elif h % 7 = 0 then Paint.rgb 251 191 36
+        else
+            match subsysOf (modOf nid) with
+            | "Runtime" -> Paint.rgb 186 230 253
+            | "Compiler" -> Paint.rgb 199 210 254
+            | _ -> Paint.rgb 153 246 228
 
     let nodeRadii =
         out.Layout.Nodes
         |> List.map (fun pn ->
-            let r = Math.Clamp(min (Bounds.width pn.Bounds) (Bounds.height pn.Bounds) * 0.42, 2.5, 4.8)
+            let r = Math.Clamp(min (Bounds.width pn.Bounds) (Bounds.height pn.Bounds) * 0.34, 1.4, 3.2)
             pn, r)
 
     let nodeMarks =
         nodeRadii
         |> List.map (fun (pn, r) ->
-            Leaf(discMark ("const:nd:" + pn.Id) pn.Center r (nodeFillFor (modOf pn.Id)) (Paint.rgb 255 255 255) 0.95))
+            Leaf(discMark ("const:nd:" + pn.Id) pn.Center r (nodeFillFor pn.Id) Paint.none 0.))
 
     let obstacles =
         nodeRadii
-        |> List.map (fun (pn, r) -> Bounds.create (pn.Center.X - r - 1.5) (pn.Center.Y - r - 1.5) (2. * r + 3.) (2. * r + 3.))
+        |> List.map (fun (pn, r) -> Bounds.create (pn.Center.X - r - 1.) (pn.Center.Y - r - 1.) (2. * r + 2.) (2. * r + 2.))
 
     let clusterLabelCands =
         out.Clusters
         |> List.filter (fun c -> c.IsLeafCluster)
         |> List.map (fun cd ->
-            let wEst = float cd.Id.Length * 5.8 + 8.
+            let wEst = float cd.Id.Length * 5.6 + 6.
             { LabelCandidate.Id = cd.Id
-              Anchor = Point.create cd.Center.X (cd.Center.Y - cd.Radius + 8.)
+              Anchor = Point.create cd.Center.X (cd.Center.Y - cd.Radius - 5.)
               Width = wEst
-              Height = 12.
+              Height = 11.
               Priority = 100. + cd.Radius
               OffsetCandidates =
                 [ Point.create 0. 0.
-                  Point.create 0. -14.
-                  Point.create 0. (2. * cd.Radius - 16.) ] })
+                  Point.create 0. (2. * cd.Radius + 10.) ] })
 
     let clusterLabels =
-        LabelCull.select constBounds 2.0 obstacles clusterLabelCands
+        LabelCull.select constBounds 1.5 obstacles clusterLabelCands
         |> List.collect (fun pl ->
             let bg =
-                roundedRect pl.Bounds 3.0
+                roundedRect pl.Bounds 2.8
                 |> Mark.path ("const:clbl-bg:" + pl.Id)
-                |> Mark.withFill (Paint.rgb 255 255 255)
-                |> Mark.withOpacity 0.88
-            let txt =
-                Mark.text ("const:clbl:" + pl.Id) (Point.create pl.Center.X (pl.Center.Y + 3.3)) pl.Id
                 |> Mark.withFill (Paint.rgb 15 23 42)
-                |> Mark.withFontSize 8.8
+                |> Mark.withOpacity 0.84
+            let txt =
+                Mark.text ("const:clbl:" + pl.Id) (Point.create pl.Center.X (pl.Center.Y + 3.1)) pl.Id
+                |> Mark.withFill (Paint.rgb 241 245 249)
+                |> Mark.withFontSize 8.2
                 |> Mark.withTextStyle { Family = "sans-serif"; Weight = 700; Anchor = "middle"; Baseline = "alphabetic" }
             [ Leaf bg; Leaf txt ])
 
     let subHead =
-        subLabel "const:sub" 190. 195. (sprintf "3 Subsystems x 3 Modules (52 fns) • LCA beta=%.2f" beta)
+        subLabel "const:sub" 190. 195. (sprintf "108 Fns • Golden-Angle Rings • Sector Arcs • LCA beta=%.2f" beta)
     let footer =
-        Mark.text "const:footer" (Point.create 190. 213.) "Blue/Teal = intra-module Poincare geodesics • Violet/Amber = inter-module LCA splines"
+        Mark.text "const:footer" (Point.create 190. 213.) "Staggered sub-rings + geodesic fans inside discs • Rim verification gauge"
         |> Mark.withFill (Paint.rgb 100 116 139)
         |> Mark.withFontSize 9.0
         |> Mark.withTextStyle { Family = "sans-serif"; Weight = 400; Anchor = "middle"; Baseline = "alphabetic" }
 
     let probePt = (out.Layout.Nodes |> List.find (fun n -> n.Id = "Parser_0")).Center
-    [ Leaf outerDisc ] @ clusterMarks @ edgeMarks @ nodeMarks @ clusterLabels @ [ Leaf subHead; Leaf footer ], probePt
+    [ Leaf outerDisc ] @ outerGaugeMarks @ clusterMarks @ edgeMarks @ nodeMarks @ clusterLabels @ [ Leaf subHead; Leaf footer ], probePt
 
 // ===========================================================================
 // CARD 3: IsotonicLayers — Log-Reach Tiers, PAVA & Disk Unrolling

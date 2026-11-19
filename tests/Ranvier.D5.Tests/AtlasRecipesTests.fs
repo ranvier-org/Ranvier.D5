@@ -607,4 +607,100 @@ let tests =
             Expect.throwsT<OperationCanceledException>
                 (fun () -> PoincareBallLift.liftWithCancellation cancelled 0.3 liftCfg diskState |> ignore)
                 "PoincareBallLift honors cooperative cancellation"
+
+        testCase "Intra-disc patterns: golden-angle SplitDenseRings, HubCount, sectorArcs, rimGaugeArcs and recursive DiscInlay subgraphs" <| fun _ ->
+            // 1. Dense multi-group call graph triggers sinh(d) sub-ring splitting & golden-angle staggering + perimeter sectorArcs
+            let groups = [ DiagramGroup.create "parser"; DiagramGroup.create "runtime"; DiagramGroup.create "crypto" ]
+            let denseNodes =
+                [ yield DiagramNode.sized "core0" 22. 18. |> DiagramNode.inGroup "runtime"
+                  yield DiagramNode.sized "core1" 22. 18. |> DiagramNode.inGroup "crypto"
+                  for k in 0 .. 59 do
+                      let g = if k % 3 = 0 then "parser" elif k % 3 = 1 then "runtime" else "crypto"
+                      yield DiagramNode.sized (sprintf "fn_%02d" k) 20. 16. |> DiagramNode.inGroup g ]
+            let denseEdges =
+                [ for k in 0 .. 59 ->
+                    let tgt = if k % 2 = 0 then "core0" else "core1"
+                    Association.create (sprintf "de_%02d" k) (sprintf "fn_%02d" k) tgt ]
+            let denseGraph = DiagramGraph.create denseNodes groups denseEdges |> ok
+
+            let compactVp = Bounds.create 0. 0. 280. 280.
+            let splitState =
+                PoincareDisk.buildState
+                    { PoincareDiskConfig.create compactVp with
+                        SplitDenseRings = true
+                        HubCount = 1 }
+                    denseGraph
+                |> ok
+
+            let coords = PoincareDisk.nodes splitState
+            let core0 = coords |> List.find (fun c -> c.Id = "core0")
+            Expect.equal core0.Ring 0 "HubCount=1 promotes highest-reach hub core0 to ring 0"
+            let maxSubRing = coords |> List.map (fun c -> c.SubRing) |> List.max
+            Expect.isTrue (maxSubRing >= 1) (sprintf "SplitDenseRings splits crowded 60-leaf ring into >= 2 sub-rows (maxSubRing=%d)" maxSubRing)
+            Expect.isTrue ((PoincareDisk.ringRadii splitState).Length >= 3) "ringRadii exports sub-row radii"
+
+            let secArcs = PoincareDisk.sectorArcs 5. 2.5 splitState
+            Expect.equal secArcs.Length 3 "sectorArcs emits 3 perimeter group bands"
+            for sa in secArcs do
+                Expect.isSome sa.Key "sectorArcs carries group key"
+                Expect.isTrue (sa.EndAngle > sa.StartAngle) "sectorArcs positive angular span"
+                Expect.isNonEmpty (Path.commands sa.Path) "sectorArcs non-empty SVG arc path"
+
+            // 2. Hyperbolic2D.rimGaugeArcs emits named category arcs + unallocated remainder track
+            let gauge =
+                Hyperbolic2D.rimGaugeArcs (Point.create 100. 100.) 60. 6. 3.0 [ "verified", 0.35; "progress", 0.20 ]
+            Expect.equal gauge.Length 3 "2 named shares + 1 remainder track"
+            Expect.equal (gauge |> List.choose (fun g -> g.Key)) [ "verified"; "progress" ] "named gauge keys preserved"
+            Expect.isTrue (gauge |> List.exists (fun g -> g.Key.IsNone)) "remainder track emitted when shares < 1.0"
+
+            // 3. ConstellationLayout exports InnerRingRadii & parent SectorArcs, and inlaySubgraphs embeds miniatures strictly inside host discs
+            let hostDag = buildEcosystemCyclicDag ()
+            let sizedHostNodes =
+                DiagramGraph.nodes hostDag
+                |> List.map (fun n -> DiagramNode.sized n.Id 44. 44.)
+            let hostGraph = DiagramGraph.simple sizedHostNodes (DiagramGraph.associations hostDag) |> ok
+            let hostLayout = PoincareDisk.layout (PoincareDiskConfig.create viewport) hostGraph |> ok
+
+            let subMods = [ DiagramGroup.create "mA"; DiagramGroup.create "mB"; DiagramGroup.create "mC" ]
+            let subNodes =
+                [ for mName in subMods do
+                    for f in 0 .. 7 do
+                        yield DiagramNode.sized (sprintf "%s_%d" mName.Id f) 10. 10. |> DiagramNode.inGroup mName.Id ]
+            let subEdges =
+                [ for mName in subMods do
+                    for f in 1 .. 7 do
+                        yield Association.create (sprintf "in_%s_%d" mName.Id f) (sprintf "%s_%d" mName.Id f) (sprintf "%s_%d" mName.Id ((f - 1) / 2))
+                  yield Association.create "x1" "mA_4" "mB_0"
+                  yield Association.create "x2" "mB_5" "mC_0" ]
+            let subCallGraph = DiagramGraph.create subNodes subMods subEdges |> ok
+
+            let standaloneConst = ConstellationLayout.compute (ConstellationConfig.create viewport) subCallGraph |> ok
+            let rootCluster = standaloneConst.Clusters |> List.find (fun c -> c.Parent.IsNone)
+            Expect.equal rootCluster.SectorArcs.Length 3 "root constellation disc exports 3 child-module tangent SectorArcs"
+            let leafWithRings = standaloneConst.Clusters |> List.filter (fun c -> c.IsLeafCluster && not c.InnerRingRadii.IsEmpty)
+            Expect.isNonEmpty leafWithRings "leaf cluster discs export concentric InnerRingRadii"
+
+            let subMap = Map.ofList [ "libc", subCallGraph; "tls", subCallGraph ]
+            let shareMap = Map.ofList [ "libc", [ "verified", 0.62; "progress", 0.18 ]; "zlib", [ "verified", 0.85 ] ]
+            let inlays =
+                ConstellationLayout.inlaySubgraphs
+                    { ConstellationConfig.create viewport with ClusterMode = ConstellationClusterMode.ExplicitGroups }
+                    shareMap
+                    subMap
+                    hostLayout
+                |> ok
+
+            Expect.equal inlays.Length 3 "inlaySubgraphs emits inlays for libc, tls, and gauge-only zlib"
+            for inlay in inlays do
+                if Map.containsKey inlay.HostNodeId subMap then
+                    Expect.equal inlay.Nodes.Length 24 (sprintf "inlay %s has 24 internal nodes" inlay.HostNodeId)
+                    Expect.isNonEmpty inlay.Clusters (sprintf "inlay %s has nested ClusterDiscs" inlay.HostNodeId)
+                    for pn in inlay.Nodes do
+                        Expect.isTrue
+                            (dist2D inlay.Center pn.Center < inlay.Radius)
+                            (sprintf "inlay %s node %s center strictly inside host disc (%g < %g)" inlay.HostNodeId pn.Id (dist2D inlay.Center pn.Center) inlay.Radius)
+                    for cd in inlay.Clusters do
+                        Expect.isTrue
+                            (dist2D inlay.Center cd.Center + cd.Radius <= inlay.Radius + 1e-3)
+                            (sprintf "inlay %s sub-cluster %s contained inside host disc" inlay.HostNodeId cd.Id)
     ]
