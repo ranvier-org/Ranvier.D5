@@ -4,6 +4,8 @@ open System
 open System.IO
 open System.Text.Json
 open Ranvier.D5
+open Ranvier.D5.Charts
+open Ranvier.D5.Geo
 open Ranvier.D5.Graph
 open Ranvier.D5.Graph3D
 open Ranvier.D5.BenchmarkHarness
@@ -73,6 +75,103 @@ let main args =
         [| for i in 0 .. 9999 ->
             Point3.create (sin (float i * 1.37) * 500.) (cos (float i * 2.11) * 500.) (sin (float i * 0.73 + 1.1) * 500.) |]
     let builtOct = Octree.build id (fun _ -> 1.) octPts
+
+    // Wave 2 benchmark fixtures
+    let boxes2d_10000 =
+        [| for i in 0 .. 9999 ->
+            let x = (sin (float i * 1.31) * 0.5 + 0.5) * 1140.
+            let y = (cos (float i * 1.93) * 0.5 + 0.5) * 760.
+            i, Bounds.create x y (8. + float (i % 15)) (6. + float ((i * 3) % 13)) |]
+    let queries2d_200 =
+        [| for q in 0 .. 199 ->
+            Bounds.create (float ((q * 37) % 1050)) (float ((q * 53) % 680)) 90. 70. |]
+
+    let boxes3d_5000 =
+        [| for i in 0 .. 4999 ->
+            let x = sin (float i * 1.47) * 360.
+            let y = cos (float i * 2.09) * 360.
+            let z = sin (float i * 0.83 + 0.6) * 360.
+            i, Bounds3.create x y z 18. 16. 20. |]
+    let rays3d_500 =
+        [| for r in 0 .. 499 ->
+            let ox = -450. + float ((r * 19) % 200)
+            let oy = -320. + float ((r * 29) % 640)
+            let oz = -320. + float ((r * 41) % 640)
+            Point3.create ox oy oz, Point3.create 1. 0.25 -0.15 |]
+
+    let oloItems120 = [ 0 .. 119 ]
+    let oloDistMat120 =
+        let xs = [| for i in 0 .. 119 -> float (i / 20) * 40. + sin (float i * 1.7) * 5. |]
+        let ys = [| for i in 0 .. 119 -> float ((i / 20) % 3) * 35. + cos (float i * 2.1) * 5. |]
+        [| for i in 0 .. 119 do
+            for j in 0 .. 119 ->
+                Double.Hypot(xs[i] - xs[j], ys[i] - ys[j]) |]
+    let oloDist120 i j = oloDistMat120[i * 120 + j]
+
+    let net1000 = buildMeshNetwork 1000 0
+
+    let hierarchy80Leaves =
+        Hierarchy.node "vtRoot" 0.
+            [ for g in 0 .. 7 ->
+                Hierarchy.node (sprintf "vg%d" g) 0.
+                    [ for k in 0 .. 9 -> Hierarchy.node (sprintf "vl_%d_%d" g k) (1. + float ((g * 3 + k) % 9)) [] ] ]
+
+    let sites3d_250 =
+        [ for i in 0 .. 249 ->
+            let x = -350. + float (i % 5) * 160. + sin (float i * 1.73) * 28.
+            let y = -350. + float ((i / 5) % 5) * 160. + cos (float i * 2.19) * 28.
+            let z = -350. + float (i / 25) * 72. + sin (float i * 1.11 + 0.4) * 22.
+            Point3.create x y z ]
+
+    let hierarchy120Leaves =
+        Hierarchy.node "gmRoot" 0.
+            [ for g in 0 .. 9 ->
+                Hierarchy.node (sprintf "gg%d" g) 0.
+                    [ for k in 0 .. 11 -> Hierarchy.node (sprintf "gl_%d_%d" g k) (1. + float ((g + k) % 7)) [] ] ]
+
+    let net200_400 = buildMeshNetwork 200 6
+    let circ200_400 = CircularLayout.layout (CircularConfig.create vp2D) net200_400 |> ok
+
+    let metroGraph40 =
+        let mNodes = [ for i in 0 .. 23 -> DiagramNode.sized (sprintf "st%d" i) 34. 24. ]
+        let mEdges =
+            [ for i in 0 .. 23 -> Association.create (sprintf "mr_%d" i) (sprintf "st%d" i) (sprintf "st%d" ((i + 1) % 24))
+              for i in 0 .. 15 -> Association.create (sprintf "mx_%d" i) (sprintf "st%d" i) (sprintf "st%d" ((i + 5) % 24)) ]
+        DiagramGraph.simple mNodes mEdges |> ok
+    let metroBase40 = CircularLayout.layout (CircularConfig.create vp2D) metroGraph40 |> ok
+
+    let cola120 = Cola.layout { ColaConfig.create vp2D with Iterations = 25; AvoidOverlaps = true } net120 |> ok
+    let bubbleGroups120 =
+        [ for g in 0 .. 3 ->
+            let gid = sprintf "c%d" g
+            gid,
+            cola120.Nodes
+            |> List.choose (fun n -> if n.ParentGroup = Some gid then Some n.Id else None) ]
+
+    let ds250_16d =
+        [ for i in 0 .. 249 ->
+            let c = i / 50
+            let feats =
+                [ for d in 0 .. 15 ->
+                    float (((c * 7 + d * 3) % 11) - 5) * 4.0
+                    + sin (float (i * 5 + d * 11) * 1.17)
+                    + 0.5 * cos (float (i * 3 + d * 7)) ]
+            sprintf "obs%d" i, feats ]
+        |> FeatureDataset.ofRows
+        |> ok
+
+    let cityTree300 =
+        Hierarchy.node "cityRoot" 0.
+            [ for d in 0 .. 8 ->
+                let leafCount = if d < 2 then 33 else 32
+                Hierarchy.node (sprintf "dist%d" d) 0.
+                    [ for b in 0 .. leafCount - 1 ->
+                        Hierarchy.node (sprintf "bldg_%d_%d" d b) (1. + float ((d * 5 + b) % 12)) [] ] ]
+    let cityCfg300 =
+        CodeCityConfig.create (Bounds.create -300. -300. 600. 600.) 140. (fun id -> float ((id.GetHashCode() &&& 0x7F) + 10))
+
+    let net250_sph = buildMeshNetwork 250 0
+    let sph150_300 = SphericalFibonacci3D.layout (Point3.create 0. 0. 0.) 300. 8 (buildMeshNetwork 150 0) |> ok
 
     let results = [|
         measure "sugiyama-compound-spline-250-nodes" 120. 32000000L (fun () ->
@@ -147,6 +246,109 @@ let main args =
         measure "layered-3d-stratified-250-nodes" 150. 36000000L (fun () ->
             let out = Layered3D.layout (Layered3DConfig.create vp3D) dag250 |> ok
             if out.Nodes.Length <> 250 then failwith "Layered3D 250 node count")
+
+        measure "rtree2d-hilbert-build-and-200-queries-10000" 250. 64000000L (fun () ->
+            let rt = RTree2D.build snd boxes2d_10000
+            if RTree2D.count rt <> 10000 then failwith "RTree2D 10000 count"
+            for q in 0 .. 199 do
+                let hits = RTree2D.search (queries2d_200[q]) rt
+                if hits.Length < 0 then failwith "RTree2D query")
+
+        measure "bvh3d-morton-build-and-500-raycasts-5000" 250. 64000000L (fun () ->
+            let bvh = Bvh3D.build snd boxes3d_5000
+            if Bvh3D.count bvh <> 5000 then failwith "Bvh3D 5000 count"
+            for r in 0 .. 499 do
+                let orig, dir = rays3d_500[r]
+                let hit = Bvh3D.raycastClosest orig dir 1200. bvh
+                if hit.IsSome && snd hit.Value < 0. then failwith "Bvh3D raycast")
+
+        measure "seriation-olo-ward-120-items" 250. 64000000L (fun () ->
+            let tree = Seriation.hierarchicalCluster Linkage.Ward oloItems120 oloDist120 |> ok |> Option.get
+            let ord = Seriation.optimalLeafOrder tree oloDist120
+            if ord.Length <> 120 then failwith "Seriation OLO 120 count")
+
+        measure "leiden-modularity-1000-nodes" 250. 64000000L (fun () ->
+            let part = Leiden.detect LeidenConfig.defaultValue net1000 |> ok
+            if part.CommunityCount < 1 then failwith "Leiden 1000 community count")
+
+        measure "voronoi-treemap-2d-80-leaves" 350. 80000000L (fun () ->
+            let cells =
+                VoronoiTreemap.layout
+                    { VoronoiTreemapConfig.create vp2D with MaxIterations = 35; AreaTolerance = 5e-3 }
+                    hierarchy80Leaves
+                |> ok
+            if cells.Length <> 89 then failwith "VoronoiTreemap 80 leaves cell count")
+
+        measure "voronoi3d-polyhedral-clip-250-sites" 350. 80000000L (fun () ->
+            let cells = Voronoi3D.clipBounds vp3D sites3d_250 |> ok
+            if cells.Length <> 250 then failwith "Voronoi3D 250 sites count")
+
+        measure "gospermap-hex-hierarchy-120-leaves" 250. 64000000L (fun () ->
+            let regs = GosperMap.layout { GosperMapConfig.create vp2D with Order = 3; SmoothIterations = 1 } hierarchy120Leaves |> ok
+            if regs.Length <> 131 then failwith "GosperMap 120 leaves count")
+
+        measure "spherical-fibonacci-voronoi-300-sites" 250. 64000000L (fun () ->
+            let pts = SphericalFibonacci.points 300 |> ok
+            let sites = pts |> List.mapi (fun idx p -> idx, p)
+            let cells = SphericalVoronoi.compute sites |> ok
+            if cells.Length <> 300 then failwith "SphericalVoronoi 300 sites count")
+
+        measure "kde-bundle-2d-400-edges" 350. 80000000L (fun () ->
+            let out = KdeBundle2D.bundle { KdeBundleConfig.defaultValue with GridSize = 96; Iterations = 6 } net200_400 circ200_400 |> ok
+            if out.Associations.Length <> 400 then failwith "KdeBundle2D 400 edges count")
+
+        measure "mingle-bundle-2d-400-edges" 300. 80000000L (fun () ->
+            let out = MingleBundle.bundle MingleConfig.defaultValue net200_400 circ200_400 |> ok
+            if out.Associations.Length <> 400 then failwith "MingleBundle 400 edges count")
+
+        measure "octilinear-metro-router-40-edges" 350. 80000000L (fun () ->
+            let out = OctilinearRouter.route { OctilinearRouterConfig.defaultValue with GridSpacing = 32. } metroGraph40 metroBase40 |> ok
+            if out.Associations.Length <> 40 then failwith "OctilinearRouter 40 edges count")
+
+        measure "bubblesets-contours-120-nodes" 250. 64000000L (fun () ->
+            let regs = BubbleSets.compute { BubbleSetConfig.defaultValue with GridStep = 8. } bubbleGroups120 cola120 |> ok
+            if regs.Length <> 4 then failwith "BubbleSets 120 nodes group count")
+
+        measure "umap2d-250-points-16d" 350. 80000000L (fun () ->
+            let pts = Umap2D.embed { UmapConfig.create vp2D with Neighbors = 12; Epochs = 120 } ds250_16d |> ok
+            if pts.Length <> 250 then failwith "Umap2D 250 points count")
+
+        measure "tsne2d-barnes-hut-250-points-16d" 350. 80000000L (fun () ->
+            let pts = Tsne2D.embed { TsneConfig.create vp2D with Perplexity = 20.; Iterations = 150 } ds250_16d |> ok
+            if pts.Length <> 250 then failwith "Tsne2D 250 points count")
+
+        measure "codecity-treemap3d-300-nodes" 250. 64000000L (fun () ->
+            let bldgs = CodeCity.layout cityCfg300 cityTree300 |> ok
+            let diag = CodeCity.toDiagramLayout bldgs
+            if bldgs.Length <> 300 || diag.Nodes.Length <> 290 then failwith "CodeCity 300 nodes count")
+
+        measure "pack3d-spheres-300-nodes" 250. 64000000L (fun () ->
+            let spheres = Pack3D.layout (Pack3DConfig.create vp3D) cityTree300 |> ok
+            if spheres.Length <> 300 then failwith "Pack3D 300 nodes count")
+
+        measure "spherical-stress-3d-250-nodes" 350. 80000000L (fun () ->
+            let out =
+                SphericalStress3D.layout
+                    { SphericalLayoutConfig.create (Point3.create 0. 0. 0.) 300. with Iterations = 25; ArcSegments = 8 }
+                    net250_sph
+                |> ok
+            if out.Nodes.Length <> 250 then failwith "SphericalStress3D 250 nodes count")
+
+        measure "kde-bundle-3d-300-edges" 350. 96000000L (fun () ->
+            let out =
+                KdeBundle3D.bundle
+                    { KdeBundle3DConfig.defaultValue with GridSize = 36; Iterations = 5; SamplePointsPerEdge = 16 }
+                    sph150_300
+                |> ok
+            if out.Associations.Length <> 300 then failwith "KdeBundle3D 300 edges count")
+
+        measure "umap3d-250-points-16d" 350. 80000000L (fun () ->
+            let pts = Umap3D.embed { Umap3DConfig.create vp3D with Neighbors = 12; Epochs = 120 } ds250_16d |> ok
+            if pts.Length <> 250 then failwith "Umap3D 250 points count")
+
+        measure "tsne3d-barnes-hut-250-points-16d" 400. 96000000L (fun () ->
+            let pts = Tsne3D.embed { Tsne3DConfig.create vp3D with Perplexity = 20.; Iterations = 150 } ds250_16d |> ok
+            if pts.Length <> 250 then failwith "Tsne3D 250 points count")
     |]
 
     let output = if args.Length = 0 then "artifacts/graph-benchmarks.json" else args[0]

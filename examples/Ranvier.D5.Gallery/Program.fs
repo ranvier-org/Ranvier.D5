@@ -11,6 +11,24 @@ open Ranvier.View.Dom
 open Ranvier.View.WebCore
 open Ranvier.View.WebCore.Sdl
 
+let private wave2Showcase kind =
+    match kind with
+    | "spatial-indexing" ->
+        Some("Ranvier.D5 — Space-Filling Curves, R-Trees, BVH & 3D k-NN", SpatialOrganisationGallery.sceneSpatialIndexing, SpatialOrganisationGallery.probesSpatialIndexing)
+    | "seriation-sets" ->
+        Some("Ranvier.D5 — Matrix Seriation, DBSCAN, UpSet & Euler/Venn", SpatialOrganisationGallery.sceneSeriationSets, SpatialOrganisationGallery.probesSeriationSets)
+    | "voronoi-treemaps" ->
+        Some("Ranvier.D5 — Power Diagrams, CVT, Voronoi & Gosper Treemaps", SpatialOrganisationGallery.sceneVoronoiTreemaps, SpatialOrganisationGallery.probesVoronoiTreemaps)
+    | "bundling-routing" ->
+        Some("Ranvier.D5.Graph — Leiden, Edge Bundling, 45° Metro & Analytical", NetworkManifoldsGallery.sceneBundlingRouting, NetworkManifoldsGallery.probesBundlingRouting)
+    | "cluster-manifolds-2d" ->
+        Some("Ranvier.D5.Graph — PRISM, GMap, BubbleSets & 2D Manifolds", NetworkManifoldsGallery.sceneClusterManifolds2D, NetworkManifoldsGallery.probesClusterManifolds2D)
+    | "hierarchies-3d" ->
+        Some("Ranvier.D5.Graph3D — Treemap3D, CodeCity, Pack3D & Voronoi3D", Spatial3DGallery.sceneHierarchies3D, Spatial3DGallery.probesHierarchies3D)
+    | "spherical-manifolds-3d" ->
+        Some("Ranvier.D5.Geo & Graph3D — Spherical Voronoi, Geodesic Stress & 3D Manifolds", Spatial3DGallery.sceneSphericalManifolds3D, Spatial3DGallery.probesSphericalManifolds3D)
+    | _ -> None
+
 let mount (host: WebCoreHost) graph read =
     let container = host.Document.createElement "div"
     host.Document.body.appendChild container |> ignore
@@ -397,6 +415,33 @@ let capture kind path =
             if Object.ReferenceEquals(before,graph.Run(fun () -> scene.Value)) then failwith "Graph gallery signal did not update the scene."
             verify 0.75
             {new IDisposable with member _.Dispose()=mounted.Dispose()}
+        elif (wave2Showcase kind).IsSome then
+            let _,build,probes=(wave2Showcase kind).Value
+            let phase=graph.Run(fun () -> Api.createSignal 0.)
+            let scene=graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) build)
+            let mounted=mount host graph (fun () -> scene.Value)
+            let verify value =
+                host.Cycle()
+                host.Frame()
+                let struct(w,h)=host.PaintSize
+                let pixels=Array.zeroCreate<byte>(w*h*4)
+                host.Paint pixels
+                for label,(point:Point) in probes value do
+                    let x,y=int(Math.Round point.X)+8,int(Math.Round point.Y)+8
+                    if x<0 || x>=w || y<0 || y>=h then
+                        failwithf "Wave 2 gallery %s probe %s landed out of bounds at (%d,%d) within %dx%d." kind label x y w h
+                    let i=(y*w+x)*4
+                    let r,g,b=int pixels[i],int pixels[i+1],int pixels[i+2]
+                    if r>=248 && g>=250 && b>=252 then
+                        failwithf "Wave 2 gallery %s probe %s did not paint over card background at (%d,%d): (%d,%d,%d)." kind label x y r g b
+            verify 0.
+            let before=graph.Run(fun () -> scene.Value)
+            graph.Run(fun () -> phase.Value<-0.75)
+            if Object.ReferenceEquals(before,graph.Run(fun () -> scene.Value)) then
+                failwithf "Wave 2 gallery %s signal did not update the scene." kind
+            verify 0.75
+            graph.Run(fun () -> phase.Value<-0.)
+            {new IDisposable with member _.Dispose()=mounted.Dispose()}
         elif kind="linked" then
             let owner,_,_,_,_=Ranvier.D5.Examples.LinkedCharts.mount host graph
             owner :> IDisposable
@@ -478,6 +523,19 @@ let main args =
         use window=Window.Create((if is3D then "Ranvier.D5.Graph3D — H3, Walrus & 3D layouts" else "Ranvier.D5.Graph — compound & association engines"),820,590)
         let phase=window.Graph.Run(fun () -> Api.createSignal 0.)
         let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) (if is3D then GraphLayoutsGallery.scene3D else GraphLayoutsGallery.scene2D))
+        let mounted=mount window.Host window.Graph (fun () -> scene.Value)
+        let timer=Stopwatch.StartNew()
+        while window.Step() do window.Graph.Run(fun () -> phase.Value<-0.5-0.5*cos(timer.Elapsed.TotalSeconds*0.5))
+        mounted.Dispose()
+    elif args.Length=2 && args[0].StartsWith "--capture-" && (wave2Showcase (args[0].Substring 10)).IsSome then
+        capture (args[0].Substring 10) args[1]
+    elif args |> Array.exists(fun arg -> arg.StartsWith "--" && (wave2Showcase (arg.Substring 2)).IsSome) then
+        let winTitle,build,_=
+            args
+            |> Array.pick(fun arg -> if arg.StartsWith "--" then wave2Showcase (arg.Substring 2) else None)
+        use window=Window.Create(winTitle,820,590)
+        let phase=window.Graph.Run(fun () -> Api.createSignal 0.)
+        let scene=window.Graph.Run(fun () -> Reactive.derive (fun () -> phase.Value) build)
         let mounted=mount window.Host window.Graph (fun () -> scene.Value)
         let timer=Stopwatch.StartNew()
         while window.Step() do window.Graph.Run(fun () -> phase.Value<-0.5-0.5*cos(timer.Elapsed.TotalSeconds*0.5))

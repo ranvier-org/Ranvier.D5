@@ -10,6 +10,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Ranvier.D5/Ranvier.D5.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.Geo/Ranvier.D5.Geo.fsproj" />
     <ProjectReference Include="../../src/Ranvier.D5.Graph/Ranvier.D5.Graph.fsproj" />
     <ProjectReference Include="../../src/Ranvier.D5.Graph3D/Ranvier.D5.Graph3D.fsproj" />
   </ItemGroup>

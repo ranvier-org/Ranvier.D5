@@ -2,6 +2,42 @@
 
 Every image below comes from a working native WebCore view. For complete animated dashboards built from these pieces, see the [live dashboards app](../Ranvier.D5.Dashboards/README.md).
 
+## Spatial indexing, seriation, sets & non-rectangular treemaps
+
+![Native 2D/3D space-filling curves, packed Hilbert R-trees, BVH raycast and 3D k-NN](../../docs/images/spatial-indexing.png)
+
+![Native RCM, Fiedler, Bar-Joseph OLO & bicluster seriation, 2D/3D DBSCAN, UpSet and Euler/Venn](../../docs/images/seriation-sets.png)
+
+![Native Aurenhammer power diagrams, L-BFGS CVT, polygonal Voronoi treemaps, ordered treemaps and Peano-Gosper hex maps](../../docs/images/voronoi-treemaps.png)
+
+Run `--spatial-indexing`, `--seriation-sets`, or `--voronoi-treemaps`; capture with
+`--capture-spatial-indexing artifacts/spatial-indexing.bmp`, `--capture-seriation-sets artifacts/seriation-sets.bmp`,
+and `--capture-voronoi-treemaps artifacts/voronoi-treemaps.bmp`. Each capture verifies painted native WebCore pixels
+across all four panels at two reactive signal phases before snapping back to canonical `phase = 0`.
+[Source](SpatialOrganisationGallery.fs).
+
+## Community bundling, 45° metro routing, cluster contours & 2D manifolds
+
+![Native Leiden communities, Holten HEB, Gansner MINGLE, Selassie Divided FDEB, Hurter KDE2D, LOOM 45° metro routing and analytical layouts](../../docs/images/bundling-routing.png)
+
+![Native PRISM overlap removal, GMap Voronoi countries, Collins BubbleSets, Umap2D, Barnes-Hut Tsne2D, Isomap2D and Sammon2D](../../docs/images/cluster-manifolds-2d.png)
+
+Run `--bundling-routing` or `--cluster-manifolds-2d`; capture with
+`--capture-bundling-routing artifacts/bundling-routing.bmp` and
+`--capture-cluster-manifolds-2d artifacts/cluster-manifolds-2d.bmp`.
+[Source](NetworkManifoldsGallery.fs).
+
+## 3D volumetric hierarchies, spherical Voronoi & 3D manifolds
+
+![Native Treemap3D (CubeHilbert, CubeSquarified, StepTree), Wettel-Lanza CodeCity, Pack3D and Rycroft Voronoi3D / VoronoiTreemap3D](../../docs/images/hierarchies-3d.png)
+
+![Native Keinert SphericalFibonacci, SphericalVoronoi CVT, SphericalStress3D, HierarchicalBundle3D, CUBu KdeBundle3D and 3D manifold quartet](../../docs/images/spherical-manifolds-3d.png)
+
+Run `--hierarchies-3d` or `--spherical-manifolds-3d`; capture with
+`--capture-hierarchies-3d artifacts/hierarchies-3d.bmp` and
+`--capture-spherical-manifolds-3d artifacts/spherical-manifolds-3d.bmp`.
+[Source](Spatial3DGallery.fs).
+
 ## Compound diagram & 3D hyperbolic graph layouts
 
 ![Native Sugiyama orthogonal association machine, IPSep-CoLa and fCoSE](../../docs/images/graph-layouts.png)
