@@ -27,6 +27,8 @@ let private wave2Showcase kind =
         Some("Ranvier.D5.Graph3D — Treemap3D, CodeCity, Pack3D & Voronoi3D", Spatial3DGallery.sceneHierarchies3D, Spatial3DGallery.probesHierarchies3D)
     | "spherical-manifolds-3d" ->
         Some("Ranvier.D5.Geo & Graph3D — Spherical Voronoi, Geodesic Stress & 3D Manifolds", Spatial3DGallery.sceneSphericalManifolds3D, Spatial3DGallery.probesSphericalManifolds3D)
+    | "atlas-recipes" ->
+        Some("Ranvier.D5.Graph & Graph3D — Poincaré Disk, Constellations, Isotonic PAVA & 3D Ball Lift", AtlasRecipesGallery.sceneAtlasRecipes, AtlasRecipesGallery.probesAtlasRecipes)
     | _ -> None
 
 let mount (host: WebCoreHost) graph read =

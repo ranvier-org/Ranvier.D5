@@ -331,5 +331,57 @@ let main _ =
     let sam3Pts = Sammon3D.embed vp3D DistanceMetric.Euclidean 40 42u featDs |> ok "Sammon3D.embed"
     check (umap3Diag.Nodes.Length = 30 && tsne3Pts.Length = 30 && iso3Pts.Length = 30 && sam3Pts.Length = 30) "3D manifold embeddings in JS"
 
-    printfn "Fickl JS runtime suite passed: all Wave 1 and Wave 2 2D/3D spatial, organisation and manifold engines executed cleanly in JavaScript."
+    // 10. Atlas Recipes: Hyperbolic2D, PoincareDisk, ConstellationLayout, Pava, IsotonicLayers, LabelCull & PoincareBallLift
+    let hpA = Hyperbolic2D.ofPolar 1.1 0.4
+    let hpB = Hyperbolic2D.ofPolar 1.8 -0.9
+    let hpF = Hyperbolic2D.ofPolar 0.9 1.2
+    let hpF0, _ = Hyperbolic2D.mobiusTranslate hpF hpF
+    let hpA1, _ = Hyperbolic2D.mobiusTranslate hpF hpA
+    let hpB1, _ = Hyperbolic2D.mobiusTranslate hpF hpB
+    check
+        (abs hpF0.X < 1e-11 && abs hpF0.Y < 1e-11 && abs (Hyperbolic2D.distance hpA hpB - Hyperbolic2D.distance hpA1 hpB1) < 1e-8)
+        "Hyperbolic2D.mobiusTranslate isometry in JS"
+
+    let pdState = PoincareDisk.buildState (PoincareDiskConfig.create vp2D) treeGraph |> ok "PoincareDisk.buildState"
+    let pdFocused = PoincareDisk.focusNode "t5" pdState |> ok "PoincareDisk.focusNode" |> PoincareDisk.project
+    let t5Node = pdFocused.Nodes |> List.find (fun n -> n.Id = "t5")
+    check
+        (pdFocused.Nodes.Length = 31 && sqrt (Point.distanceSquared (PoincareDisk.diskCenter pdState) t5Node.Center) < 1e-5)
+        "PoincareDisk.focusNode in JS"
+
+    let constOut =
+        ConstellationLayout.compute
+            { ConstellationConfig.create vp2D with ClusterMode = ConstellationClusterMode.HybridGroupsAndLeiden(8, 1.0) }
+            groupedMesh
+        |> ok "ConstellationLayout.compute"
+    check (constOut.Layout.Nodes.Length = 30 && not constOut.Clusters.IsEmpty) "ConstellationLayout.compute in JS"
+
+    let pavaXs = Pava.solveWeighted [ 90.; 40.; 70.; 50. ] [ 1.; 2.; 1.; 2. ] [ 12.; 15.; 10. ] 10. 180. |> ok "Pava.solveWeighted"
+    check (pavaXs.Length = 4 && (pavaXs[1]) - (pavaXs[0]) >= 12. - 1e-8) "Pava.solveWeighted in JS"
+
+    let pdBase2D = PoincareDisk.project pdState
+    let isoOut =
+        IsotonicLayers.compute
+            { IsotonicLayersConfig.create vp2D with ReferenceLayout = Some pdBase2D }
+            treeGraph
+        |> ok "IsotonicLayers.compute"
+    let isoMid = IsotonicLayers.interpolate 0.5 pdBase2D isoOut.Layout |> ok "IsotonicLayers.interpolate"
+    check (isoOut.Layout.Nodes.Length = 31 && isoMid.Nodes.Length = 31) "IsotonicLayers in JS"
+
+    let culledLbls =
+        LabelCull.select
+            vp2D
+            4.
+            []
+            [ { LabelCandidate.Id = "l1"; Anchor = Point.create 120. 120.; Width = 44.; Height = 14.; Priority = 10.; OffsetCandidates = [ Point.create 0. 0. ] }
+              { LabelCandidate.Id = "l2"; Anchor = Point.create 122. 120.; Width = 44.; Height = 14.; Priority = 2.; OffsetCandidates = [ Point.create 0. 0. ] } ]
+    check (culledLbls.Length = 1 && culledLbls.Head.Id = "l1") "LabelCull.select in JS"
+
+    let pbl0 = PoincareBallLift.morph 0.0 (PoincareBallLiftConfig.create (Point3.create 0. 0. 0.) 200.) pdState
+    let pbl1 = PoincareBallLift.morph 1.0 (PoincareBallLiftConfig.create (Point3.create 0. 0. 0.) 200.) pdState
+    check
+        (pbl0.Nodes.Length = 31 && (pbl1.Nodes |> List.forall (fun n -> abs n.Center.Z < 1e-8)))
+        "PoincareBallLift.morph in JS"
+
+    printfn "Fickl JS runtime suite passed: all Wave 1, Wave 2 and Atlas Recipe 2D/3D engines executed cleanly in JavaScript."
     0

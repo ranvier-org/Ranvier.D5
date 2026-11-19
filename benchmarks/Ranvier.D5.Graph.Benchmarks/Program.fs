@@ -173,6 +173,18 @@ let main args =
     let net250_sph = buildMeshNetwork 250 0
     let sph150_300 = SphericalFibonacci3D.layout (Point3.create 0. 0. 0.) 300. 8 (buildMeshNetwork 150 0) |> ok
 
+    let dag500_1000 =
+        let dNodes = [ for i in 0 .. 499 -> DiagramNode.sized (sprintf "pk%d" i) 30. 20. ]
+        let dEdges =
+            [ for i in 0 .. 498 ->
+                Association.create (sprintf "dc_%d" i) (sprintf "pk%d" i) (sprintf "pk%d" (min 499 (i + 1 + (i % 5))))
+              for k in 0 .. 500 ->
+                let s = (k * 7) % 494
+                let t = min 499 (s + 2 + (k % 13))
+                Association.create (sprintf "ds_%d" k) (sprintf "pk%d" s) (sprintf "pk%d" t) ]
+        DiagramGraph.simple dNodes dEdges |> ok
+    let pdState500 = PoincareDisk.buildState (PoincareDiskConfig.create vp2D) dag500_1000 |> ok
+
     let results = [|
         measure "sugiyama-compound-spline-250-nodes" 120. 32000000L (fun () ->
             let out = Sugiyama.layout { SugiyamaConfig.create vp2D with Routing = SugiyamaRouting.CubicSpline } dag250 |> ok
@@ -349,6 +361,26 @@ let main args =
         measure "tsne3d-barnes-hut-250-points-16d" 400. 96000000L (fun () ->
             let pts = Tsne3D.embed { Tsne3DConfig.create vp3D with Perplexity = 20.; Iterations = 150 } ds250_16d |> ok
             if pts.Length <> 250 then failwith "Tsne3D 250 points count")
+
+        measure "poincare-disk-2d-500-nodes-1000-edges" 250. 64000000L (fun () ->
+            let out = PoincareDisk.layout (PoincareDiskConfig.create vp2D) dag500_1000 |> ok
+            if out.Nodes.Length <> 500 then failwith "PoincareDisk 500 nodes count")
+
+        measure "constellation-hybrid-300-nodes-600-edges" 250. 64000000L (fun () ->
+            let out =
+                ConstellationLayout.compute
+                    { ConstellationConfig.create vp2D with ClusterMode = ConstellationClusterMode.HybridGroupsAndLeiden(24, 1.0) }
+                    net300
+                |> ok
+            if out.Layout.Nodes.Length <> 300 then failwith "ConstellationLayout 300 nodes count")
+
+        measure "isotonic-layers-pava-500-nodes" 250. 64000000L (fun () ->
+            let out = IsotonicLayers.compute (IsotonicLayersConfig.create vp2D) dag500_1000 |> ok
+            if out.Layout.Nodes.Length <> 500 then failwith "IsotonicLayers 500 nodes count")
+
+        measure "poincare-ball-lift-3d-500-nodes" 250. 64000000L (fun () ->
+            let out = PoincareBallLift.morph 0.25 (PoincareBallLiftConfig.create (Point3.create 0. 0. 0.) 300.) pdState500
+            if out.Nodes.Length <> 500 then failwith "PoincareBallLift 500 nodes count")
     |]
 
     let output = if args.Length = 0 then "artifacts/graph-benchmarks.json" else args[0]

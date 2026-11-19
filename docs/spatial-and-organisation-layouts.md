@@ -97,6 +97,19 @@ Placed in core `Ranvier.D5` so `Ranvier.D5.Charts`, `Ranvier.D5.Geo`, `Ranvier.D
 
 ---
 
+## 8. 2D Poincaré Disk DAGs, Multi-Scale Constellations, PAVA Isotonic Unrolling & 3D Conformal Ball Lift (`Ranvier.D5.Graph` & `Ranvier.D5.Graph3D`)
+
+| Module | Space | Algorithms & Capabilities |
+|---|---|---|
+| `Hyperbolic2D` & `PoincareDisk` (`Ranvier.D5.Graph`) | 2D / $\mathbb{D}^2$ | Open unit Poincaré disk, Lamping–Rao–Pirolli (1995) conformal Möbius focus automorphism $T_a(z) = \frac{z - a}{1 - \bar{a} z}$ (`focusNode`, `focusPoint`), orthogonal Poincaré geodesic circular arcs (`ArcTo`), and concentric hyperbolic DAG ring sizing (`LongestPath` & `LogTransitiveReach`, `FoundationsInner` & `RootsInner`, $2\pi\sinh(d)$ binary search + circular barycenter sweeps) |
+| `ConstellationLayout` (`Ranvier.D5.Graph`) | 2D | Multi-scale compound module/call-graph constellations: `ExplicitGroups`, `LeidenAuto`, or `HybridGroupsAndLeiden` clustering, recursive front-chain circle packing + exact Apollonius/Welzl minimum enclosing discs (`encloseDiscs`), intra-cluster `PoincareDisk` rings + orthogonal geodesic arcs, and inter-cluster LCA bundled splines |
+| `Pava`, `IsotonicLayers` & `LabelCull` (`Ranvier.D5.Graph`) | 2D | Exact $O(n)$ weighted Pool Adjacent Violators (`Pava.solveWeighted`) box separation, bitset transitive reach (`computeReach`), water-filling stratified bands (`IsotonicLayers`) with `PoincareDisk` angular unrolling and continuous `interpolate` morphing, plus uniform spatial-grid `LabelCull.select` |
+| `PoincareBallLift` (`Ranvier.D5.Graph3D`) | 2D $\leftrightarrow$ 3D | Conformal 2D Poincaré disk $\to$ 3D Poincaré ball lifting (FNV-1a deterministic spherical elevation, $\tanh(\operatorname{atanh}(\rho)\cdot\text{boost})$ radial boost, quaternion SLERP rotation, conformal ball scaling, inward $\mathbb{H}^3$ geodesic chains, and continuous `morph` `fold: 0 -> 1`) |
+
+![2D Poincaré Disk, Modularity Constellations, PAVA Layers & 3D Ball Lift](images/atlas-recipes.png)
+
+---
+
 ## Reproducing Interactive Native Views & Lossless Captures
 
 ```sh
@@ -108,6 +121,7 @@ dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --bundling-routin
 dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --cluster-manifolds-2d
 dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --hierarchies-3d
 dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --spherical-manifolds-3d
+dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --atlas-recipes
 
 # Headless native BMP captures + lossless PNG conversion
 dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --capture-spatial-indexing artifacts/spatial-indexing.bmp
@@ -117,6 +131,7 @@ dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --capture-bundlin
 dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --capture-cluster-manifolds-2d artifacts/cluster-manifolds-2d.bmp
 dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --capture-hierarchies-3d artifacts/hierarchies-3d.bmp
 dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --capture-spherical-manifolds-3d artifacts/spherical-manifolds-3d.bmp
+dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --capture-atlas-recipes artifacts/atlas-recipes.bmp
 python tools/document-snapshots.py
 ```
 
@@ -148,3 +163,7 @@ All figures below are **measured here** via `dotnet run --project benchmarks/Ran
 | `kde-bundle-3d-300-edges` | `4.423` | `5.821` | `1,278,192` |
 | `umap3d-250-points-16d` | `33.413` | `35.348` | `331,608` |
 | `tsne3d-barnes-hut-250-points-16d` | `26.728` | `29.352` | `1,595,752` |
+| `poincare-disk-2d-500-nodes-1000-edges` | `1.608` | `7.008` | `1,837,032` |
+| `constellation-hybrid-300-nodes-600-edges` | `1.100` | `2.791` | `2,722,672` |
+| `isotonic-layers-pava-500-nodes` | `1.402` | `3.307` | `2,592,688` |
+| `poincare-ball-lift-3d-500-nodes` | `0.758` | `1.698` | `1,526,168` |

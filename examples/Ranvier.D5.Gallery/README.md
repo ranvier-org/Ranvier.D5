@@ -38,6 +38,16 @@ Run `--hierarchies-3d` or `--spherical-manifolds-3d`; capture with
 `--capture-spherical-manifolds-3d artifacts/spherical-manifolds-3d.bmp`.
 [Source](Spatial3DGallery.fs).
 
+## Hyperbolic Poincaré disk, modularity constellations, isotonic PAVA layers & 3D ball lift
+
+![Native 2D Poincaré disk with Möbius focus, Welzl-packed modularity constellations, PAVA isotonic dependency strata and 3D conformal Poincaré ball unfold](../../docs/images/atlas-recipes.png)
+
+Run `--atlas-recipes`; capture with `--capture-atlas-recipes artifacts/atlas-recipes.bmp`.
+One signal drives Möbius focus panning on the 2D Poincaré disk, Holten LCA bundling tension across Welzl-packed
+constellations, continuous disk-to-layer PAVA unrolling, and 3D conformal Poincaré ball quaternion orbit and
+`fold` collapse onto the flat `Z = 0` disk.
+[Source](AtlasRecipesGallery.fs).
+
 ## Compound diagram & 3D hyperbolic graph layouts
 
 ![Native Sugiyama orthogonal association machine, IPSep-CoLa and fCoSE](../../docs/images/graph-layouts.png)
