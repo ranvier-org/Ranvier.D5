@@ -172,26 +172,26 @@ module HierarchicalBundle3D =
                             pos3D[u] <- pt
                             hasPos[u] <- true
                         | _ ->
-                            match groupPos.TryGetValue uid with
-                            | true, gp ->
-                                pos3D[u] <- gp
+                            let ch = children[u]
+                            let mutable sx, sy, sz = 0., 0., 0.
+                            let mutable cnt = 0
+                            for k = 0 to ch.Length - 1 do
+                                let c = ch[k]
+                                if hasPos[c] then
+                                    sx <- sx + pos3D[c].X
+                                    sy <- sy + pos3D[c].Y
+                                    sz <- sz + pos3D[c].Z
+                                    cnt <- cnt + 1
+                            if cnt > 0 then
+                                let inv = 1. / float cnt
+                                pos3D[u] <- Point3.create (sx * inv) (sy * inv) (sz * inv)
                                 hasPos[u] <- true
-                            | _ ->
-                                let ch = children[u]
-                                let mutable sx, sy, sz = 0., 0., 0.
-                                let mutable cnt = 0
-                                for k = 0 to ch.Length - 1 do
-                                    let c = ch[k]
-                                    if hasPos[c] then
-                                        sx <- sx + pos3D[c].X
-                                        sy <- sy + pos3D[c].Y
-                                        sz <- sz + pos3D[c].Z
-                                        cnt <- cnt + 1
-                                if cnt > 0 then
-                                    let inv = 1. / float cnt
-                                    pos3D[u] <- Point3.create (sx * inv) (sy * inv) (sz * inv)
+                            else
+                                match groupPos.TryGetValue uid with
+                                | true, gp ->
+                                    pos3D[u] <- gp
                                     hasPos[u] <- true
-                                else
+                                | _ ->
                                     pos3D[u] <- fallbackCenter
 
                     let missing = ResizeArray<LayoutError>()

@@ -28,7 +28,9 @@ type ConeTree3DConfig =
       /// <summary>Axial distance between parent apex and child cone base (or radial step in balloon mode).</summary>
       LevelStep: float
       /// <summary>Minimum sibling clearance gap on cone perimeters / balloon spheres.</summary>
-      SiblingGap: float }
+      SiblingGap: float
+      /// <summary>Axial progression direction for <c>VerticalCone</c> (<c>+Y</c> vs <c>-Y</c>) and <c>HorizontalCam</c> (<c>+X</c> vs <c>-X</c>); default <c>VerticalDirection3D.Increasing</c>.</summary>
+      Direction: VerticalDirection3D }
 
 /// <summary>Constructors for <c>ConeTree3DConfig</c>.</summary>
 [<RequireQualifiedAccess>]
@@ -40,7 +42,8 @@ module ConeTree3DConfig =
           RootId = None
           SpanningStrategy = SpanningTreeStrategy.Bfs
           LevelStep = 110.
-          SiblingGap = 20. }
+          SiblingGap = 20.
+          Direction = VerticalDirection3D.Increasing }
 
 /// <summary>Robertson-Mackinlay-Card (1991) 3D Cone Trees and Carrière-Kazman (1995) 3D Spherical Balloon Trees.</summary>
 [<RequireQualifiedAccess>]
@@ -143,6 +146,11 @@ module ConeTree3D =
                 let yUnit = Point3.create 0. 1. 0.
                 let qNodes = Array.zeroCreate<int> n
                 let qDirs = Array.zeroCreate<Point3> n
+                let axialSign =
+                    match config.Direction with
+                    | VerticalDirection3D.Increasing -> 1.
+                    | VerticalDirection3D.Decreasing -> -1.
+                let axialStep = axialSign * config.LevelStep
 
                 let placeTree (rootIdx: int) (rootOrigin: Point3) =
                     centers[rootIdx] <- rootOrigin
@@ -161,8 +169,8 @@ module ConeTree3D =
                             let c = ch[0]
                             let nextPt =
                                 match config.Mode with
-                                | ConeTreeMode.VerticalCone -> Point3.create pCenter.X (pCenter.Y + config.LevelStep) pCenter.Z
-                                | ConeTreeMode.HorizontalCam -> Point3.create (pCenter.X + config.LevelStep) pCenter.Y pCenter.Z
+                                | ConeTreeMode.VerticalCone -> Point3.create pCenter.X (pCenter.Y + axialStep) pCenter.Z
+                                | ConeTreeMode.HorizontalCam -> Point3.create (pCenter.X + axialStep) pCenter.Y pCenter.Z
                                 | ConeTreeMode.SphericalBalloon ->
                                     let step = max config.LevelStep (selfRadius[u] + coneRadius[c] + config.SiblingGap)
                                     Point3.create (pCenter.X + outDir.X * step) (pCenter.Y + outDir.Y * step) (pCenter.Z + outDir.Z * step)
@@ -188,9 +196,9 @@ module ConeTree3D =
                                     let cPt =
                                         match config.Mode with
                                         | ConeTreeMode.VerticalCone ->
-                                            Point3.create (pCenter.X + rRing * cos midA) (pCenter.Y + config.LevelStep) (pCenter.Z + rRing * sin midA)
+                                            Point3.create (pCenter.X + rRing * cos midA) (pCenter.Y + axialStep) (pCenter.Z + rRing * sin midA)
                                         | _ ->
-                                            Point3.create (pCenter.X + config.LevelStep) (pCenter.Y + rRing * cos midA) (pCenter.Z + rRing * sin midA)
+                                            Point3.create (pCenter.X + axialStep) (pCenter.Y + rRing * cos midA) (pCenter.Z + rRing * sin midA)
                                     centers[c] <- cPt
                                     qNodes[qTail] <- c
                                     qDirs[qTail] <- outDir
@@ -223,8 +231,14 @@ module ConeTree3D =
                         cursorX <- cursorX + coneRadius[rootIndices[r - 1]] + coneRadius[ri] + config.SiblingGap * 2.
                     let startOrigin =
                         match config.Mode with
-                        | ConeTreeMode.VerticalCone -> Point3.create cursorX (Bounds3.minY config.Bounds + selfRadius[ri]) c0.Z
-                        | ConeTreeMode.HorizontalCam -> Point3.create (Bounds3.minX config.Bounds + selfRadius[ri]) cursorX c0.Z
+                        | ConeTreeMode.VerticalCone ->
+                            match config.Direction with
+                            | VerticalDirection3D.Increasing -> Point3.create cursorX (Bounds3.minY config.Bounds + selfRadius[ri]) c0.Z
+                            | VerticalDirection3D.Decreasing -> Point3.create cursorX (Bounds3.maxY config.Bounds - selfRadius[ri]) c0.Z
+                        | ConeTreeMode.HorizontalCam ->
+                            match config.Direction with
+                            | VerticalDirection3D.Increasing -> Point3.create (Bounds3.minX config.Bounds + selfRadius[ri]) cursorX c0.Z
+                            | VerticalDirection3D.Decreasing -> Point3.create (Bounds3.maxX config.Bounds - selfRadius[ri]) cursorX c0.Z
                         | ConeTreeMode.SphericalBalloon -> Point3.create cursorX c0.Y c0.Z
                     placeTree ri startOrigin
 

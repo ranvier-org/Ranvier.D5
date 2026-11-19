@@ -5,6 +5,14 @@ open System.Collections.Generic
 open Ranvier.D5
 open Ranvier.D5.Graph
 
+/// <summary>Directional progression along the primary layout axis in 3D space.</summary>
+[<RequireQualifiedAccess; Struct>]
+type VerticalDirection3D =
+    /// <summary>Coordinates progress in the positive axis direction (<c>+Y</c>, <c>+X</c>, or <c>+Z</c>; default).</summary>
+    | Increasing
+    /// <summary>Coordinates progress in the negative axis direction (<c>-Y</c>, <c>-X</c>, or <c>-Z</c>, e.g. top-down in right-handed Y-up 3D).</summary>
+    | Decreasing
+
 /// <summary>Unit quaternion representing a gimbal-lock-free 3D rotation.</summary>
 [<Struct>]
 type Quaternion =
@@ -215,11 +223,47 @@ module internal Kernels3D =
                 | Some pid when idxMap.ContainsKey pid -> childGroups[idxMap[pid]].Add gi
                 | _ -> ()
 
+            let maxSpan =
+                if nodeBoxes.Length = 0 then 0.0
+                else
+                    let mutable minNX, minNY, minNZ = infinity, infinity, infinity
+                    let mutable maxNX, maxNY, maxNZ = -infinity, -infinity, -infinity
+                    for bi = 0 to nodeBoxes.Length - 1 do
+                        let b = nodeBoxes[bi]
+                        let x0, y0, z0 = Bounds3.minX b, Bounds3.minY b, Bounds3.minZ b
+                        let x1, y1, z1 = Bounds3.maxX b, Bounds3.maxY b, Bounds3.maxZ b
+                        if x0 < minNX then minNX <- x0
+                        if y0 < minNY then minNY <- y0
+                        if z0 < minNZ then minNZ <- z0
+                        if x1 > maxNX then maxNX <- x1
+                        if y1 > maxNY then maxNY <- y1
+                        if z1 > maxNZ then maxNZ <- z1
+                    max (maxNX - minNX) (max (maxNY - minNY) (maxNZ - minNZ))
+
             let outer = Array.zeroCreate<Bounds3> gCount
             let inner = Array.zeroCreate<Bounds3> gCount
             for gi = gCount - 1 downto 0 do
                 let g = orderedGroups[gi]
-                let p = g.Padding
+                let rawP = g.Padding
+                let isOversizedForSpan =
+                    maxSpan > 0.0
+                    && maxSpan < 30.0
+                    && (g.MinSize.Width > maxSpan
+                        || g.MinSize.Height > maxSpan
+                        || rawP.Top > 0.25 * maxSpan
+                        || rawP.Right > 0.25 * maxSpan
+                        || rawP.Bottom > 0.25 * maxSpan
+                        || rawP.Left > 0.25 * maxSpan)
+                let gScale = if isOversizedForSpan then maxSpan / 300.0 else 1.0
+                let p =
+                    if gScale = 1.0 then rawP
+                    else
+                        { Top = rawP.Top * gScale
+                          Right = rawP.Right * gScale
+                          Bottom = rawP.Bottom * gScale
+                          Left = rawP.Left * gScale }
+                let minW = if gScale = 1.0 then g.MinSize.Width else g.MinSize.Width * gScale
+                let minH = if gScale = 1.0 then g.MinSize.Height else g.MinSize.Height * gScale
                 let padZ = 0.5 * (p.Left + p.Right)
                 let mutable hasAny = false
                 let mutable acc = Bounds3.create 0. 0. 0. 0. 0. 0.
@@ -228,7 +272,7 @@ module internal Kernels3D =
                 for cgi in childGroups[gi] do
                     acc <- if not hasAny then (hasAny <- true; outer[cgi]) else Bounds3.union acc outer[cgi]
                 if not hasAny then
-                    let w, h = g.MinSize.Width, g.MinSize.Height
+                    let w, h = minW, minH
                     let d = min w h
                     outer[gi] <- Bounds3.create 0. 0. 0. w h d
                     inner[gi] <- Bounds3.create p.Left p.Top padZ (max 0. (w - p.Left - p.Right)) (max 0. (h - p.Top - p.Bottom)) (max 0. (d - 2. * padZ))
@@ -239,8 +283,8 @@ module internal Kernels3D =
                             (Bounds3.minX acc - p.Left)
                             (Bounds3.minY acc - p.Top)
                             (Bounds3.minZ acc - padZ)
-                            (max g.MinSize.Width (Bounds3.sizeX acc + p.Left + p.Right))
-                            (max g.MinSize.Height (Bounds3.sizeY acc + p.Top + p.Bottom))
+                            (max minW (Bounds3.sizeX acc + p.Left + p.Right))
+                            (max minH (Bounds3.sizeY acc + p.Top + p.Bottom))
                             (Bounds3.sizeZ acc + 2. * padZ)
 
             [ for gi in 0 .. gCount - 1 ->

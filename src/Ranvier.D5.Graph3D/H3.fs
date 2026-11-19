@@ -84,6 +84,28 @@ module H3 =
         if n = 0 then
             { Bounds = boundBox; Nodes = []; Groups = Kernels3D.computeGroups3D state.Graph [||]; Associations = [] }
         else
+            let unitScale = max 1e-6 (bRad / 300.0)
+            let mutable maxInputDim = 0.
+            for i = 0 to n - 1 do
+                let nd = state.Nodes[i]
+                if nd.Size.Width > maxInputDim then maxInputDim <- nd.Size.Width
+                if nd.Size.Height > maxInputDim then maxInputDim <- nd.Size.Height
+                if nd.DepthSize > maxInputDim then maxInputDim <- nd.DepthSize
+            let dimScale =
+                if maxInputDim > 0.5 * bRad then (0.5 * bRad) / maxInputDim
+                else 1.0
+            let inline projectNodeSizes (nd: DiagramNode) (baseRad: float) (atten: float) =
+                let clampedScale = max 0.015 (min 1. atten)
+                let effRad = max (1.2 * unitScale) (baseRad * clampedScale)
+                let minBox = 2.4 * unitScale
+                let w = if dimScale = 1.0 then nd.Size.Width else nd.Size.Width * dimScale
+                let h = if dimScale = 1.0 then nd.Size.Height else nd.Size.Height * dimScale
+                let d = if dimScale = 1.0 then nd.DepthSize else nd.DepthSize * dimScale
+                let sx = max minBox (w * 0.25 * clampedScale)
+                let sy = max minBox (h * 0.25 * clampedScale)
+                let sz = max minBox (d * 0.25 * clampedScale)
+                struct (effRad, sx, sy, sz)
+
             let worldCenters = Array.zeroCreate<Point3> n
             let attens = Array.zeroCreate<float> n
             let hasGroups = DiagramGraph.groupCount state.Graph > 0
@@ -105,11 +127,7 @@ module H3 =
                     let atten = attens[i]
                     let worldCenter = Point3.create cx cy cz
                     worldCenters[i] <- worldCenter
-                    let clampedScale = max 0.015 (min 1. atten)
-                    let effRad = max 1.2 (state.BaseRadius[i] * clampedScale)
-                    let sx = max 2.4 (nd.Size.Width * 0.25 * clampedScale)
-                    let sy = max 2.4 (nd.Size.Height * 0.25 * clampedScale)
-                    let sz = max 2.4 (nd.DepthSize * 0.25 * clampedScale)
+                    let struct (effRad, sx, sy, sz) = projectNodeSizes nd state.BaseRadius[i] atten
                     let hx, hy, hz = sx * 0.5, sy * 0.5, sz * 0.5
                     if cx - hx < minX then minX <- cx - hx
                     if cy - hy < minY then minY <- cy - hy
@@ -192,11 +210,7 @@ module H3 =
                     attens[i] <- atten
                     let worldCenter = Point3.create (unitBallPt.X * bRad) (unitBallPt.Y * bRad) (unitBallPt.Z * bRad)
                     worldCenters[i] <- worldCenter
-                    let clampedScale = max 0.015 (min 1. atten)
-                    let effRad = max 1.2 (state.BaseRadius[i] * clampedScale)
-                    let sx = max 2.4 (nd.Size.Width * 0.25 * clampedScale)
-                    let sy = max 2.4 (nd.Size.Height * 0.25 * clampedScale)
-                    let sz = max 2.4 (nd.DepthSize * 0.25 * clampedScale)
+                    let struct (effRad, sx, sy, sz) = projectNodeSizes nd state.BaseRadius[i] atten
                     let box = Kernels3D.nodeBox worldCenter sx sy sz
                     if hasGroups then nodeBoxes[i] <- box
                     posNodes <-
@@ -516,7 +530,8 @@ module H3 =
                     qHead <- qHead + 1
                     packChildrenOnCap uFrame hemiRadius[u] (Math.PI * 0.48) children[u]
 
-                let baseRadii = Array.init n (fun i -> max 3.5 (10. * normScale[i]))
+                let unitScale = max 1e-6 (config.BallRadius / 300.0)
+                let baseRadii = Array.init n (fun i -> max (3.5 * unitScale) (10. * unitScale * normScale[i]))
 
                 Ok
                     { Config = config
