@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "title": "Data visualization (D5)",
+  "description": "Pure functional scales, shapes, chart recipes, 2D/3D graph layouts, geographic kernels, and WebGPU 3D plots.",
+  "content": "docs",
+  "static": false,
+  "index": "index.md",
+  "proofsUrl": "https://ranvier-org.github.io/Ranvier.D5/proofs/",
+  "exclude": [
+    "3d-prior-art.md",
+    "api-audit.md",
+    "d3-coverage.md",
+    "graph-layout-research.md",
+    "performance-gates.md",
+    "plan.md",
+    "release-*.md",
+    "windows-baseline.json"
+  ],
+  "sections": [
+    {
+      "title": "Overview & Design",
+      "items": [
+        "index.md",
+        "design.md",
+        "contracts.md"
+      ]
+    },
+    {
+      "title": "Scales, Color & Data",
+      "items": [
+        "chromatic.md",
+        "dsv.md",
+        "random.md",
+        "reduction.md"
+      ]
+    },
+    {
+      "title": "Charts & Series",
+      "items": [
+        "distribution-series.md",
+        "density.md",
+        "density-charts.md",
+        "contours.md",
+        "advanced-charts.md"
+      ]
+    },
+    {
+      "title": "Hierarchies & Flows",
+      "items": [
+        "hierarchy.md",
+        "hierarchy-charts.md",
+        "sankey.md",
+        "chord.md",
+        "flow-charts.md"
+      ]
+    },
+    {
+      "title": "Networks & Graph Layouts",
+      "items": [
+        "force.md",
+        "network.md",
+        "planar.md",
+        "graph-layouts.md",
+        "background-layout.md"
+      ]
+    },
+    {
+      "title": "Spatial & Geography",
+      "items": [
+        "quadtree.md",
+        "spatial.md",
+        "tiling.md",
+        "geographic-kernels.md",
+        "geographic-projections.md",
+        "map-charts.md"
+      ]
+    },
+    {
+      "title": "Interaction",
+      "items": [
+        "interaction.md",
+        "transitions.md"
+      ]
+    }
+  ]
+}

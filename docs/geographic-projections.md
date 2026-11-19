@@ -87,7 +87,7 @@ retained as evidence rather than copied: a reflected clipped exterior and its
 hole can share winding in D3 and fill the hole.
 
 Normal and Traced geographic benchmarks gate ordinary, seam-heavy, polar,
-clipped and 100,000-vertex workloads; see [performance gates](performance-gates.md).
+clipped and 100,000-vertex workloads; see [performance gates](https://github.com/ranvier-org/Ranvier.D5/blob/main/docs/performance-gates.md).
 Resampling halves each great-circle arc by rotating its parent frame instead
 of re-solving the arc from rounded degrees; in a same-machine alternating
 comparison the 10,000-vertex Mercator polar workload measured 50 to 34 ms
