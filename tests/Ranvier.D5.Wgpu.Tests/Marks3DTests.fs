@@ -646,24 +646,47 @@ let marks3DTests =
                 let packedOverflowYUp = Glyph3D.packBars overflowScaleYUp (ReadOnlySpan<BarDatum3D> [| overflowBars[0] |])
                 Expect.equal packedOverflowYUp.Length 0 "YUp bar with overflowing wzSize omitted cleanly"
 
-                // Warmed tryPackBar and tryPackSegment allocate 0 managed bytes (no reference tuples)
+                // Warmed tryPackBar and tryPackSegment allocate 0 managed bytes (no reference tuples or FSharpOption<double>)
                 let barOut = Array.zeroCreate<Instance3D> 1
                 let segOut = Array.zeroCreate<LineVertex3D> 2
-                let struct (dx, dy, _) = overflowScale.DataExtents
                 let finiteBar = overflowBars[1]
                 let finitePair = struct (Point3.create -0.5 0.0 0.0, Point3.create 0.5 0.0 0.0, RgbaColor.white)
 
+                let logSub1e162Scale =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.ZUp
+                        (AxisScale3D.log 10.0 (1e-210, 1e-190))
+                        (AxisScale3D.log 10.0 (-1e-190, -1e-210))
+                        (AxisScale3D.piecewise [ 0.0; 1.0; 2.0 ] [ 0.0; 0.5; 1.0 ])
+
+                let logBar =
+                    { finiteBar with
+                        X = 1e-200
+                        Y = -1e-200
+                        Z0 = 0.0
+                        Z1 = 1.5
+                        WidthX = 1e-201
+                        WidthY = 1e-201
+                    }
+
+                let logPair = struct (Point3.create 1e-205 -1e-205 0.25, Point3.create 1e-195 -1e-195 1.75, RgbaColor.white)
+
                 for _ = 1 to 100 do
-                    MarksKernel.tryPackBar overflowScale dx dy overflowScale.UpAxis overflowScale.XScale overflowScale.YScale 1u finiteBar barOut 0 |> ignore
+                    MarksKernel.tryPackBar overflowScale 1u finiteBar barOut 0 |> ignore
                     MarksKernel.tryPackSegment overflowScale finitePair segOut 0 |> ignore
+                    MarksKernel.tryPackBar logSub1e162Scale 1u logBar barOut 0 |> ignore
+                    MarksKernel.tryPackSegment logSub1e162Scale logPair segOut 0 |> ignore
 
                 let allocBefore = GC.GetAllocatedBytesForCurrentThread ()
                 let mutable okBar = true
                 let mutable okSeg = true
 
                 for _ = 1 to 1000 do
-                    okBar <- okBar && MarksKernel.tryPackBar overflowScale dx dy overflowScale.UpAxis overflowScale.XScale overflowScale.YScale 1u finiteBar barOut 0
+                    okBar <- okBar && MarksKernel.tryPackBar overflowScale 1u finiteBar barOut 0
                     okSeg <- okSeg && MarksKernel.tryPackSegment overflowScale finitePair segOut 0
+                    okBar <- okBar && MarksKernel.tryPackBar logSub1e162Scale 1u logBar barOut 0
+                    okSeg <- okSeg && MarksKernel.tryPackSegment logSub1e162Scale logPair segOut 0
 
                 let allocAfter = GC.GetAllocatedBytesForCurrentThread ()
                 Expect.isTrue okBar "warmed tryPackBar succeeds"

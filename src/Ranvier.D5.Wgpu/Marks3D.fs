@@ -377,11 +377,6 @@ module internal MarksKernel =
 
     let tryPackBar
         (scale: Scale3D)
-        (dx: float)
-        (dy: float)
-        (upAxis: UpAxis)
-        (xScale: AxisScale3D)
-        (yScale: AxisScale3D)
         (pickId: uint32)
         (d: BarDatum3D)
         (out: Instance3D array)
@@ -401,34 +396,32 @@ module internal MarksKernel =
             && d.WidthY > 0.0
             && isFiniteColor d.Color
         then
-            let struct (_, _, dz) = scale.DataExtents
-            let zScale = scale.ZScale
+            let struct (dx, dy, dz) = scale.DataExtents
+            let mx = scale.MapperX
+            let my = scale.MapperY
+            let mz = scale.MapperZ
+            let tx = AxisCoordMapper.evalNormalized mx d.X
+            let ty = AxisCoordMapper.evalNormalized my d.Y
+            let tz0 = AxisCoordMapper.evalNormalized mz d.Z0
+            let tz1 = AxisCoordMapper.evalNormalized mz d.Z1
+            let txLo = AxisCoordMapper.evalNormalized mx (d.X - d.WidthX * 0.5)
+            let txHi = AxisCoordMapper.evalNormalized mx (d.X + d.WidthX * 0.5)
+            let tyLo = AxisCoordMapper.evalNormalized my (d.Y - d.WidthY * 0.5)
+            let tyHi = AxisCoordMapper.evalNormalized my (d.Y + d.WidthY * 0.5)
 
-            match AxisScale3D.tryMapNormalized xScale d.X with
-            | ValueNone -> false
-            | ValueSome tx ->
-                match AxisScale3D.tryMapNormalized yScale d.Y with
-                | ValueNone -> false
-                | ValueSome ty ->
-                    match AxisScale3D.tryMapNormalized zScale d.Z0 with
-                    | ValueNone -> false
-                    | ValueSome tz0 ->
-                        match AxisScale3D.tryMapNormalized zScale d.Z1 with
-                        | ValueNone -> false
-                        | ValueSome tz1 ->
-                            match AxisScale3D.tryMapNormalized xScale (d.X - d.WidthX * 0.5) with
-                            | ValueNone -> false
-                            | ValueSome txLo ->
-                                match AxisScale3D.tryMapNormalized xScale (d.X + d.WidthX * 0.5) with
-                                | ValueNone -> false
-                                | ValueSome txHi ->
-                                    match AxisScale3D.tryMapNormalized yScale (d.Y - d.WidthY * 0.5) with
-                                    | ValueNone -> false
-                                    | ValueSome tyLo ->
-                                        match AxisScale3D.tryMapNormalized yScale (d.Y + d.WidthY * 0.5) with
-                                        | ValueNone -> false
-                                        | ValueSome tyHi ->
-                                            packBarMapped dx dy dz upAxis tx ty tz0 tz1 txLo txHi tyLo tyHi d.Color roughness emissive pickId flags out slot
+            if
+                Check3D.isFinite tx
+                && Check3D.isFinite ty
+                && Check3D.isFinite tz0
+                && Check3D.isFinite tz1
+                && Check3D.isFinite txLo
+                && Check3D.isFinite txHi
+                && Check3D.isFinite tyLo
+                && Check3D.isFinite tyHi
+            then
+                packBarMapped dx dy dz scale.UpAxis tx ty tz0 tz1 txLo txHi tyLo tyHi d.Color roughness emissive pickId flags out slot
+            else
+                false
         else
             false
 
@@ -617,17 +610,13 @@ module Glyph3D =
         if items.Length = 0 then
             ReadOnlyMemory<Instance3D>.Empty
         else
-            let struct (dx, dy, _) = scale.DataExtents
-            let upAxis = scale.UpAxis
-            let xScale = scale.XScale
-            let yScale = scale.YScale
             let out = Array.zeroCreate<Instance3D> items.Length
             let mutable count = 0
 
             for i = 0 to items.Length - 1 do
                 let d = items[i]
 
-                if MarksKernel.tryPackBar scale dx dy upAxis xScale yScale d.PickId d out count then
+                if MarksKernel.tryPackBar scale d.PickId d out count then
                     count <- count + 1
 
             MarksKernel.trimMemory out count

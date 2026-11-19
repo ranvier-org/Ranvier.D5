@@ -627,4 +627,20 @@ let channelTests =
                 Expect.floatClose { absolute = 1e-9; relative = 0.0 } wCoords[0] -1.0 "AxisCoordMapper.mapWorldCoords min"
                 Expect.floatClose { absolute = 1e-9; relative = 0.0 } wCoords[1] 0.0 "AxisCoordMapper.mapWorldCoords mid"
                 Expect.equal (AxisCoordMapper.axisDir (AxisScale3D.linear (10.0, 0.0))) -1.0 "AxisCoordMapper.axisDir reversed"
+
+                let subLogPos = RampTransform.classify (Scale.log 10.0 (1e-210, 1e-190) (0.0, 1.0))
+                let subLogNeg = RampTransform.classify (Scale.log 10.0 (-1e-190, -1e-210) (0.0, 1.0))
+
+                match subLogPos with
+                | RampTransform.Log (sign, _, _, false) -> Expect.equal sign 1.0 "positive sub-1e-162 log classifies as RampTransform.Log"
+                | other -> failtestf "expected RampTransform.Log for positive sub-1e-162 domain, got %A" other
+
+                match subLogNeg with
+                | RampTransform.Log (sign, _, _, false) -> Expect.equal sign -1.0 "negative sub-1e-162 log classifies as RampTransform.Log"
+                | other -> failtestf "expected RampTransform.Log for negative sub-1e-162 domain, got %A" other
+
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } (RampTransform.eval subLogPos 1e-200) 0.5 "positive sub-1e-162 log midpoint"
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } (RampTransform.eval subLogNeg -1e-200) 0.5 "negative sub-1e-162 log midpoint"
+                Expect.isTrue (Double.IsNaN (RampTransform.eval subLogPos 0.0)) "positive sub-1e-162 log rejects zero"
+                Expect.isTrue (Double.IsNaN (RampTransform.eval subLogNeg 1e-200)) "negative sub-1e-162 log rejects positive"
         ]

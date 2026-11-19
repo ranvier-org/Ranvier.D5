@@ -170,25 +170,6 @@ module Reactive3D =
         let batch = context.CreateBatch (unitBox, BlendMode.Opaque, false)
         Api.onCleanup (fun () -> batch.Dispose ())
 
-        let mutable cachedScale = Unchecked.defaultof<Scale3D>
-        let mutable dx = 0.0
-        let mutable dy = 0.0
-        let mutable upAxis = UpAxis.ZUp
-        let mutable xScale = Unchecked.defaultof<AxisScale3D>
-        let mutable yScale = Unchecked.defaultof<AxisScale3D>
-
-        let packBar (s: Scale3D) (pickId: uint32) (datum: BarDatum3D) (out: Instance3D array) (slot: int) : bool =
-            if not (obj.ReferenceEquals (s, cachedScale)) then
-                cachedScale <- s
-                let struct (extX, extY, _) = s.DataExtents
-                dx <- extX
-                dy <- extY
-                upAxis <- s.UpAxis
-                xScale <- s.XScale
-                yScale <- s.YScale
-
-            MarksKernel.tryPackBar s dx dy upAxis xScale yScale pickId datum out slot
-
         let sync =
             KeyedSlotSync<'K, BarDatum3D, Instance3D>(
                 layerId,
@@ -196,7 +177,7 @@ module Reactive3D =
                 false,
                 scale,
                 rows,
-                packBar,
+                MarksKernel.tryPackBar,
                 (fun arr slot pickId -> arr[slot].PickId <- pickId),
                 (fun arr count -> batch.UpdateInstances (MarksKernel.spanSlice arr 0 count)),
                 (fun startIdx arr srcStart count -> batch.UpdateRange (startIdx, MarksKernel.spanSlice arr srcStart count)),
