@@ -133,13 +133,59 @@ let surfaceTests =
                     let triN = Vector3.Normalize (Vector3.Cross (b - a, c - a))
                     expectVec3Close 1e-5f triN Vector3.UnitY $"reversed Scale3D X flat tri[{t}] CCW winding"
 
-                // YUp plane z = 0 produces +UnitZ normals matching CCW winding
+                // YUp plane z = 0 produces +UnitZ normals matching CCW winding and +Y data orientation
                 let yupScale = Scale3D.create BoxAspect.Cube UpAxis.YUp (AxisScale3D.linear (0.0, 2.0)) (AxisScale3D.linear (0.0, 2.0)) (AxisScale3D.linear (0.0, 2.0))
                 let yupMesh = Surface3D.build { spec with Scale = yupScale } flatGrid
                 let yupVerts = SurfaceMesh.vertices yupMesh
+                let yupInds = SurfaceMesh.indices yupMesh
+
+                Expect.isGreaterThan yupVerts.Span[20].Position.Y yupVerts.Span[0].Position.Y "YUp increasing data Y maps along +UnitY"
 
                 for i = 0 to yupVerts.Length - 1 do
                     expectVec3Close 1e-5f yupVerts.Span[i].Normal Vector3.UnitZ $"YUp flat normal[{i}] points +UnitZ"
+
+                for t = 0 to (yupInds.Length / 3) - 1 do
+                    let i0 = int yupInds.Span[t * 3]
+                    let a = yupVerts.Span[i0].Position
+                    let b = yupVerts.Span[int yupInds.Span[t * 3 + 1]].Position
+                    let c = yupVerts.Span[int yupInds.Span[t * 3 + 2]].Position
+                    let cross = Vector3.Cross (b - a, c - a)
+                    Expect.isGreaterThan (Vector3.Dot (cross, yupVerts.Span[i0].Normal)) 0.0f $"YUp flat tri[{t}] dot(cross, normal) > 0"
+                    expectVec3Close 1e-5f (Vector3.Normalize cross) Vector3.UnitZ $"YUp flat tri[{t}] CCW winding aligns with +UnitZ"
+
+                // YUp tilted plane z = x (dWorld/dx = (+1, 0, +1), dWorld/dy = (0, +1, 0), analytical normal = (-1/sqrt2, 0, +1/sqrt2))
+                let yupTiltedMesh = Surface3D.build { spec with Scale = yupScale } tiltedGrid
+                let yupTiltedVerts = SurfaceMesh.vertices yupTiltedMesh
+                let yupTiltedInds = SurfaceMesh.indices yupTiltedMesh
+                let expectedYupTiltedNormal = Vector3 (-invSqrt2, 0.0f, invSqrt2)
+
+                for i = 0 to yupTiltedVerts.Length - 1 do
+                    let v = yupTiltedVerts.Span[i]
+                    expectVec3Close 1e-5f v.Normal expectedYupTiltedNormal $"YUp tilted normal[{i}]"
+
+                for t = 0 to (yupTiltedInds.Length / 3) - 1 do
+                    let i0 = int yupTiltedInds.Span[t * 3]
+                    let a = yupTiltedVerts.Span[i0].Position
+                    let b = yupTiltedVerts.Span[int yupTiltedInds.Span[t * 3 + 1]].Position
+                    let c = yupTiltedVerts.Span[int yupTiltedInds.Span[t * 3 + 2]].Position
+                    let cross = Vector3.Cross (b - a, c - a)
+                    Expect.isGreaterThan (Vector3.Dot (cross, yupTiltedVerts.Span[i0].Normal)) 0.0f $"YUp tilted tri[{t}] dot(cross, normal) > 0"
+                    expectVec3Close 1e-5f (Vector3.Normalize cross) expectedYupTiltedNormal $"YUp tilted tri[{t}] CCW winding"
+
+                // YUp reversed Y in Scale3D preserves +UnitZ normals and CCW winding
+                let yupRevYScale = Scale3D.create BoxAspect.Cube UpAxis.YUp (AxisScale3D.linear (0.0, 2.0)) (AxisScale3D.linear (2.0, 0.0)) (AxisScale3D.linear (0.0, 2.0))
+                let yupRevYMesh = Surface3D.build { spec with Scale = yupRevYScale } flatGrid
+                let yupRevYVerts = SurfaceMesh.vertices yupRevYMesh
+                let yupRevYInds = SurfaceMesh.indices yupRevYMesh
+
+                for t = 0 to (yupRevYInds.Length / 3) - 1 do
+                    let i0 = int yupRevYInds.Span[t * 3]
+                    let a = yupRevYVerts.Span[i0].Position
+                    let b = yupRevYVerts.Span[int yupRevYInds.Span[t * 3 + 1]].Position
+                    let c = yupRevYVerts.Span[int yupRevYInds.Span[t * 3 + 2]].Position
+                    let cross = Vector3.Cross (b - a, c - a)
+                    Expect.isGreaterThan (Vector3.Dot (cross, yupRevYVerts.Span[i0].Normal)) 0.0f $"YUp reversed Y tri[{t}] dot(cross, normal) > 0"
+                    expectVec3Close 1e-5f (Vector3.Normalize cross) Vector3.UnitZ $"YUp reversed Y tri[{t}] CCW winding"
 
             testCase "Center NaN hole omits 8 touching triangles, keeps neighbor normals finite, and SurfaceBatch updates holes and allocates 0 bytes on steady waves"
             <| fun () ->
@@ -163,9 +209,26 @@ let surfaceTests =
                 let holeInds = SurfaceMesh.indices holeMesh
                 let holeWire = SurfaceMesh.wireframe holeMesh
 
-                // 16 cells total -> 4 cells touch (2, 2) -> 12 active cells -> 24 triangles (72 indices)
+                // 4x4 cells (5x5 vertices): 16 cells total -> 4 cells touch (2, 2) -> 12 active cells -> 24 triangles (72 indices)
+                // 40 total grid edges -> 4 edges incident to (2, 2) have no active cell -> 36 active edges = 72 paired LineVertex3D endpoints
                 Expect.equal (holeInds.Length / 3) 24 "5x5 grid with center NaN omits 8 triangles (24 remain)"
-                Expect.isTrue (holeWire.Length > 0 && holeWire.Length % 2 = 0) "wireframe produces paired endpoints"
+                Expect.equal holeWire.Length 72 "4x4-cell (5x5-vertex) single-hole grid emits exact 72 paired wireframe vertices"
+
+                // Also verify a 4x4-vertex (3x3-cell) grid with a single interior NaN hole at (1, 1):
+                // 5 valid cells form an L-shape along c=2 and r=2; 24 total edges - 8 edges bordering only the 4 invalid cells = 16 active edges = 32 paired LineVertex3D endpoints
+                let heights4x4Hole =
+                    Array.init 16 (fun idx ->
+                        let c = idx % 4
+                        let r = idx / 4
+                        if c = 1 && r = 1 then Double.NaN else 0.5 * float c)
+
+                let grid4x4Hole =
+                    SurfaceGrid.uniform 4 4 (0.0, 3.0) (0.0, 3.0) (ReadOnlySpan<float>(heights4x4Hole)) ReadOnlySpan.Empty
+                    |> unwrapOk "grid4x4Hole"
+
+                let mesh4x4Hole = Surface3D.build spec grid4x4Hole
+                Expect.equal ((SurfaceMesh.indices mesh4x4Hole).Length / 3) 10 "4x4-vertex grid with 1 interior NaN omits 4 of 9 cells (10 triangles remain)"
+                Expect.equal (SurfaceMesh.wireframe mesh4x4Hole).Length 32 "4x4-vertex single-hole grid emits exact 32 paired wireframe vertices"
 
                 let centerIdx = 2 * cols + 2
                 for t = 0 to holeInds.Length - 1 do
@@ -285,12 +348,31 @@ let surfaceTests =
                 let afterWire = GC.GetAllocatedBytesForCurrentThread ()
                 Expect.equal (afterWire - beforeWire) 0L "20 warmed SurfaceBatch.Update frames allocate 0 bytes (with wireframe)"
 
-                // Also test UpdateGrid with resized grid
-                let biggerGrid =
+                // Also test UpdateGrid shrinking (32x32 -> 8x8 -> 4x4 hole -> 4x4 full) and steady-state zero-alloc Update
+                let smallerGrid =
                     SurfaceGrid.fromFunction 8 8 (0.0, 4.0) (0.0, 4.0) (fun x y -> sin x * cos y) ValueNone
-                    |> unwrapOk "biggerGrid"
-                waveBatchWithWire.UpdateGrid (spec, biggerGrid)
+                    |> unwrapOk "smallerGrid"
+                waveBatchWithWire.UpdateGrid (spec, smallerGrid)
                 Expect.equal waveBatchWithWire.Batch.Mesh.TriangleCount (7 * 7 * 2) "UpdateGrid resizes mesh triangle count"
+                Expect.equal waveBatchWithWire.WireframeBatch.Value.SegmentCount (7 * 8 + 8 * 7) "UpdateGrid shrinks wireframe segment count to 8x8"
+
+                waveBatchWithWire.UpdateGrid (spec, grid4x4Hole)
+                Expect.equal waveBatchWithWire.Batch.Mesh.TriangleCount 10 "UpdateGrid shrinks to 4x4 hole grid"
+                Expect.equal waveBatchWithWire.WireframeBatch.Value.SegmentCount 16 "UpdateGrid shrinks 4x4 single-hole wireframe to 16 segments"
+
+                let full4x4 = Array.zeroCreate<float> 16
+                let grid4x4Full =
+                    SurfaceGrid.uniform 4 4 (0.0, 3.0) (0.0, 3.0) (ReadOnlySpan<float>(full4x4)) ReadOnlySpan.Empty
+                    |> unwrapOk "grid4x4Full"
+                waveBatchWithWire.UpdateGrid (spec, grid4x4Full)
+                Expect.equal waveBatchWithWire.WireframeBatch.Value.SegmentCount 24 "UpdateGrid restores full 4x4 wireframe to 24 segments"
+
+                waveBatchWithWire.Update (spec, ReadOnlySpan<float>(full4x4), ReadOnlySpan.Empty)
+                let beforeShrunkWire = GC.GetAllocatedBytesForCurrentThread ()
+                for _ = 1 to 10 do
+                    waveBatchWithWire.Update (spec, ReadOnlySpan<float>(full4x4), ReadOnlySpan.Empty)
+                let afterShrunkWire = GC.GetAllocatedBytesForCurrentThread ()
+                Expect.equal (afterShrunkWire - beforeShrunkWire) 0L "10 warmed Update frames after shrunk UpdateGrid allocate 0 bytes"
 
             testCase "Independent 4th-dimension scalars color constant-height z=1 plane with Unlit ColorRamp output on WgpuContext"
             <| fun () ->
@@ -439,7 +521,13 @@ let surfaceTests =
                 Expect.equal (SurfaceGrid.columns rectGrid) 3 "SurfaceGrid.columns"
                 Expect.equal (SurfaceGrid.rows rectGrid) 3 "SurfaceGrid.rows"
 
-                // Validation errors
+                // Validation errors & null guards
+                Expect.throwsT<ArgumentNullException>
+                    (fun () -> Surface3D.build (Unchecked.defaultof<SurfaceSpec>) rectGrid |> ignore)
+                    "Surface3D.build rejects null SurfaceSpec"
+                Expect.throwsT<ArgumentNullException>
+                    (fun () -> Surface3D.build spec (Unchecked.defaultof<SurfaceGrid>) |> ignore)
+                    "Surface3D.build rejects null SurfaceGrid"
                 Expect.isError (SurfaceGrid.uniform 1 4 (0.0, 1.0) (0.0, 1.0) (ReadOnlySpan<float> [| 0.0; 1.0; 2.0; 3.0 |]) ReadOnlySpan.Empty) "columns < 2 returns Error"
                 Expect.isError (SurfaceGrid.uniform 2 2 (0.0, 1.0) (0.0, 1.0) (ReadOnlySpan<float> [| 0.0; 1.0 |]) ReadOnlySpan.Empty) "mismatched height length returns Error"
                 Expect.isError (SurfaceGrid.uniform 2 2 (0.0, 1.0) (0.0, 1.0) (ReadOnlySpan<float> [| 0.0; 1.0; 2.0; 3.0 |]) (ReadOnlySpan<float> [| 1.0 |])) "mismatched scalar length returns Error"

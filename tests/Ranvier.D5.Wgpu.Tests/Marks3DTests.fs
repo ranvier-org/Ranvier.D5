@@ -176,8 +176,37 @@ let marks3DTests =
                     ] do
                     verifyValidMesh (Glyph3D.unitMesh shape) $"unitMesh %A{shape}"
 
+                Expect.throwsT<ArgumentOutOfRangeException>
+                    (fun () -> Glyph3D.unitArrowMesh 2 |> ignore)
+                    "unitArrowMesh rejects segments = 2 (< 3)"
+
+                Expect.throwsT<ArgumentOutOfRangeException>
+                    (fun () -> Glyph3D.unitArrowMesh 0 |> ignore)
+                    "unitArrowMesh rejects segments = 0"
+
+                Expect.throwsT<ArgumentOutOfRangeException>
+                    (fun () -> Glyph3D.unitArrowMesh -1 |> ignore)
+                    "unitArrowMesh rejects negative segments"
+
+                verifyOutwardWinding (Glyph3D.unitArrowMesh 3) "unitArrowMesh 3"
+
                 let arrowMesh = Glyph3D.unitArrowMesh 12
-                verifyValidMesh arrowMesh "unitArrowMesh"
+                verifyOutwardWinding arrowMesh "unitArrowMesh 12"
+
+                let mutable signedVol6 = 0.0
+
+                for t = 0 to (arrowMesh.Indices.Length / 3) - 1 do
+                    let v0 = arrowMesh.Vertices[int arrowMesh.Indices[t * 3]]
+                    let v1 = arrowMesh.Vertices[int arrowMesh.Indices[t * 3 + 1]]
+                    let v2 = arrowMesh.Vertices[int arrowMesh.Indices[t * 3 + 2]]
+                    let triCross = Vector3.Cross (v1.Position - v0.Position, v2.Position - v0.Position)
+                    signedVol6 <- signedVol6 + float (Vector3.Dot (v0.Position, Vector3.Cross (v1.Position, v2.Position)))
+
+                    if triCross.LengthSquared () > 1e-12f then
+                        let avgNormal = v0.Normal + v1.Normal + v2.Normal
+                        Expect.isGreaterThan (Vector3.Dot (triCross, avgNormal)) 0.0f $"unitArrowMesh 12 tri[{t}] dot(triCross, avgNormal) > 0"
+
+                Expect.isGreaterThan signedVol6 0.0 "unitArrowMesh 12 has positive signed volume"
 
                 let mutable minY = Single.PositiveInfinity
                 let mutable maxY = Single.NegativeInfinity
@@ -561,4 +590,106 @@ let marks3DTests =
                         Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float (v.Normal.Length ())) 1.0 $"fine tube ring[{i}].v[{s}] unit normal"
                         Expect.floatClose { absolute = 1e-3; relative = 0.0 } (float (Vector3.Dot (v.Normal, tangent))) 0.0 $"fine tube ring[{i}].v[{s}] normal orthogonal to tangent"
                         Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float ((v.Position - center).Length ())) (float tubeRadius) $"fine tube ring[{i}].v[{s}] preserves circular radius"
+
+            testCase "MarksKernel.tryPackBar omits float32 wzSize overflow bars and packBars/packArrows/segments match finite invariants"
+            <| fun () ->
+                let overflowScale =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (-1.0, 1.0))
+                        (AxisScale3D.linear (-1.0, 1.0))
+                        (AxisScale3D.linear (-1.0, 1.0))
+
+                // w0.Y = -2e38f (finite), w1.Y = +2e38f (finite), but wzSize = abs (w1.Y - w0.Y) = +Infinityf -> omitted
+                let overflowBars =
+                    [|
+                        {
+                            X = 0.0
+                            Y = 0.0
+                            Z0 = -2.0e38
+                            Z1 = 2.0e38
+                            WidthX = 0.5
+                            WidthY = 0.5
+                            Color = RgbaColor.white
+                            Shading = ShadingMode.Unlit
+                            PickId = 90u
+                            Selected = false
+                        }
+                        {
+                            X = 0.0
+                            Y = 0.0
+                            Z0 = 0.0
+                            Z1 = 0.5
+                            WidthX = 0.5
+                            WidthY = 0.5
+                            Color = RgbaColor.white
+                            Shading = ShadingMode.Unlit
+                            PickId = 91u
+                            Selected = false
+                        }
+                    |]
+
+                let packedOverflow = Glyph3D.packBars overflowScale (ReadOnlySpan<BarDatum3D> overflowBars)
+                Expect.equal packedOverflow.Length 1 "bar with overflowing wzSize omitted while finite bar is packed"
+                Expect.equal packedOverflow.Span[0].PickId 91u "surviving finite bar retains PickId"
+
+                // Verify YUp wzSize overflow guard as well
+                let overflowScaleYUp =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.YUp
+                        (AxisScale3D.linear (-1.0, 1.0))
+                        (AxisScale3D.linear (-1.0, 1.0))
+                        (AxisScale3D.linear (-1.0, 1.0))
+
+                let packedOverflowYUp = Glyph3D.packBars overflowScaleYUp (ReadOnlySpan<BarDatum3D> [| overflowBars[0] |])
+                Expect.equal packedOverflowYUp.Length 0 "YUp bar with overflowing wzSize omitted cleanly"
+
+                // Warmed tryPackBar and tryPackSegment allocate 0 managed bytes (no reference tuples or FSharpOption<double>)
+                let barOut = Array.zeroCreate<Instance3D> 1
+                let segOut = Array.zeroCreate<LineVertex3D> 2
+                let finiteBar = overflowBars[1]
+                let finitePair = struct (Point3.create -0.5 0.0 0.0, Point3.create 0.5 0.0 0.0, RgbaColor.white)
+
+                let logSub1e162Scale =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.ZUp
+                        (AxisScale3D.log 10.0 (1e-210, 1e-190))
+                        (AxisScale3D.log 10.0 (-1e-190, -1e-210))
+                        (AxisScale3D.piecewise [ 0.0; 1.0; 2.0 ] [ 0.0; 0.5; 1.0 ])
+
+                let logBar =
+                    { finiteBar with
+                        X = 1e-200
+                        Y = -1e-200
+                        Z0 = 0.0
+                        Z1 = 1.5
+                        WidthX = 1e-201
+                        WidthY = 1e-201
+                    }
+
+                let logPair = struct (Point3.create 1e-205 -1e-205 0.25, Point3.create 1e-195 -1e-195 1.75, RgbaColor.white)
+
+                for _ = 1 to 100 do
+                    MarksKernel.tryPackBar overflowScale 1u finiteBar barOut 0 |> ignore
+                    MarksKernel.tryPackSegment overflowScale finitePair segOut 0 |> ignore
+                    MarksKernel.tryPackBar logSub1e162Scale 1u logBar barOut 0 |> ignore
+                    MarksKernel.tryPackSegment logSub1e162Scale logPair segOut 0 |> ignore
+
+                let allocBefore = GC.GetAllocatedBytesForCurrentThread ()
+                let mutable okBar = true
+                let mutable okSeg = true
+
+                for _ = 1 to 1000 do
+                    okBar <- okBar && MarksKernel.tryPackBar overflowScale 1u finiteBar barOut 0
+                    okSeg <- okSeg && MarksKernel.tryPackSegment overflowScale finitePair segOut 0
+                    okBar <- okBar && MarksKernel.tryPackBar logSub1e162Scale 1u logBar barOut 0
+                    okSeg <- okSeg && MarksKernel.tryPackSegment logSub1e162Scale logPair segOut 0
+
+                let allocAfter = GC.GetAllocatedBytesForCurrentThread ()
+                Expect.isTrue okBar "warmed tryPackBar succeeds"
+                Expect.isTrue okSeg "warmed tryPackSegment succeeds"
+                Expect.equal (allocAfter - allocBefore) 0L "1000 warmed tryPackBar and tryPackSegment calls allocate 0 bytes"
         ]

@@ -117,36 +117,6 @@ type ShadingMode =
     /// <summary>Applies studio hemisphere and key/rim lighting with explicit surface roughness and emissive boost.</summary>
     | Lit of roughness: float32 * emissive: float32
 
-[<Struct>]
-type internal RampTransform =
-    | Linear of x0: float * span: float * clamped: bool
-    | Log of sign: float * logAbs0: float * logSpan: float * clamped: bool
-    | Constant of value: float
-    | General of scale: Continuous
-
-module internal RampTransform =
-    let inline eval (transform: RampTransform) (value: float) : float =
-        if not (Check3D.isFinite value) then
-            Double.NaN
-        else
-            match transform with
-            | RampTransform.Linear (x0, span, clamped) ->
-                let raw = (value - x0) / span
-                let t = if clamped then Math.Clamp (raw, 0.0, 1.0) else raw
-                if Check3D.isFinite t then t else Double.NaN
-            | RampTransform.Log (sign, la, lSpan, clamped) ->
-                if value * sign <= 0.0 then
-                    Double.NaN
-                else
-                    let raw = (Math.Log (abs value) - la) / lSpan
-                    let t = if clamped then Math.Clamp (raw, 0.0, 1.0) else raw
-                    if Check3D.isFinite t then t else Double.NaN
-            | RampTransform.Constant t -> t
-            | RampTransform.General scale ->
-                match Scale.tryMap scale value with
-                | Some t when Check3D.isFinite t -> t
-                | _ -> Double.NaN
-
 /// <summary>Immutable 256-entry GPU colormap lookup table paired with a continuous scale and clipping policy.</summary>
 type ColorRamp =
     private
@@ -216,91 +186,6 @@ module ColorRamp =
         ]
         |> List.map hexStop
 
-    let private approxEq (a: float) (b: float) =
-        abs (a - b) <= 1e-9 * max 1.0 (max (abs a) (abs b))
-
-    let private matchesAt (scale: Continuous) (x: float) (expected: float) =
-        match Scale.tryMap scale x with
-        | Some actual -> approxEq actual expected
-        | None -> false
-
-    let internal classifyTransform (scale: Continuous) : RampTransform =
-        try
-            let x0 = Scale.invert scale 0.0
-            let x1 = Scale.invert scale 1.0
-
-            if not (Check3D.isFinite x0 && Check3D.isFinite x1) then
-                RampTransform.General scale
-            elif x0 = x1 then
-                match Scale.tryMap scale x0 with
-                | Some mid when
-                    Check3D.isFinite mid
-                    && matchesAt scale (x0 - 1.0) mid
-                    && matchesAt scale (x0 + 1.0) mid
-                    && matchesAt scale (-abs x0 - 1.0) mid
-                    && matchesAt scale 0.0 mid
-                    ->
-                    RampTransform.Constant mid
-                | _ -> RampTransform.General scale
-            else
-                let span = x1 - x0
-
-                if
-                    Check3D.isFinite span
-                    && matchesAt scale x0 0.0
-                    && matchesAt scale x1 1.0
-                    && matchesAt scale (x0 + 0.25 * span) 0.25
-                    && matchesAt scale (x0 + 0.5 * span) 0.5
-                    && matchesAt scale (x0 + 0.75 * span) 0.75
-                then
-                    let xNeg = x0 - 0.5 * span
-                    let xPos = x1 + 0.5 * span
-
-                    if Check3D.isFinite xNeg && Check3D.isFinite xPos then
-                        if matchesAt scale xNeg -0.5 && matchesAt scale xPos 1.5 then
-                            RampTransform.Linear (x0, span, false)
-                        elif matchesAt scale xNeg 0.0 && matchesAt scale xPos 1.0 then
-                            RampTransform.Linear (x0, span, true)
-                        else
-                            RampTransform.General scale
-                    else
-                        RampTransform.General scale
-                elif x0 * x1 > 0.0 then
-                    let sign = if x0 < 0.0 then -1.0 else 1.0
-                    let la = Math.Log (abs x0)
-                    let lb = Math.Log (abs x1)
-                    let lSpan = lb - la
-
-                    if
-                        Check3D.isFinite lSpan
-                        && lSpan <> 0.0
-                        && matchesAt scale x0 0.0
-                        && matchesAt scale x1 1.0
-                        && matchesAt scale (sign * Math.Exp (la + 0.25 * lSpan)) 0.25
-                        && matchesAt scale (sign * Math.Exp (la + 0.5 * lSpan)) 0.5
-                        && matchesAt scale (sign * Math.Exp (la + 0.75 * lSpan)) 0.75
-                        && (Scale.tryMap scale 0.0).IsNone
-                        && (Scale.tryMap scale (-x0)).IsNone
-                    then
-                        let xNeg = sign * Math.Exp (la - 0.25 * lSpan)
-                        let xPos = sign * Math.Exp (lb + 0.25 * lSpan)
-
-                        if Check3D.isFinite xNeg && Check3D.isFinite xPos then
-                            if matchesAt scale xNeg -0.25 && matchesAt scale xPos 1.25 then
-                                RampTransform.Log (sign, la, lSpan, false)
-                            elif matchesAt scale xNeg 0.0 && matchesAt scale xPos 1.0 then
-                                RampTransform.Log (sign, la, lSpan, true)
-                            else
-                                RampTransform.General scale
-                        else
-                            RampTransform.General scale
-                    else
-                        RampTransform.General scale
-                else
-                    RampTransform.General scale
-        with :? ArgumentException ->
-            RampTransform.General scale
-
     let private samplePaletteLut (eval: float -> Rgba) : RgbaColor array =
         let lut = Array.zeroCreate<RgbaColor> 256
 
@@ -335,7 +220,7 @@ module ColorRamp =
             nullArg (nameof scale)
 
         {
-            Transform = classifyTransform scale
+            Transform = RampTransform.classify scale
             Clip = clip
             Lut = samplePaletteLut eval
         }
@@ -389,6 +274,9 @@ module ColorRamp =
 
     /// <summary>Maps a scalar <c>value</c> into an <c>RgbaColor</c> in <c>O(1)</c> with zero heap allocations on linear, logarithmic, and constant scales.</summary>
     let tryMap (ramp: ColorRamp) (value: float) : RgbaColor voption =
+        if isNull (box ramp) then
+            nullArg (nameof ramp)
+
         let t = RampTransform.eval ramp.Transform value
         if Check3D.isFinite t then
             mapNormalized ramp t
@@ -403,6 +291,9 @@ module ColorRamp =
 
     /// <summary>Samples <c>count</c> evenly spaced <c>RgbaColor</c> stops across the ramp's <c>[0.0, 1.0]</c> range.</summary>
     let stops (count: int) (ramp: ColorRamp) : ReadOnlyMemory<RgbaColor> =
+        if isNull (box ramp) then
+            nullArg (nameof ramp)
+
         if count < 0 then
             raise (ArgumentOutOfRangeException (nameof count, "Stop count must be nonnegative."))
         elif count = 0 then
@@ -521,6 +412,9 @@ module WallProjection3D =
         (plane: WallPlane)
         (point: Point3)
         : Vector3 =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
         validateWalls activeBackWalls
         let struct (bx, fy, bz) = activeBackWalls
         let world = Scale3D.map scale point
@@ -589,6 +483,9 @@ module WallProjection3D =
         (color: RgbaColor)
         (contours: ContourPolygon list)
         : ReadOnlyMemory<LineVertex3D> =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
         validateWalls activeBackWalls
 
         if isNull (box contours) then

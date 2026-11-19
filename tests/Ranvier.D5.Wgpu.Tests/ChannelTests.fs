@@ -395,4 +395,252 @@ let channelTests =
                 Expect.isLessThanOrEqual (abs (int dr - int scr)) 2 "disabledUniforms restores raw instance color R"
                 Expect.isLessThanOrEqual (abs (int dg - int scg)) 2 "disabledUniforms restores raw instance color G"
                 Expect.isLessThanOrEqual (abs (int db - int scb)) 2 "disabledUniforms restores raw instance color B"
+
+            testCase "ColorShader Lit evaluates 13-stop LUT per-fragment, supports 1e-20 domain, and Channels3D enforces null guards + YUp contours + AxisCoordMapper"
+            <| fun () ->
+                let wgsl = ColorShader.wgsl ()
+                Expect.equal (WgpuContext.ValidateWgsl wgsl) (Ok ()) "ColorShader.wgsl passes WgpuContext.ValidateWgsl"
+
+                // 1. Per-fragment Lit LUT interpolation across one large triangle spanning t = 0.0 -> 1.0
+                //    (At world origin (0,0,0), barycentric weights are 0.25*0 + 0.5*1 + 0.25*0 = 0.5 -> bright turbo green,
+                //     whereas per-vertex RGB averaging yields dark brownish purple with very low green.)
+                let turbo = ColorRamp.turbo (0.0, 1.0)
+                let uTurbo = ColorShader.packUniforms 0.0f 1.0f turbo
+
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64, customWgsl = wgsl)
+
+                let triMesh =
+                    {
+                        Vertices =
+                            [|
+                                Vertex3D (Vector3 (-1.0f, -2.0f, 0.0f), Vector3.UnitZ, Vector4 (0.0f, 0.0f, 0.0f, 1.0f))
+                                Vertex3D (Vector3 (1.0f, 0.0f, 0.0f), Vector3.UnitZ, Vector4 (1.0f, 0.0f, 0.0f, 1.0f))
+                                Vertex3D (Vector3 (-1.0f, 2.0f, 0.0f), Vector3.UnitZ, Vector4 (0.0f, 0.0f, 0.0f, 1.0f))
+                            |]
+                        Indices = [| 0u; 1u; 2u |]
+                    }
+
+                use triHandle = ctx.UploadMesh triMesh
+                use triBatch = ctx.CreateBatch (triHandle, BlendMode.Opaque, true)
+                triBatch.SetSingle (Instance3D.identity RgbaColor.white 0.5f 1u InstanceFlags.None)
+
+                let cam = Camera3D.orthographic Vector3.Zero 0.0f 0.0f 1.0f 4.0f
+
+                let triPass =
+                    ScenePass.create cam
+                    |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                    |> ScenePass.withBatches [| triBatch |]
+
+                ctx.SetUserUniforms (uTurbo.Span)
+                triPass |> WgpuContext.render ctx |> ignore
+                let struct (lr, lg, lb, _) = pixelAt ctx 32 32
+                Expect.isGreaterThan lg 170uy "Lit ColorShader midpoint yields bright turbo green"
+                Expect.isGreaterThan lg lr "Lit ColorShader midpoint green exceeds red"
+                Expect.isGreaterThan lg (lb + 60uy) "Lit ColorShader midpoint green exceeds blue"
+
+                // Compare Lit ColorShader pixel against both:
+                // (a) vertex-interpolated endpoint colors (proving per-fragment LUT evaluation beats vertex RGB average), and
+                // (b) stock shader Lit triangle colored at exact midpoint t=0.5 (proving studio lighting parity).
+                let loTurbo = ColorRamp.tryMap turbo 0.0 |> ValueOption.get
+                let hiTurbo = ColorRamp.tryMap turbo 1.0 |> ValueOption.get
+                let midTurbo = ColorRamp.tryMap turbo 0.5 |> ValueOption.get
+
+                use vertexInterpTri =
+                    ctx.UploadMesh
+                        {
+                            Vertices =
+                                [|
+                                    Vertex3D (Vector3 (-1.0f, -2.0f, 0.0f), Vector3.UnitZ, loTurbo.ToVector4 ())
+                                    Vertex3D (Vector3 (1.0f, 0.0f, 0.0f), Vector3.UnitZ, hiTurbo.ToVector4 ())
+                                    Vertex3D (Vector3 (-1.0f, 2.0f, 0.0f), Vector3.UnitZ, loTurbo.ToVector4 ())
+                                |]
+                            Indices = [| 0u; 1u; 2u |]
+                        }
+
+                use vertexInterpBatch = ctx.CreateBatch (vertexInterpTri, BlendMode.Opaque, true)
+                vertexInterpBatch.SetSingle (Instance3D.identity RgbaColor.white 0.5f 1u InstanceFlags.None)
+                ctx.SetUserUniforms ((ColorShader.disabledUniforms ()).Span)
+
+                ScenePass.create cam
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withBatches [| vertexInterpBatch |]
+                |> WgpuContext.render ctx
+                |> ignore
+
+                let struct (vr, vg, _, _) = pixelAt ctx 32 32
+                Expect.isLessThan vg vr "vertex-interpolated RGB average lacks turbo midpoint green"
+                Expect.isGreaterThan (int lg - int vg) 80 "per-fragment Lit LUT green dramatically exceeds vertex-interpolated RGB average"
+
+                use stockTri =
+                    ctx.UploadMesh
+                        {
+                            Vertices =
+                                [|
+                                    Vertex3D (Vector3 (-1.0f, -2.0f, 0.0f), Vector3.UnitZ, Vector4.One)
+                                    Vertex3D (Vector3 (1.0f, 0.0f, 0.0f), Vector3.UnitZ, Vector4.One)
+                                    Vertex3D (Vector3 (-1.0f, 2.0f, 0.0f), Vector3.UnitZ, Vector4.One)
+                                |]
+                            Indices = [| 0u; 1u; 2u |]
+                        }
+
+                use stockTriBatch = ctx.CreateBatch (stockTri, BlendMode.Opaque, true)
+                stockTriBatch.SetSingle (Instance3D.identity midTurbo 0.5f 1u InstanceFlags.None)
+
+                ScenePass.create cam
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withBatches [| stockTriBatch |]
+                |> WgpuContext.render ctx
+                |> ignore
+
+                let struct (sr, sg, sb, _) = pixelAt ctx 32 32
+                Expect.isLessThanOrEqual (abs (int lr - int sr)) 2 "Lit ColorShader R matches stock studio lighting"
+                Expect.isLessThanOrEqual (abs (int lg - int sg)) 2 "Lit ColorShader G matches stock studio lighting"
+                Expect.isLessThanOrEqual (abs (int lb - int sb)) 2 "Lit ColorShader B matches stock studio lighting"
+
+                // 2. Tiny domain [0.0f, 1e-20f] maps low and high stops distinctly via 1e-30 guard
+                let coolWarm = ColorRamp.coolWarm (0.0, 1.0)
+                let uTiny = ColorShader.packUniforms 0.0f 1e-20f coolWarm
+
+                let makeTinyQuad s =
+                    ctx.UploadMesh
+                        {
+                            Vertices =
+                                [|
+                                    Vertex3D (Vector3 (-1.0f, -1.0f, 0.0f), Vector3.UnitZ, Vector4 (s, 0.0f, 0.0f, 1.0f))
+                                    Vertex3D (Vector3 (1.0f, -1.0f, 0.0f), Vector3.UnitZ, Vector4 (s, 0.0f, 0.0f, 1.0f))
+                                    Vertex3D (Vector3 (1.0f, 1.0f, 0.0f), Vector3.UnitZ, Vector4 (s, 0.0f, 0.0f, 1.0f))
+                                    Vertex3D (Vector3 (-1.0f, 1.0f, 0.0f), Vector3.UnitZ, Vector4 (s, 0.0f, 0.0f, 1.0f))
+                                |]
+                            Indices = [| 0u; 1u; 2u; 0u; 2u; 3u |]
+                        }
+
+                use lowTinyMesh = makeTinyQuad 0.0f
+                use highTinyMesh = makeTinyQuad 1e-20f
+                use lowTinyBatch = ctx.CreateBatch (lowTinyMesh, BlendMode.Opaque, true)
+                use highTinyBatch = ctx.CreateBatch (highTinyMesh, BlendMode.Opaque, true)
+                lowTinyBatch.SetSingle (Instance3D.identity RgbaColor.white 0.5f 1u InstanceFlags.Unlit)
+                highTinyBatch.SetSingle (Instance3D.identity RgbaColor.white 0.5f 1u InstanceFlags.Unlit)
+
+                ctx.SetUserUniforms (uTiny.Span)
+
+                ScenePass.create cam
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withBatches [| lowTinyBatch |]
+                |> WgpuContext.render ctx
+                |> ignore
+
+                let struct (tlr, _, tlb, _) = pixelAt ctx 32 32
+                Expect.isGreaterThan tlb (tlr + 40uy) "tiny domain [0, 1e-20] maps 0.0f to cool blue"
+
+                ScenePass.create cam
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withBatches [| highTinyBatch |]
+                |> WgpuContext.render ctx
+                |> ignore
+
+                let struct (thr, _, thb, _) = pixelAt ctx 32 32
+                Expect.isGreaterThan thr (thb + 40uy) "tiny domain [0, 1e-20] maps 1e-20f to warm red"
+
+                // 3. nullArg guards on ColorRamp and WallProjection3D
+                Expect.throwsT<ArgumentNullException> (fun () -> ColorRamp.tryMap (Unchecked.defaultof<ColorRamp>) 0.5 |> ignore) "tryMap rejects null ramp"
+                Expect.throwsT<ArgumentNullException> (fun () -> ColorRamp.stops 5 (Unchecked.defaultof<ColorRamp>) |> ignore) "stops rejects null ramp"
+                Expect.throwsT<ArgumentNullException> (fun () -> ColorRamp.stops 0 (Unchecked.defaultof<ColorRamp>) |> ignore) "stops(0) rejects null ramp"
+
+                let walls = struct (-1.0f, -1.0f, -1.0f)
+
+                Expect.throwsT<ArgumentNullException>
+                    (fun () -> WallProjection3D.projectPoint (Unchecked.defaultof<Scale3D>) walls WallPlane.XY (Point3.create 0.0 0.0 0.0) |> ignore)
+                    "projectPoint rejects null scale"
+
+                Expect.throwsT<ArgumentNullException>
+                    (fun () -> WallProjection3D.projectContours (Unchecked.defaultof<Scale3D>) walls WallPlane.XY RgbaColor.white [] |> ignore)
+                    "projectContours rejects null scale"
+
+                let validScale = Scale3D.cartesian (0.0, 10.0) (0.0, 10.0) (0.0, 10.0)
+
+                Expect.throwsT<ArgumentNullException>
+                    (fun () -> WallProjection3D.projectContours validScale walls WallPlane.XY RgbaColor.white (Unchecked.defaultof<ContourPolygon list>) |> ignore)
+                    "projectContours rejects null contours"
+
+                // 4. YUp test case for WallProjection3D.projectContours
+                let scaleY =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.YUp
+                        (AxisScale3D.linear (0.0, 10.0))
+                        (AxisScale3D.linear (0.0, 10.0))
+                        (AxisScale3D.linear (0.0, 10.0))
+
+                let frameY = Axis3D.build (Axis3D.defaultSpec scaleY) 320 240 cam
+                let struct (bxY, fyY, bzY) = Axis3D.backWallPlanes frameY
+
+                let values =
+                    [ for r in 0..4 do
+                        for c in 0..4 ->
+                            Some (if r >= 1 && r <= 3 && c >= 1 && c <= 3 && not (r = 2 && c = 2) then 2.0 else 0.0) ]
+
+                let grid =
+                    match DensityGrid.create (Bounds.create 0.0 0.0 10.0 10.0) 5 5 values with
+                    | Ok g -> g
+                    | Error e -> failtestf "grid failed: %A" e
+
+                let contours =
+                    match Contour.compute (ContourConfig.create [ 1.0 ]) grid with
+                    | Ok c -> c
+                    | Error e -> failtestf "contour failed: %A" e
+
+                let lineCol = RgbaColor (0.3f, 0.8f, 0.5f, 1.0f)
+                let xyY = WallProjection3D.projectContours scaleY (struct (bxY, fyY, bzY)) WallPlane.XY lineCol contours
+                let xzY = WallProjection3D.projectContours scaleY (struct (bxY, fyY, bzY)) WallPlane.XZ lineCol contours
+                let yzY = WallProjection3D.projectContours scaleY (struct (bxY, fyY, bzY)) WallPlane.YZ lineCol contours
+
+                Expect.isGreaterThan xyY.Length 0 "YUp XY contours emit vertices"
+                Expect.equal (xyY.Length % 2) 0 "YUp XY contours paired"
+                Expect.equal (xzY.Length % 2) 0 "YUp XZ contours paired"
+                Expect.equal (yzY.Length % 2) 0 "YUp YZ contours paired"
+
+                for i = 0 to xyY.Length - 1 do
+                    Expect.floatClose { absolute = 1e-5; relative = 0.0 } (float xyY.Span[i].Position.Z) (float bzY) "YUp XY contour lies on world Z"
+
+                for i = 0 to xzY.Length - 1 do
+                    Expect.floatClose { absolute = 1e-5; relative = 0.0 } (float xzY.Span[i].Position.Y) (float fyY) "YUp XZ contour lies on world Y"
+
+                for i = 0 to yzY.Length - 1 do
+                    Expect.floatClose { absolute = 1e-5; relative = 0.0 } (float yzY.Span[i].Position.X) (float bxY) "YUp YZ contour lies on world X"
+
+                // 5. Shared internal AxisCoordMapper works across linear, log, time, piecewise, and categorical
+                let linMap = AxisCoordMapper.classify (AxisScale3D.linear (10.0, 30.0))
+                let linOut = Array.zeroCreate<float> 3
+                AxisCoordMapper.mapArray linMap [| 10.0; 20.0; Double.NaN |] linOut
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } linOut[0] 0.0 "AxisCoordMapper linear start"
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } linOut[1] 0.5 "AxisCoordMapper linear midpoint"
+                Expect.isTrue (Double.IsNaN linOut[2]) "AxisCoordMapper NaN returns NaN"
+
+                let logMap = AxisCoordMapper.classify (AxisScale3D.log 10.0 (1.0, 100.0))
+                let logOut = Array.zeroCreate<float> 2
+                AxisCoordMapper.mapArray logMap [| 10.0; 0.0 |] logOut
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } logOut[0] 0.5 "AxisCoordMapper log midpoint"
+                Expect.isTrue (Double.IsNaN logOut[1]) "AxisCoordMapper log zero returns NaN"
+
+                let wCoords, wValid = AxisCoordMapper.mapWorldCoords linMap 2.0 [| 10.0; 20.0; Double.NaN |]
+                Expect.equal wValid [| true; true; false |] "AxisCoordMapper.mapWorldCoords flags finite vs NaN"
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } wCoords[0] -1.0 "AxisCoordMapper.mapWorldCoords min"
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } wCoords[1] 0.0 "AxisCoordMapper.mapWorldCoords mid"
+                Expect.equal (AxisCoordMapper.axisDir (AxisScale3D.linear (10.0, 0.0))) -1.0 "AxisCoordMapper.axisDir reversed"
+
+                let subLogPos = RampTransform.classify (Scale.log 10.0 (1e-210, 1e-190) (0.0, 1.0))
+                let subLogNeg = RampTransform.classify (Scale.log 10.0 (-1e-190, -1e-210) (0.0, 1.0))
+
+                match subLogPos with
+                | RampTransform.Log (sign, _, _, false) -> Expect.equal sign 1.0 "positive sub-1e-162 log classifies as RampTransform.Log"
+                | other -> failtestf "expected RampTransform.Log for positive sub-1e-162 domain, got %A" other
+
+                match subLogNeg with
+                | RampTransform.Log (sign, _, _, false) -> Expect.equal sign -1.0 "negative sub-1e-162 log classifies as RampTransform.Log"
+                | other -> failtestf "expected RampTransform.Log for negative sub-1e-162 domain, got %A" other
+
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } (RampTransform.eval subLogPos 1e-200) 0.5 "positive sub-1e-162 log midpoint"
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } (RampTransform.eval subLogNeg -1e-200) 0.5 "negative sub-1e-162 log midpoint"
+                Expect.isTrue (Double.IsNaN (RampTransform.eval subLogPos 0.0)) "positive sub-1e-162 log rejects zero"
+                Expect.isTrue (Double.IsNaN (RampTransform.eval subLogNeg 1e-200)) "negative sub-1e-162 log rejects positive"
         ]

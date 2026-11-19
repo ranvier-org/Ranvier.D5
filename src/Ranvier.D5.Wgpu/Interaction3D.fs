@@ -405,6 +405,7 @@ type internal KeyedSlotSync<'K, 'Datum, 'Gpu when 'K: equality>
     let mutable dirtySlots = Array.zeroCreate<int> 16
     let mutable dirtyGen = 1
     let mutable dirtyCount = 0
+    let orderedKeys = if preserveOrder then ResizeArray<'K>() else null
     let mutable activeCount = 0
     let mutable prevBatchCount = 0
     let mutable lastUpdatedSlots = 0
@@ -492,6 +493,28 @@ type internal KeyedSlotSync<'K, 'Datum, 'Gpu when 'K: equality>
         let pickId = PickEncoding.encode layerId slot
         packSlot curScale pickId datum shadow (slot * slotsPerItem)
 
+    let syncOrderedKeys (keys: 'K array) =
+        if preserveOrder then
+            orderedKeys.Clear ()
+            orderedKeys.AddRange keys
+
+    let findOrderedInsertSlot (key: 'K) : int =
+        let mutable precedingActive = 0
+        let mutable found = false
+        let mutable i = 0
+
+        while not found && i < orderedKeys.Count do
+            let k = orderedKeys[i]
+
+            if k = key then
+                found <- true
+            elif (tryFindSlot k).IsSome then
+                precedingActive <- precedingActive + 1
+
+            i <- i + 1
+
+        if found then precedingActive else activeCount
+
     let copySlot (srcSlot: int) (dstSlot: int) =
         slotToKey[dstSlot] <- slotToKey[srcSlot]
         let srcBase = srcSlot * slotsPerItem
@@ -507,6 +530,34 @@ type internal KeyedSlotSync<'K, 'Datum, 'Gpu when 'K: equality>
     let shiftSlotsRight (startSlot: int) (endInclusive: int) =
         for s = endInclusive downto startSlot do
             copySlot s (s + 1)
+
+    let insertOrdered (curScale: Scale3D) (key: 'K) (datum: 'Datum) =
+        if layerId <> 0uy && activeCount >= PickEncoding.MaxSlotsPerLayer then
+            raise (InvalidOperationException $"Keyed GPU layer {layerId} exceeded maximum pickable slot capacity ({PickEncoding.MaxSlotsPerLayer}).")
+
+        let insertSlot = findOrderedInsertSlot key
+        ensureCapacity (activeCount + 1)
+        let pickId = PickEncoding.encode layerId insertSlot
+
+        if packSlot curScale pickId datum tempMoved 0 then
+            if insertSlot < activeCount then
+                shiftSlotsRight insertSlot (activeCount - 1)
+
+            slotToKey[insertSlot] <- key
+            let dstBase = insertSlot * slotsPerItem
+
+            for k = 0 to slotsPerItem - 1 do
+                shadow[dstBase + k] <- tempMoved[k]
+
+            activeCount <- activeCount + 1
+
+            for s = insertSlot to activeCount - 1 do
+                setSlotMapping slotToKey[s] s
+
+                if layerId <> 0uy && s > insertSlot then
+                    rewritePickId shadow (s * slotsPerItem) (PickEncoding.encode layerId s)
+
+                markDirty s
 
     let removeAtSlot (slot: int) =
         let oldKey = slotToKey[slot]
@@ -539,6 +590,7 @@ type internal KeyedSlotSync<'K, 'Datum, 'Gpu when 'K: equality>
     let rebuildFull (keys: 'K array) (curScale: Scale3D) =
         nextDirtyGen ()
         clearMappings ()
+        syncOrderedKeys keys
         ensureCapacity keys.Length
         let prevActive = activeCount
         let mutable nextCount = 0
@@ -619,13 +671,16 @@ type internal KeyedSlotSync<'K, 'Datum, 'Gpu when 'K: equality>
                     else
                         removeAtSlot slot
                 | Some datum, ValueNone ->
-                    let slot = activeCount
-                    ensureCapacity (slot + 1)
+                    if preserveOrder then
+                        insertOrdered curScale key datum
+                    else
+                        let slot = activeCount
+                        ensureCapacity (slot + 1)
 
-                    if writeSlot curScale slot datum then
-                        setSlotMapping key slot
-                        activeCount <- slot + 1
-                        markDirty slot
+                        if writeSlot curScale slot datum then
+                            setSlotMapping key slot
+                            activeCount <- slot + 1
+                            markDirty slot
                 | None, ValueSome slot -> removeAtSlot slot
                 | None, ValueNone -> ()
 
@@ -715,6 +770,7 @@ type internal KeyedSlotSync<'K, 'Datum, 'Gpu when 'K: equality>
 
                         markDirty s
 
+                syncOrderedKeys delta.Keys
                 applyUpserts curScale delta true
                 previousKeyCount <- delta.Keys.Length
                 flushIncremental ()
@@ -878,7 +934,10 @@ module Probe3D =
 
         Scale3D.invert scale hit.WorldPosition
 
-    /// <summary>Emits 3 orthogonal hairline drop-segments (6 <c>LineVertex3D</c> endpoints) from <c>worldPos</c> onto <c>Axis3D.backWallPlanes axisFrame</c>.</summary>
+    /// <summary>
+    /// Emits 3 orthogonal hairline drop-segments (6 <c>LineVertex3D</c> endpoints) from <c>worldPos</c> onto <c>Axis3D.backWallPlanes axisFrame</c>,
+    /// setting <c>ignoreSectionPlane = true</c> (<c>Pad = 1.0f</c>) so hover spikes remain unclipped under active <c>SectionPlane</c> cuts.
+    /// </summary>
     let hoverSpikes (scale: Scale3D) (axisFrame: AxisFrame3D) (color: RgbaColor) (worldPos: Vector3) : ReadOnlyMemory<LineVertex3D> =
         if isNull (box scale) then
             nullArg (nameof scale)
@@ -895,12 +954,12 @@ module Probe3D =
 
         let vertices =
             [|
-                LineVertex3D (worldPos, colV4)
-                LineVertex3D (Vector3 (bx, worldPos.Y, worldPos.Z), colV4)
-                LineVertex3D (worldPos, colV4)
-                LineVertex3D (Vector3 (worldPos.X, fy, worldPos.Z), colV4)
-                LineVertex3D (worldPos, colV4)
-                LineVertex3D (Vector3 (worldPos.X, worldPos.Y, bz), colV4)
+                LineVertex3D (worldPos, colV4, true)
+                LineVertex3D (Vector3 (bx, worldPos.Y, worldPos.Z), colV4, true)
+                LineVertex3D (worldPos, colV4, true)
+                LineVertex3D (Vector3 (worldPos.X, fy, worldPos.Z), colV4, true)
+                LineVertex3D (worldPos, colV4, true)
+                LineVertex3D (Vector3 (worldPos.X, worldPos.Y, bz), colV4, true)
             |]
 
         ReadOnlyMemory<LineVertex3D>(vertices)

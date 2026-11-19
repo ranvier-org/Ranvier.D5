@@ -2,6 +2,11 @@ namespace Ranvier.D5.Wgpu
 
 open System
 open System.Numerics
+#if FABLE_COMPILER
+open Fable.Core
+#else
+open System.Runtime.CompilerServices
+#endif
 open Ranvier.D5
 
 /// <summary>Vertical data-axis orientation mapping data <c>(X, Y, Z)</c> into right-handed <c>Ranvier.Wgpu</c> Y-up world space.</summary>
@@ -41,19 +46,56 @@ type AxisScale3D =
 /// <summary>Constructors, domain inspection, normalized mapping, inversion, and tick generation for <c>AxisScale3D</c>.</summary>
 [<RequireQualifiedAccess>]
 module AxisScale3D =
+#if FABLE_COMPILER
+    [<Emit("new WeakMap()")>]
+    let private createWeakMap () : obj = jsNative
+
+    [<Emit("$0.set($1, $2)")>]
+    let private weakMapSet (_map: obj) (_key: Continuous) (_value: float) : unit = jsNative
+
+    [<Emit("$0.get($1)")>]
+    let private weakMapGet (_map: obj) (_key: Continuous) : obj = jsNative
+
+    let private logBases = createWeakMap ()
+
+    let private registerLogBasis (scale: Continuous) (basis: float) =
+        weakMapSet logBases scale basis
+
+    let private tryGetLogBasis (scale: Continuous) : float voption =
+        let v = weakMapGet logBases scale
+        if isNull v then ValueNone else ValueSome (unbox<float> v)
+#else
+    let private logBases = ConditionalWeakTable<Continuous, ref<float>>()
+
+    let private registerLogBasis (scale: Continuous) (basis: float) =
+        logBases.AddOrUpdate (scale, ref basis)
+
+    let private tryGetLogBasis (scale: Continuous) : float voption =
+        match logBases.TryGetValue scale with
+        | true, basisRef -> ValueSome basisRef.Value
+        | false, _ -> ValueNone
+#endif
+
     let private isLogContinuous (scale: Continuous) =
         let a = Scale.invert scale 0.0
         let b = Scale.invert scale 1.0
 
-        if a * b > 0.0 && a <> b then
+        if ((a > 0.0 && b > 0.0) || (a < 0.0 && b < 0.0)) && a <> b then
             let mid = Scale.invert scale 0.5
             let sign = if a < 0.0 then -1.0 else 1.0
-            let geom = sign * sqrt (abs a * abs b)
-            let arith = 0.5 * (a + b)
-            abs (mid - geom) <= 1e-9 * max 1.0 (abs geom)
-            && abs (mid - arith) > 1e-6 * max 1.0 (abs arith)
+            let logA = Math.Log (abs a)
+            let logB = Math.Log (abs b)
+            let geom = sign * Math.Exp (0.5 * (logA + logB))
+            let arith = 0.5 * a + 0.5 * b
+            abs (mid - geom) <= 1e-9 * abs geom
+            && abs (mid - arith) > 1e-6 * abs arith
         else
             false
+
+    let internal isLogScale (axisScale: AxisScale3D) : bool =
+        match axisScale with
+        | AxisScale3D.Continuous c -> isLogContinuous c
+        | _ -> false
 
     /// <summary>Creates a linear numeric axis scale normalized to <c>[0.0, 1.0]</c>; throws <c>ArgumentException</c> for non-finite domains.</summary>
     let linear (domain: float * float) : AxisScale3D =
@@ -61,7 +103,9 @@ module AxisScale3D =
 
     /// <summary>Creates a logarithmic numeric axis scale normalized to <c>[0.0, 1.0]</c>; domain endpoints must be nonzero and share one sign.</summary>
     let log (basis: float) (domain: float * float) : AxisScale3D =
-        AxisScale3D.Continuous (Scale.log basis domain (0.0, 1.0))
+        let scale = Scale.log basis domain (0.0, 1.0)
+        registerLogBasis scale basis
+        AxisScale3D.Continuous scale
 
     /// <summary>Creates a symmetric logarithmic axis scale with positive linear-region constant normalized to <c>[0.0, 1.0]</c>.</summary>
     let symlog (constant: float) (domain: float * float) : AxisScale3D =
@@ -178,12 +222,29 @@ module AxisScale3D =
                 if isLogContinuous c then
                     let a = Scale.invert c 0.0
                     let b = Scale.invert c 1.0
-                    let decades = abs (Math.Log10 (abs b) - Math.Log10 (abs a))
+                    let rawBasis = tryGetLogBasis c |> ValueOption.defaultValue 10.0
 
-                    if decades < float count && decades * 9.0 > 10000.0 then
+                    let tickBasis =
+                        if rawBasis > 0.0 && rawBasis < 1.0 then
+                            let inv = 1.0 / rawBasis
+                            if Check3D.isFinite inv && inv > 1.0 then inv else 10.0
+                        elif Check3D.isFinite rawBasis && rawBasis > 1.0 then
+                            rawBasis
+                        else
+                            10.0
+
+                    let decades = abs (Math.Log (abs b) - Math.Log (abs a)) / abs (Math.Log tickBasis)
+
+                    let minorMult =
+                        if tickBasis = floor tickBasis && tickBasis <= 100.0 then
+                            max 1.0 (tickBasis - 1.0)
+                        else
+                            1.0
+
+                    if decades < float count && decades * minorMult > 10000.0 then
                         Scale.ticks count c
                     else
-                        Scale.logTicks 10.0 count c
+                        Scale.logTicks tickBasis count c
                 else
                     Scale.ticks count c
             | AxisScale3D.Piecewise p ->
@@ -208,6 +269,210 @@ module AxisScale3D =
                         ticks
             | AxisScale3D.Categorical band -> categoricalTicks count band |> List.map snd
 
+[<Struct>]
+type internal RampTransform =
+    | Linear of x0: float * span: float * clamped: bool
+    | Log of sign: float * logAbs0: float * logSpan: float * clamped: bool
+    | Constant of value: float
+    | General of scale: Continuous
+
+module internal RampTransform =
+    let private approxEq (a: float) (b: float) =
+        abs (a - b) <= 1e-9 * max 1.0 (max (abs a) (abs b))
+
+    let private matchesAt (scale: Continuous) (x: float) (expected: float) =
+        match Scale.tryMap scale x with
+        | Some actual -> approxEq actual expected
+        | None -> false
+
+    let classify (scale: Continuous) : RampTransform =
+        try
+            let x0 = Scale.invert scale 0.0
+            let x1 = Scale.invert scale 1.0
+
+            if not (Check3D.isFinite x0 && Check3D.isFinite x1) then
+                RampTransform.General scale
+            elif x0 = x1 then
+                match Scale.tryMap scale x0 with
+                | Some mid when
+                    Check3D.isFinite mid
+                    && matchesAt scale (x0 - 1.0) mid
+                    && matchesAt scale (x0 + 1.0) mid
+                    && matchesAt scale (-abs x0 - 1.0) mid
+                    && matchesAt scale 0.0 mid
+                    ->
+                    RampTransform.Constant mid
+                | _ -> RampTransform.General scale
+            else
+                let span = x1 - x0
+
+                if
+                    Check3D.isFinite span
+                    && matchesAt scale x0 0.0
+                    && matchesAt scale x1 1.0
+                    && matchesAt scale (x0 + 0.25 * span) 0.25
+                    && matchesAt scale (x0 + 0.5 * span) 0.5
+                    && matchesAt scale (x0 + 0.75 * span) 0.75
+                then
+                    let xNeg = x0 - 0.5 * span
+                    let xPos = x1 + 0.5 * span
+
+                    if Check3D.isFinite xNeg && Check3D.isFinite xPos then
+                        if matchesAt scale xNeg -0.5 && matchesAt scale xPos 1.5 then
+                            RampTransform.Linear (x0, span, false)
+                        elif matchesAt scale xNeg 0.0 && matchesAt scale xPos 1.0 then
+                            RampTransform.Linear (x0, span, true)
+                        else
+                            RampTransform.General scale
+                    else
+                        RampTransform.General scale
+                elif (x0 > 0.0 && x1 > 0.0) || (x0 < 0.0 && x1 < 0.0) then
+                    let sign = if x0 < 0.0 then -1.0 else 1.0
+                    let la = Math.Log (abs x0)
+                    let lb = Math.Log (abs x1)
+                    let lSpan = lb - la
+
+                    if
+                        Check3D.isFinite lSpan
+                        && lSpan <> 0.0
+                        && matchesAt scale x0 0.0
+                        && matchesAt scale x1 1.0
+                        && matchesAt scale (sign * Math.Exp (la + 0.25 * lSpan)) 0.25
+                        && matchesAt scale (sign * Math.Exp (la + 0.5 * lSpan)) 0.5
+                        && matchesAt scale (sign * Math.Exp (la + 0.75 * lSpan)) 0.75
+                        && (Scale.tryMap scale 0.0).IsNone
+                        && (Scale.tryMap scale (-x0)).IsNone
+                    then
+                        let xNeg = sign * Math.Exp (la - 0.25 * lSpan)
+                        let xPos = sign * Math.Exp (lb + 0.25 * lSpan)
+
+                        if Check3D.isFinite xNeg && Check3D.isFinite xPos then
+                            if matchesAt scale xNeg -0.25 && matchesAt scale xPos 1.25 then
+                                RampTransform.Log (sign, la, lSpan, false)
+                            elif matchesAt scale xNeg 0.0 && matchesAt scale xPos 1.0 then
+                                RampTransform.Log (sign, la, lSpan, true)
+                            else
+                                RampTransform.General scale
+                        else
+                            RampTransform.General scale
+                    else
+                        RampTransform.General scale
+                else
+                    RampTransform.General scale
+        with :? ArgumentException ->
+            RampTransform.General scale
+
+#if FABLE_COMPILER
+    let inline eval (transform: RampTransform) (value: float) : float =
+#else
+    [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
+    let eval (transform: RampTransform) (value: float) : float =
+#endif
+        if not (Check3D.isFinite value) then
+            Double.NaN
+        else
+            match transform with
+            | RampTransform.Linear (x0, span, clamped) ->
+                let raw = (value - x0) / span
+                let t = if clamped then Math.Clamp (raw, 0.0, 1.0) else raw
+                if Check3D.isFinite t then t else Double.NaN
+            | RampTransform.Log (sign, la, lSpan, clamped) ->
+                if value * sign <= 0.0 then
+                    Double.NaN
+                else
+                    let raw = (Math.Log (abs value) - la) / lSpan
+                    let t = if clamped then Math.Clamp (raw, 0.0, 1.0) else raw
+                    if Check3D.isFinite t then t else Double.NaN
+            | RampTransform.Constant t -> t
+            | RampTransform.General scale ->
+                match Scale.tryMap scale value with
+                | Some t when Check3D.isFinite t -> t
+                | _ -> Double.NaN
+
+[<Struct>]
+type internal AxisCoordMapper =
+    | ContinuousFast of transform: RampTransform
+    | TimeLinear of ms0: float * spanMs: float
+    | TimeConst of mid: float
+    | PiecewiseAxis of piecewise: Piecewise
+    | CategoricalAxis
+
+module internal AxisCoordMapper =
+    let classify (axis: AxisScale3D) : AxisCoordMapper =
+        match axis with
+        | AxisScale3D.Continuous c -> ContinuousFast (RampTransform.classify c)
+        | AxisScale3D.TimeUtc ts ->
+            let ms0 = float ((Scale.timeInvert ts 0.0).ToUnixTimeMilliseconds ())
+            let ms1 = float ((Scale.timeInvert ts 1.0).ToUnixTimeMilliseconds ())
+
+            if ms0 = ms1 then
+                TimeConst 0.5
+            else
+                TimeLinear (ms0, ms1 - ms0)
+        | AxisScale3D.Piecewise p -> PiecewiseAxis p
+        | AxisScale3D.Categorical _ -> CategoricalAxis
+
+#if FABLE_COMPILER
+    let inline evalNormalized (mapper: AxisCoordMapper) (value: float) : float =
+#else
+    [<MethodImpl(MethodImplOptions.AggressiveInlining)>]
+    let evalNormalized (mapper: AxisCoordMapper) (value: float) : float =
+#endif
+        if not (Check3D.isFinite value) then
+            Double.NaN
+        else
+            match mapper with
+            | ContinuousFast rt -> RampTransform.eval rt value
+            | TimeLinear (ms0, spanMs) ->
+                let t = (value - ms0) / spanMs
+                if Check3D.isFinite t then t else Double.NaN
+            | TimeConst mid -> mid
+            | PiecewiseAxis p ->
+                try
+                    let t = Scale.piecewiseMap p value
+                    if Check3D.isFinite t then t else Double.NaN
+                with :? ArgumentException ->
+                    Double.NaN
+            | CategoricalAxis -> value
+
+    let axisDir (axis: AxisScale3D) : float =
+        match axis with
+        | AxisScale3D.Categorical _ -> 1.0
+        | _ ->
+            let d = AxisScale3D.invertNormalized axis 1.0 - AxisScale3D.invertNormalized axis 0.0
+            if d < 0.0 then -1.0 else 1.0
+
+    let mapArray (mapper: AxisCoordMapper) (coords: float array) (dst: float array) =
+        for i = 0 to coords.Length - 1 do
+            dst[i] <- evalNormalized mapper coords[i]
+
+    let mapWorldCoords (mapper: AxisCoordMapper) (extent: float) (coords: float array) : float array * bool array =
+        let n = coords.Length
+        let world = Array.zeroCreate<float> n
+        let valid = Array.zeroCreate<bool> n
+
+        for i = 0 to n - 1 do
+            let t = evalNormalized mapper coords[i]
+
+            if Check3D.isFinite t then
+                let w = (t - 0.5) * extent
+
+                if Check3D.isFinite w && Check3D.isFinite32 (float32 w) then
+                    world[i] <- w
+                    valid[i] <- true
+
+        world, valid
+
+    let inline mapInterpolatedWorld (mapper: AxisCoordMapper) (extent: float) (c0: float) (c1: float) (w0: float) (w1: float) (mu: float) : float =
+        let c = c0 + (c1 - c0) * mu
+        let t = evalNormalized mapper c
+
+        if Check3D.isFinite t then
+            let w = (t - 0.5) * extent
+            if Check3D.isFinite w && Check3D.isFinite32 (float32 w) then w else w0 + (w1 - w0) * mu
+        else
+            w0 + (w1 - w0) * mu
+
 /// <summary>Immutable 3D data-to-world coordinate mapping combining three <c>AxisScale3D</c>s, <c>BoxAspect</c>, and <c>UpAxis</c>.</summary>
 type Scale3D =
     private
@@ -217,6 +482,9 @@ type Scale3D =
             AxisX: AxisScale3D
             AxisY: AxisScale3D
             AxisZ: AxisScale3D
+            MapX: AxisCoordMapper
+            MapY: AxisCoordMapper
+            MapZ: AxisCoordMapper
             DataExtentX: float
             DataExtentY: float
             DataExtentZ: float
@@ -229,6 +497,9 @@ type Scale3D =
     member internal this.XScale = this.AxisX
     member internal this.YScale = this.AxisY
     member internal this.ZScale = this.AxisZ
+    member internal this.MapperX = this.MapX
+    member internal this.MapperY = this.MapY
+    member internal this.MapperZ = this.MapZ
     member internal this.DataExtents = struct (this.DataExtentX, this.DataExtentY, this.DataExtentZ)
 
 /// <summary>Constructors, coordinate transforms, and bounding helpers for <c>Scale3D</c>.</summary>
@@ -308,6 +579,9 @@ module Scale3D =
             AxisX = x
             AxisY = y
             AxisZ = z
+            MapX = AxisCoordMapper.classify x
+            MapY = AxisCoordMapper.classify y
+            MapZ = AxisCoordMapper.classify z
             DataExtentX = dx
             DataExtentY = dy
             DataExtentZ = dz
@@ -334,15 +608,14 @@ module Scale3D =
 
     /// <summary>Maps a data <c>Point3</c> into centered <c>Ranvier.Wgpu</c> world coordinates, returning <c>ValueNone</c> when any axis omits the observation.</summary>
     let tryMap (scale: Scale3D) (point: Point3) : Vector3 voption =
-        match AxisScale3D.tryMapNormalized scale.AxisX point.X with
-        | ValueNone -> ValueNone
-        | ValueSome tx ->
-            match AxisScale3D.tryMapNormalized scale.AxisY point.Y with
-            | ValueNone -> ValueNone
-            | ValueSome ty ->
-                match AxisScale3D.tryMapNormalized scale.AxisZ point.Z with
-                | ValueNone -> ValueNone
-                | ValueSome tz -> normalizedToWorld scale.Up scale.DataExtentX scale.DataExtentY scale.DataExtentZ tx ty tz
+        let tx = AxisCoordMapper.evalNormalized scale.MapX point.X
+        let ty = AxisCoordMapper.evalNormalized scale.MapY point.Y
+        let tz = AxisCoordMapper.evalNormalized scale.MapZ point.Z
+
+        if Check3D.isFinite tx && Check3D.isFinite ty && Check3D.isFinite tz then
+            normalizedToWorld scale.Up scale.DataExtentX scale.DataExtentY scale.DataExtentZ tx ty tz
+        else
+            ValueNone
 
     /// <summary>Maps a data <c>Point3</c> into centered <c>Ranvier.Wgpu</c> world coordinates; raises <c>ArgumentException</c> when any coordinate cannot be mapped.</summary>
     let map (scale: Scale3D) (point: Point3) : Vector3 =
@@ -371,9 +644,12 @@ module Scale3D =
             match resolveAxis scale.AxisY yKey with
             | ValueNone -> ValueNone
             | ValueSome ty ->
-                match AxisScale3D.tryMapNormalized scale.AxisZ zVal with
-                | ValueNone -> ValueNone
-                | ValueSome tz -> normalizedToWorld scale.Up scale.DataExtentX scale.DataExtentY scale.DataExtentZ tx ty tz
+                let tz = AxisCoordMapper.evalNormalized scale.MapZ zVal
+
+                if Check3D.isFinite tz then
+                    normalizedToWorld scale.Up scale.DataExtentX scale.DataExtentY scale.DataExtentZ tx ty tz
+                else
+                    ValueNone
 
     /// <summary>Inverts a finite <c>Ranvier.Wgpu</c> world position back into data coordinates; under <c>ZUp</c>, world <c>(wx, wy, wz)</c> maps back via <c>(wx, -wz, wy)</c>.</summary>
     let invert (scale: Scale3D) (worldPos: Vector3) : Point3 =

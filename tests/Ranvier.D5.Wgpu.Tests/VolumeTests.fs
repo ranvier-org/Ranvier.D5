@@ -645,4 +645,233 @@ let volumeTests =
                     Expect.isTrue (v.Position.X >= loX - 1e-4f && v.Position.X <= hiX + 1e-4f) $"vertex[{i}].X inside mapped world box ({v.Position.X})"
                     Expect.isTrue (v.Position.Y >= loY - 1e-4f && v.Position.Y <= hiY + 1e-4f) $"vertex[{i}].Y inside mapped world box ({v.Position.Y})"
                     Expect.isTrue (v.Position.Z >= loZ - 1e-4f && v.Position.Z <= hiZ + 1e-4f) $"vertex[{i}].Z inside mapped world box ({v.Position.Z})"
+
+            testCase "IsoSurface3D.compute handles extreme +/-2.5e38f voxel scalars without float32 subtraction overflow or NaN"
+            <| fun () ->
+                let bounds = Bounds3.create -1.0 -1.0 -1.0 2.0 2.0 2.0
+
+                let stepExtremeGrid =
+                    VolumeGrid.fromFunction
+                        10
+                        10
+                        10
+                        bounds
+                        (fun x y z ->
+                            let r2 = x * x + y * y + z * z
+                            if r2 <= 0.36 then 2.5e38f else -2.5e38f)
+                        ValueNone
+                    |> unwrapOk "stepExtremeGrid"
+
+                let smoothExtremeGrid =
+                    VolumeGrid.fromFunction
+                        12
+                        12
+                        12
+                        bounds
+                        (fun x y z ->
+                            let v = 2.5e38 * (0.36 - (x * x + y * y + z * z))
+                            float32 (Math.Clamp (v, -2.5e38, 2.5e38)))
+                        ValueNone
+                    |> unwrapOk "smoothExtremeGrid"
+
+                let cubeScale =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (-1.0, 1.0))
+                        (AxisScale3D.linear (-1.0, 1.0))
+                        (AxisScale3D.linear (-1.0, 1.0))
+
+                let tinyScale =
+                    Scale3D.create
+                        (BoxAspect.Manual (0.002, 0.002, 0.002))
+                        UpAxis.ZUp
+                        (AxisScale3D.linear (-1.0, 1.0))
+                        (AxisScale3D.linear (-1.0, 1.0))
+                        (AxisScale3D.linear (-1.0, 1.0))
+
+                let extremeRamp = ColorRamp.viridis (-2.5e38, 2.5e38)
+
+                for label, scale, grid, thr in
+                    [
+                        "step +/-2.5e38f thr=0", cubeScale, stepExtremeGrid, 0.0f
+                        "step +/-2.5e38f thr=1.5e38f", cubeScale, stepExtremeGrid, 1.5e38f
+                        "step +/-2.5e38f tiny 0.002", tinyScale, stepExtremeGrid, 0.0f
+                        "smooth +/-2.5e38f thr=0", cubeScale, smoothExtremeGrid, 0.0f
+                    ] do
+                    let mesh =
+                        IsoSurface3D.compute scale extremeRamp (IsoSurfaceConfig.create thr) grid
+                        |> unwrapOk label
+
+                    verifyOutwardWinding mesh label
+                    verifyClosedManifoldByPosition mesh label
+
+                let smoothMesh =
+                    IsoSurface3D.compute cubeScale extremeRamp (IsoSurfaceConfig.create 0.0f) smoothExtremeGrid
+                    |> unwrapOk "smoothMesh radial check"
+
+                for i = 0 to smoothMesh.Vertices.Length - 1 do
+                    let v = smoothMesh.Vertices[i]
+                    let radial = Vector3.Normalize v.Position
+                    Expect.isGreaterThan (Vector3.Dot (radial, v.Normal)) 0.7f $"smooth +/-2.5e38f vertex[{i}] has outward gradient normal"
+
+            testCase "IsoSurface3D.compute and VolumeSlices3D.extract handle Log and Piecewise non-linear scales including unmappable X[0] = 0.0"
+            <| fun () ->
+                // 1. IsoSurface3D over AxisScale3D.log 10.0 (1.0, 100.0)
+                let logBounds = Bounds3.create 1.0 1.0 1.0 99.0 99.0 99.0
+
+                let logSphereGrid =
+                    VolumeGrid.fromFunction
+                        12
+                        12
+                        12
+                        logBounds
+                        (fun x y z ->
+                            let lx = log10 x - 1.0
+                            let ly = log10 y - 1.0
+                            let lz = log10 z - 1.0
+                            float32 (0.25 - (lx * lx + ly * ly + lz * lz)))
+                        ValueNone
+                    |> unwrapOk "logSphereGrid"
+
+                let logScaleAll =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.ZUp
+                        (AxisScale3D.log 10.0 (1.0, 100.0))
+                        (AxisScale3D.log 10.0 (1.0, 100.0))
+                        (AxisScale3D.log 10.0 (1.0, 100.0))
+
+                let logIsoMesh =
+                    IsoSurface3D.compute logScaleAll (ColorRamp.viridis (-1.0, 1.0)) (IsoSurfaceConfig.create 0.0f) logSphereGrid
+                    |> unwrapOk "logIsoMesh"
+
+                verifyOutwardWinding logIsoMesh "log-scale IsoSurface3D"
+                verifyClosedManifoldByPosition logIsoMesh "log-scale IsoSurface3D"
+
+                // 2. IsoSurface3D over AxisScale3D.piecewise (verify non-linear vertex placement at knot x = 0.25 -> normalized 0.75 -> worldX = +0.5)
+                let pwScale =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.ZUp
+                        (AxisScale3D.piecewise [ 0.0; 0.25; 1.0 ] [ 0.0; 0.75; 1.0 ])
+                        (AxisScale3D.linear (0.0, 1.0))
+                        (AxisScale3D.linear (0.0, 1.0))
+
+                let pwPlaneGrid =
+                    VolumeGrid.fromFunction
+                        4
+                        4
+                        4
+                        (Bounds3.create 0.0 0.0 0.0 1.0 1.0 1.0)
+                        (fun x _ _ -> float32 (x - 0.25))
+                        ValueNone
+                    |> unwrapOk "pwPlaneGrid"
+
+                let pwMesh =
+                    IsoSurface3D.compute
+                        pwScale
+                        (ColorRamp.viridis (-1.0, 1.0))
+                        { IsoSurfaceConfig.create 0.0f with CapBoundaries = false }
+                        pwPlaneGrid
+                    |> unwrapOk "pwMesh"
+
+                verifyOutwardWinding pwMesh "piecewise-scale IsoSurface3D"
+
+                for i = 0 to pwMesh.Vertices.Length - 1 do
+                    Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float pwMesh.Vertices[i].Position.X) 0.5 "piecewise knot x=0.25 maps to worldX=+0.5"
+
+                // 3. VolumeSlices3D.extract with X[0] = 0.0 (unmappable on AxisScale3D.log 10.0 (1.0, 100.0)) while X[1..] > 0.0
+                let zeroEdgeBounds = Bounds3.create 0.0 1.0 1.0 100.0 99.0 99.0
+
+                let zeroEdgeGrid =
+                    VolumeGrid.fromFunction
+                        6
+                        6
+                        6
+                        zeroEdgeBounds
+                        (fun x y z -> float32 (x + y + z))
+                        ValueNone
+                    |> unwrapOk "zeroEdgeGrid"
+
+                let sliceRamp = ColorRamp.viridis (0.0, 300.0)
+                let slices = { XIndex = Some 2; YIndex = Some 2; ZIndex = Some 2 }
+
+                for upAxis, expX, expY, expZ in
+                    [
+                        UpAxis.ZUp, Vector3.UnitX, -Vector3.UnitZ, Vector3.UnitY
+                        UpAxis.YUp, Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ
+                    ] do
+                    let zeroEdgeLogScale =
+                        Scale3D.create
+                            BoxAspect.Cube
+                            upAxis
+                            (AxisScale3D.log 10.0 (1.0, 100.0))
+                            (AxisScale3D.log 10.0 (1.0, 100.0))
+                            (AxisScale3D.linear (1.0, 100.0))
+
+                    let sliceMesh =
+                        VolumeSlices3D.extract zeroEdgeLogScale sliceRamp slices zeroEdgeGrid
+                        |> unwrapOk $"zeroEdgeLogSlice {upAxis}"
+
+                    // X-slice (ix=2, 6x6 valid) = 36 verts / 50 tris; Y-slice (X[0]=0 omitted -> 5x6) = 30 verts / 40 tris; Z-slice (5x6) = 30 verts / 40 tris
+                    Expect.equal sliceMesh.Vertices.Length 96 $"{upAxis}: unmappable X[0]=0.0 compacts vertices from 108 to 96"
+                    Expect.equal (sliceMesh.Indices.Length / 3) 130 $"{upAxis}: 3 slices emit 50 + 40 + 40 = 130 triangles"
+                    verifyOutwardWinding sliceMesh $"zeroEdgeLogSlice {upAxis}"
+
+                    for vIdx = 0 to 35 do
+                        Expect.equal sliceMesh.Vertices[vIdx].Normal expX $"{upAxis}: X-slice vertex[{vIdx}] normal"
+
+                    for vIdx = 36 to 65 do
+                        Expect.equal sliceMesh.Vertices[vIdx].Normal expY $"{upAxis}: Y-slice vertex[{vIdx}] normal"
+
+                    for vIdx = 66 to 95 do
+                        Expect.equal sliceMesh.Vertices[vIdx].Normal expZ $"{upAxis}: Z-slice vertex[{vIdx}] normal"
+
+                    for t = 0 to (sliceMesh.Indices.Length / 3) - 1 do
+                        let v0 = sliceMesh.Vertices[int sliceMesh.Indices[t * 3]]
+                        let v1 = sliceMesh.Vertices[int sliceMesh.Indices[t * 3 + 1]]
+                        let v2 = sliceMesh.Vertices[int sliceMesh.Indices[t * 3 + 2]]
+                        let cross = Vector3.Cross (v1.Position - v0.Position, v2.Position - v0.Position)
+                        Expect.isGreaterThan (Vector3.Dot (cross, v0.Normal)) 0.0f $"{upAxis}: tri[{t}] dot(cross, planeNormal) > 0"
+
+                    // Unmappable slice XIndex = Some 0 yields 0 vertices cleanly
+                    let unmappableSlice =
+                        VolumeSlices3D.extract zeroEdgeLogScale sliceRamp { XIndex = Some 0; YIndex = None; ZIndex = None } zeroEdgeGrid
+                        |> unwrapOk $"unmappable X[0] slice {upAxis}"
+
+                    Expect.equal unmappableSlice.Vertices.Length 0 $"{upAxis}: XIndex=0 (X=0.0) omits all vertices cleanly"
+                    Expect.equal unmappableSlice.Indices.Length 0 $"{upAxis}: XIndex=0 emits 0 indices"
+
+                // 4. VolumeSlices3D.extract over reversed piecewise scale maintains positive dot(cross, planeNormal)
+                let revPwScale =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.ZUp
+                        (AxisScale3D.piecewise [ 0.0; 0.5; 1.0 ] [ 1.0; 0.2; 0.0 ])
+                        (AxisScale3D.piecewise [ 0.0; 0.25; 1.0 ] [ 0.0; 0.75; 1.0 ])
+                        (AxisScale3D.linear (0.0, 1.0))
+
+                let revPwGrid =
+                    VolumeGrid.fromFunction
+                        5
+                        5
+                        5
+                        (Bounds3.create 0.0 0.0 0.0 1.0 1.0 1.0)
+                        (fun x y z -> float32 (x + y + z))
+                        ValueNone
+                    |> unwrapOk "revPwGrid"
+
+                let revPwSlices =
+                    VolumeSlices3D.extract revPwScale (ColorRamp.viridis (0.0, 3.0)) { XIndex = Some 2; YIndex = Some 2; ZIndex = Some 2 } revPwGrid
+                    |> unwrapOk "revPwSlices"
+
+                verifyOutwardWinding revPwSlices "reversed piecewise VolumeSlices3D"
+
+                for t = 0 to (revPwSlices.Indices.Length / 3) - 1 do
+                    let v0 = revPwSlices.Vertices[int revPwSlices.Indices[t * 3]]
+                    let v1 = revPwSlices.Vertices[int revPwSlices.Indices[t * 3 + 1]]
+                    let v2 = revPwSlices.Vertices[int revPwSlices.Indices[t * 3 + 2]]
+                    let cross = Vector3.Cross (v1.Position - v0.Position, v2.Position - v0.Position)
+                    Expect.isGreaterThan (Vector3.Dot (cross, v0.Normal)) 0.0f $"revPwSlices tri[{t}] dot(cross, planeNormal) > 0"
         ]

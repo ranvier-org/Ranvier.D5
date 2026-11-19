@@ -20,14 +20,6 @@ type SurfaceGrid =
             CurviPoints: Point3 array
         }
 
-[<Struct>]
-type private AxisMapper =
-    | ContinuousFast of transform: RampTransform
-    | TimeLinear of ms0: float * spanMs: float
-    | TimeConst of mid: float
-    | PiecewiseAxis of piecewise: Piecewise
-    | CategoricalAxis
-
 /// <summary>Appearance, coordinate scale, shading, opacity, wireframe, and pick configuration for a 3D surface.</summary>
 type SurfaceSpec =
     {
@@ -142,6 +134,9 @@ module private SurfaceKernel =
                 ok
 
     let validateSpec (spec: SurfaceSpec) =
+        if isNull (box spec) then
+            nullArg (nameof spec)
+
         if isNull (box spec.Scale) then
             nullArg "spec.Scale"
 
@@ -159,48 +154,9 @@ module private SurfaceKernel =
             Check3D.nonNegative32 "spec.Shading.roughness" roughness
             Check3D.nonNegative32 "spec.Shading.emissive" emissive
 
-    let classifyAxis (axis: AxisScale3D) : AxisMapper =
-        match axis with
-        | AxisScale3D.Continuous c -> AxisMapper.ContinuousFast (ColorRamp.classifyTransform c)
-        | AxisScale3D.TimeUtc ts ->
-            let ms0 = float ((Scale.timeInvert ts 0.0).ToUnixTimeMilliseconds ())
-            let ms1 = float ((Scale.timeInvert ts 1.0).ToUnixTimeMilliseconds ())
-
-            if ms0 = ms1 then
-                AxisMapper.TimeConst 0.5
-            else
-                AxisMapper.TimeLinear (ms0, ms1 - ms0)
-        | AxisScale3D.Piecewise p -> AxisMapper.PiecewiseAxis p
-        | AxisScale3D.Categorical _ -> AxisMapper.CategoricalAxis
-
-    let inline evalAxis (mapper: AxisMapper) (value: float) : float =
-        if not (Check3D.isFinite value) then
-            Double.NaN
-        else
-            match mapper with
-            | AxisMapper.ContinuousFast rt -> RampTransform.eval rt value
-            | AxisMapper.TimeLinear (ms0, spanMs) ->
-                let t = (value - ms0) / spanMs
-                if Check3D.isFinite t then t else Double.NaN
-            | AxisMapper.TimeConst mid -> mid
-            | AxisMapper.PiecewiseAxis p ->
-                try
-                    let t = Scale.piecewiseMap p value
-                    if Check3D.isFinite t then t else Double.NaN
-                with :? ArgumentException ->
-                    Double.NaN
-            | AxisMapper.CategoricalAxis -> value
-
-    let axisDir (axis: AxisScale3D) : float =
-        match axis with
-        | AxisScale3D.Categorical _ -> 1.0
-        | _ ->
-            let d = AxisScale3D.invertNormalized axis 1.0 - AxisScale3D.invertNormalized axis 0.0
-            if d < 0.0 then -1.0 else 1.0
-
     let shouldFlipGridWinding (scale: Scale3D) (isCurvilinear: bool) (xs: float array) (ys: float array) : bool =
-        let sX = axisDir scale.XScale
-        let sY = axisDir scale.YScale
+        let sX = AxisCoordMapper.axisDir scale.XScale
+        let sY = AxisCoordMapper.axisDir scale.YScale
 
         let gX =
             if isCurvilinear then 1.0
@@ -262,16 +218,12 @@ module private SurfaceKernel =
         && isBitSet mask i01
         && isBitSet mask (i01 + 1)
 
-    let mapAxisArray (mapper: AxisMapper) (coords: float array) (dst: float array) =
-        for i = 0 to coords.Length - 1 do
-            dst[i] <- evalAxis mapper coords[i]
-
     let fillRectilinearVertices
         (cols: int)
         (rows: int)
         (txBuf: float array)
         (tyBuf: float array)
-        (zMapper: AxisMapper)
+        (zMapper: AxisCoordMapper)
         (upAxis: UpAxis)
         (dx: float)
         (dy: float)
@@ -296,7 +248,7 @@ module private SurfaceKernel =
             for c = 0 to cols - 1 do
                 let idx = rowBase + c
                 let zVal = heights[idx]
-                let tz = evalAxis zMapper zVal
+                let tz = AxisCoordMapper.evalNormalized zMapper zVal
                 let struct (posOk, worldPos) = normalizedToWorldFast upAxis dx dy dz txBuf[c] ty tz
 
                 if posOk then
@@ -314,9 +266,9 @@ module private SurfaceKernel =
     let fillCurvilinearVertices
         (count: int)
         (curviPoints: Point3 array)
-        (xMapper: AxisMapper)
-        (yMapper: AxisMapper)
-        (zMapper: AxisMapper)
+        (xMapper: AxisCoordMapper)
+        (yMapper: AxisCoordMapper)
+        (zMapper: AxisCoordMapper)
         (upAxis: UpAxis)
         (dx: float)
         (dy: float)
@@ -338,9 +290,9 @@ module private SurfaceKernel =
         for idx = 0 to count - 1 do
             let pt = curviPoints[idx]
             let zVal = if hasHeightOverride then heights[idx] else pt.Z
-            let tx = evalAxis xMapper pt.X
-            let ty = evalAxis yMapper pt.Y
-            let tz = evalAxis zMapper zVal
+            let tx = AxisCoordMapper.evalNormalized xMapper pt.X
+            let ty = AxisCoordMapper.evalNormalized yMapper pt.Y
+            let tz = AxisCoordMapper.evalNormalized zMapper zVal
             let struct (posOk, worldPos) = normalizedToWorldFast upAxis dx dy dz tx ty tz
 
             if posOk then
@@ -657,9 +609,9 @@ module Surface3D =
 
         let struct (dx, dy, dz) = spec.Scale.DataExtents
         let upAxis = spec.Scale.UpAxis
-        let xMapper = SurfaceKernel.classifyAxis spec.Scale.XScale
-        let yMapper = SurfaceKernel.classifyAxis spec.Scale.YScale
-        let zMapper = SurfaceKernel.classifyAxis spec.Scale.ZScale
+        let xMapper = AxisCoordMapper.classify spec.Scale.XScale
+        let yMapper = AxisCoordMapper.classify spec.Scale.YScale
+        let zMapper = AxisCoordMapper.classify spec.Scale.ZScale
         let flipWinding = SurfaceKernel.shouldFlipGridWinding spec.Scale grid.IsCurvilinear grid.Xs grid.Ys
 
         if grid.IsCurvilinear then
@@ -683,8 +635,8 @@ module Surface3D =
         else
             let txBuf = Array.zeroCreate<float> cols
             let tyBuf = Array.zeroCreate<float> rows
-            SurfaceKernel.mapAxisArray xMapper grid.Xs txBuf
-            SurfaceKernel.mapAxisArray yMapper grid.Ys tyBuf
+            AxisCoordMapper.mapArray xMapper grid.Xs txBuf
+            AxisCoordMapper.mapArray yMapper grid.Ys tyBuf
 
             SurfaceKernel.fillRectilinearVertices
                 cols
@@ -780,18 +732,18 @@ module Surface3D =
 
                     let struct (dx, dy, dz) = spec.Scale.DataExtents
                     let upAxis = spec.Scale.UpAxis
-                    let xMapper = SurfaceKernel.classifyAxis spec.Scale.XScale
-                    let yMapper = SurfaceKernel.classifyAxis spec.Scale.YScale
-                    let zMapper = SurfaceKernel.classifyAxis spec.Scale.ZScale
-                    let flipWinding = (SurfaceKernel.axisDir spec.Scale.XScale * SurfaceKernel.axisDir spec.Scale.YScale) < 0.0
+                    let xMapper = AxisCoordMapper.classify spec.Scale.XScale
+                    let yMapper = AxisCoordMapper.classify spec.Scale.YScale
+                    let zMapper = AxisCoordMapper.classify spec.Scale.ZScale
+                    let flipWinding = (AxisCoordMapper.axisDir spec.Scale.XScale * AxisCoordMapper.axisDir spec.Scale.YScale) < 0.0
                     let useZForColor = scalars.Length = 0
 
                     for s = 0 to siteCount - 1 do
                         let origIdx = (Delaunay.inputIndices s tri)[0]
                         let pt = points[origIdx]
-                        let tx = SurfaceKernel.evalAxis xMapper pt.X
-                        let ty = SurfaceKernel.evalAxis yMapper pt.Y
-                        let tz = SurfaceKernel.evalAxis zMapper pt.Z
+                        let tx = AxisCoordMapper.evalNormalized xMapper pt.X
+                        let ty = AxisCoordMapper.evalNormalized yMapper pt.Y
+                        let tz = AxisCoordMapper.evalNormalized zMapper pt.Z
                         let struct (posOk, worldPos) = SurfaceKernel.normalizedToWorldFast upAxis dx dy dz tx ty tz
 
                         if posOk then
@@ -855,8 +807,8 @@ module Surface3D =
                             accumY[i2] <- accumY[i2] + cy
                             accumZ[i2] <- accumZ[i2] + cz
 
-                            match spec.Wireframe, wireLines, edgeSet with
-                            | ValueSome wc, Some lines, Some seen ->
+                            match struct (spec.Wireframe, wireLines, edgeSet) with
+                            | struct (ValueSome wc, Some lines, Some seen) ->
                                 let cVec = wc.ToVector4 ()
                                 addEdge lines seen cVec i0 i1
                                 addEdge lines seen cVec i1 i2
@@ -907,9 +859,9 @@ type SurfaceBatch private
         initTxBuf: float array,
         initTyBuf: float array,
         initScale: Scale3D,
-        initXMapper: AxisMapper,
-        initYMapper: AxisMapper,
-        initZMapper: AxisMapper,
+        initXMapper: AxisCoordMapper,
+        initYMapper: AxisCoordMapper,
+        initZMapper: AxisCoordMapper,
         initFlipWinding: bool,
         initShading: ShadingMode,
         initPickId: uint32,
@@ -951,13 +903,13 @@ type SurfaceBatch private
 
         if scaleChanged || forceAxisMap then
             lastScale <- spec.Scale
-            xMapper <- SurfaceKernel.classifyAxis spec.Scale.XScale
-            yMapper <- SurfaceKernel.classifyAxis spec.Scale.YScale
-            zMapper <- SurfaceKernel.classifyAxis spec.Scale.ZScale
+            xMapper <- AxisCoordMapper.classify spec.Scale.XScale
+            yMapper <- AxisCoordMapper.classify spec.Scale.YScale
+            zMapper <- AxisCoordMapper.classify spec.Scale.ZScale
 
             if not isCurvilinear then
-                SurfaceKernel.mapAxisArray xMapper xs txBuf
-                SurfaceKernel.mapAxisArray yMapper ys tyBuf
+                AxisCoordMapper.mapArray xMapper xs txBuf
+                AxisCoordMapper.mapArray yMapper ys tyBuf
 
             let newFlip = SurfaceKernel.shouldFlipGridWinding spec.Scale isCurvilinear xs ys
             let flipChanged = newFlip <> flipWinding
@@ -1040,6 +992,10 @@ type SurfaceBatch private
         | Some lb ->
             match spec.Wireframe with
             | ValueSome wireColor ->
+#if FABLE_COMPILER
+                if (maskChanged || not lastHasWireframe) && scratchLines.Length < maxLineVertices then
+                    scratchLines <- Array.zeroCreate<LineVertex3D> maxLineVertices
+#endif
                 let activeLineCount =
                     SurfaceKernel.buildActiveWireframe cols rows wireColor scratchVertices currMask scratchLines
 
@@ -1049,7 +1005,8 @@ type SurfaceBatch private
                     lb.Resize 0
                 else
 #if FABLE_COMPILER
-                    lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(Array.sub scratchLines 0 activeLineCount))
+                    scratchLines <- Array.sub scratchLines 0 activeLineCount
+                    lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(scratchLines))
 #else
                     lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(scratchLines, 0, activeLineCount))
 #endif
@@ -1086,11 +1043,11 @@ type SurfaceBatch private
         let currMask = Array.zeroCreate<uint64> maskWords
         let nextMask = Array.zeroCreate<uint64> maskWords
         let indicesScratch = Array.zeroCreate<uint32> maxIndices
-        let lineScratch = if spec.Wireframe.IsSome then Array.zeroCreate<LineVertex3D> maxLines else [||]
+        let mutable lineScratch = if spec.Wireframe.IsSome then Array.zeroCreate<LineVertex3D> maxLines else [||]
 
-        let xMapper = SurfaceKernel.classifyAxis spec.Scale.XScale
-        let yMapper = SurfaceKernel.classifyAxis spec.Scale.YScale
-        let zMapper = SurfaceKernel.classifyAxis spec.Scale.ZScale
+        let xMapper = AxisCoordMapper.classify spec.Scale.XScale
+        let yMapper = AxisCoordMapper.classify spec.Scale.YScale
+        let zMapper = AxisCoordMapper.classify spec.Scale.ZScale
         let flipWinding = SurfaceKernel.shouldFlipGridWinding spec.Scale initialGrid.IsCurvilinear initialGrid.Xs initialGrid.Ys
 
         let txBuf, tyBuf =
@@ -1099,8 +1056,8 @@ type SurfaceBatch private
             else
                 let tx = Array.zeroCreate<float> cols
                 let ty = Array.zeroCreate<float> rows
-                SurfaceKernel.mapAxisArray xMapper initialGrid.Xs tx
-                SurfaceKernel.mapAxisArray yMapper initialGrid.Ys ty
+                AxisCoordMapper.mapArray xMapper initialGrid.Xs tx
+                AxisCoordMapper.mapArray yMapper initialGrid.Ys ty
                 tx, ty
 
         let struct (dx, dy, dz) = spec.Scale.DataExtents
@@ -1179,7 +1136,8 @@ type SurfaceBatch private
                     lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(lineScratch))
                 elif activeLines > 0 then
 #if FABLE_COMPILER
-                    lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(Array.sub lineScratch 0 activeLines))
+                    lineScratch <- Array.sub lineScratch 0 activeLines
+                    lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(lineScratch))
 #else
                     lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(lineScratch, 0, activeLines))
 #endif
@@ -1275,7 +1233,7 @@ type SurfaceBatch private
         if scratchIndices.Length < newMaxIndices then
             scratchIndices <- Array.zeroCreate<uint32> newMaxIndices
 
-        if wireframeBatch.IsSome && scratchLines.Length < newMaxLines then
+        if wireframeBatch.IsSome && scratchLines.Length <> newMaxLines then
             scratchLines <- Array.zeroCreate<LineVertex3D> newMaxLines
 
         if not isCurvilinear then

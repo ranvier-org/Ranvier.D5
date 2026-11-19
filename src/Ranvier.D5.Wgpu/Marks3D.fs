@@ -305,13 +305,78 @@ module internal MarksKernel =
         else
             false
 
-    let tryPackBar
-        (scale: Scale3D)
+    let private packBarMapped
         (dx: float)
         (dy: float)
+        (dz: float)
         (upAxis: UpAxis)
-        (xScale: AxisScale3D)
-        (yScale: AxisScale3D)
+        (tx: float)
+        (ty: float)
+        (tz0: float)
+        (tz1: float)
+        (txLo: float)
+        (txHi: float)
+        (tyLo: float)
+        (tyHi: float)
+        (color: RgbaColor)
+        (roughness: float32)
+        (emissive: float32)
+        (pickId: uint32)
+        (flags: uint32)
+        (out: Instance3D array)
+        (slot: int)
+        : bool =
+        let wx = float32 ((tx - 0.5) * dx)
+        let wy = float32 ((ty - 0.5) * dy)
+        let wz0 = float32 ((tz0 - 0.5) * dz)
+        let wz1 = float32 ((tz1 - 0.5) * dz)
+        let wxSize = float32 (abs (txHi - txLo) * dx)
+        let wySize = float32 (abs (tyHi - tyLo) * dy)
+
+        if
+            Check3D.isFinite32 wx
+            && Check3D.isFinite32 wy
+            && Check3D.isFinite32 wz0
+            && Check3D.isFinite32 wz1
+            && Check3D.isFinite32 wxSize
+            && Check3D.isFinite32 wySize
+        then
+            let w0 =
+                match upAxis with
+                | UpAxis.ZUp -> Vector3 (wx, wz0, -wy)
+                | UpAxis.YUp -> Vector3 (wx, wy, wz0)
+
+            let w1 =
+                match upAxis with
+                | UpAxis.ZUp -> Vector3 (wx, wz1, -wy)
+                | UpAxis.YUp -> Vector3 (wx, wy, wz1)
+
+            let wzSize =
+                match upAxis with
+                | UpAxis.ZUp -> abs (w1.Y - w0.Y)
+                | UpAxis.YUp -> abs (w1.Z - w0.Z)
+
+            if Check3D.isFinite32 wzSize then
+                let center = w0 * 0.5f + w1 * 0.5f
+
+                let boxScale =
+                    match upAxis with
+                    | UpAxis.ZUp -> Vector3 (wxSize, wzSize, wySize)
+                    | UpAxis.YUp -> Vector3 (wxSize, wySize, wzSize)
+
+                let worldMat =
+                    Matrix4x4.CreateScale boxScale
+                    * Matrix4x4.CreateTranslation center
+
+                out[slot] <- Instance3D.fromMatrix worldMat color roughness pickId flags emissive
+                true
+            else
+                false
+        else
+            false
+
+    let tryPackBar
+        (scale: Scale3D)
         (pickId: uint32)
         (d: BarDatum3D)
         (out: Instance3D array)
@@ -331,38 +396,32 @@ module internal MarksKernel =
             && d.WidthY > 0.0
             && isFiniteColor d.Color
         then
-            let p0 = Point3.create d.X d.Y d.Z0
-            let p1 = Point3.create d.X d.Y d.Z1
+            let struct (dx, dy, dz) = scale.DataExtents
+            let mx = scale.MapperX
+            let my = scale.MapperY
+            let mz = scale.MapperZ
+            let tx = AxisCoordMapper.evalNormalized mx d.X
+            let ty = AxisCoordMapper.evalNormalized my d.Y
+            let tz0 = AxisCoordMapper.evalNormalized mz d.Z0
+            let tz1 = AxisCoordMapper.evalNormalized mz d.Z1
+            let txLo = AxisCoordMapper.evalNormalized mx (d.X - d.WidthX * 0.5)
+            let txHi = AxisCoordMapper.evalNormalized mx (d.X + d.WidthX * 0.5)
+            let tyLo = AxisCoordMapper.evalNormalized my (d.Y - d.WidthY * 0.5)
+            let tyHi = AxisCoordMapper.evalNormalized my (d.Y + d.WidthY * 0.5)
 
-            match
-                Scale3D.tryMap scale p0,
-                Scale3D.tryMap scale p1,
-                AxisScale3D.tryMapNormalized xScale (d.X - d.WidthX * 0.5),
-                AxisScale3D.tryMapNormalized xScale (d.X + d.WidthX * 0.5),
-                AxisScale3D.tryMapNormalized yScale (d.Y - d.WidthY * 0.5),
-                AxisScale3D.tryMapNormalized yScale (d.Y + d.WidthY * 0.5)
-            with
-            | ValueSome w0, ValueSome w1, ValueSome txLo, ValueSome txHi, ValueSome tyLo, ValueSome tyHi ->
-                let wxSize = float32 (abs (txHi - txLo) * dx)
-                let wySize = float32 (abs (tyHi - tyLo) * dy)
-
-                if Check3D.isFinite32 wxSize && Check3D.isFinite32 wySize then
-                    let center = (w0 + w1) * 0.5f
-
-                    let boxScale =
-                        match upAxis with
-                        | UpAxis.ZUp -> Vector3 (wxSize, abs (w1.Y - w0.Y), wySize)
-                        | UpAxis.YUp -> Vector3 (wxSize, wySize, abs (w1.Z - w0.Z))
-
-                    let worldMat =
-                        Matrix4x4.CreateScale boxScale
-                        * Matrix4x4.CreateTranslation center
-
-                    out[slot] <- Instance3D.fromMatrix worldMat d.Color roughness pickId flags emissive
-                    true
-                else
-                    false
-            | _ -> false
+            if
+                Check3D.isFinite tx
+                && Check3D.isFinite ty
+                && Check3D.isFinite tz0
+                && Check3D.isFinite tz1
+                && Check3D.isFinite txLo
+                && Check3D.isFinite txHi
+                && Check3D.isFinite tyLo
+                && Check3D.isFinite tyHi
+            then
+                packBarMapped dx dy dz scale.UpAxis tx ty tz0 tz1 txLo txHi tyLo tyHi d.Color roughness emissive pickId flags out slot
+            else
+                false
         else
             false
 
@@ -370,12 +429,15 @@ module internal MarksKernel =
         let struct (pA, pB, col) = pair
 
         if isFinitePoint3 pA && isFinitePoint3 pB && isFiniteColor col then
-            match Scale3D.tryMap scale pA, Scale3D.tryMap scale pB with
-            | ValueSome wA, ValueSome wB ->
-                out[vertexSlot] <- LineVertex3D (wA, col)
-                out[vertexSlot + 1] <- LineVertex3D (wB, col)
-                true
-            | _ -> false
+            match Scale3D.tryMap scale pA with
+            | ValueSome wA ->
+                match Scale3D.tryMap scale pB with
+                | ValueSome wB ->
+                    out[vertexSlot] <- LineVertex3D (wA, col)
+                    out[vertexSlot + 1] <- LineVertex3D (wB, col)
+                    true
+                | ValueNone -> false
+            | ValueNone -> false
         else
             false
 
@@ -444,9 +506,12 @@ module Glyph3D =
 
     /// <summary>
     /// Builds a unit-length arrow mesh along <c>+Y</c> anchored at <c>y = 0.0f</c> with cylindrical shaft <c>[0.0f..0.72f]</c> (radius <c>1.0f</c>)
-    /// and conical arrowhead <c>[0.72f..1.0f]</c> (base radius <c>2.2f</c>).
+    /// and conical arrowhead <c>[0.72f..1.0f]</c> (base radius <c>2.2f</c>); requires <c>segments &gt;= 3</c>.
     /// </summary>
     let unitArrowMesh (segments: int) : MeshData =
+        if segments < 3 then
+            raise (ArgumentOutOfRangeException (nameof segments, "Arrow mesh requires at least 3 radial segments."))
+
         let segs = max 6 segments
         let builder = MeshBuilder ()
 
@@ -502,30 +567,36 @@ module Glyph3D =
         if isNull xCategory || isNull yCategory || not (Check3D.isFinite z0 && Check3D.isFinite z1) then
             ValueNone
         else
-            match scale.XScale, scale.YScale with
-            | AxisScale3D.Categorical bandX, AxisScale3D.Categorical bandY ->
-                match Scale.bandPosition bandX xCategory, Scale.bandPosition bandY yCategory with
-                | Some posX, Some posY ->
-                    let bwX = Scale.bandwidth bandX
-                    let bwY = Scale.bandwidth bandY
-                    let wX = if bwX > 0.0 then bwX else 1.0 / float (max 1 (Scale.bandCategories bandX).Length) * 0.6
-                    let wY = if bwY > 0.0 then bwY else 1.0 / float (max 1 (Scale.bandCategories bandY).Length) * 0.6
-                    let cx = posX + bwX * 0.5
-                    let cy = posY + bwY * 0.5
+            match scale.XScale with
+            | AxisScale3D.Categorical bandX ->
+                match scale.YScale with
+                | AxisScale3D.Categorical bandY ->
+                    match Scale.bandPosition bandX xCategory with
+                    | Some posX ->
+                        match Scale.bandPosition bandY yCategory with
+                        | Some posY ->
+                            let bwX = Scale.bandwidth bandX
+                            let bwY = Scale.bandwidth bandY
+                            let wX = if bwX > 0.0 then bwX else 1.0 / float (max 1 (Scale.bandCategories bandX).Length) * 0.6
+                            let wY = if bwY > 0.0 then bwY else 1.0 / float (max 1 (Scale.bandCategories bandY).Length) * 0.6
+                            let cx = posX + bwX * 0.5
+                            let cy = posY + bwY * 0.5
 
-                    ValueSome
-                        {
-                            X = cx
-                            Y = cy
-                            Z0 = z0
-                            Z1 = z1
-                            WidthX = wX
-                            WidthY = wY
-                            Color = color
-                            Shading = shading
-                            PickId = pickId
-                            Selected = selected
-                        }
+                            ValueSome
+                                {
+                                    X = cx
+                                    Y = cy
+                                    Z0 = z0
+                                    Z1 = z1
+                                    WidthX = wX
+                                    WidthY = wY
+                                    Color = color
+                                    Shading = shading
+                                    PickId = pickId
+                                    Selected = selected
+                                }
+                        | None -> ValueNone
+                    | None -> ValueNone
                 | _ -> ValueNone
             | _ -> ValueNone
 
@@ -539,17 +610,13 @@ module Glyph3D =
         if items.Length = 0 then
             ReadOnlyMemory<Instance3D>.Empty
         else
-            let struct (dx, dy, _) = scale.DataExtents
-            let upAxis = scale.UpAxis
-            let xScale = scale.XScale
-            let yScale = scale.YScale
             let out = Array.zeroCreate<Instance3D> items.Length
             let mutable count = 0
 
             for i = 0 to items.Length - 1 do
                 let d = items[i]
 
-                if MarksKernel.tryPackBar scale dx dy upAxis xScale yScale d.PickId d out count then
+                if MarksKernel.tryPackBar scale d.PickId d out count then
                     count <- count + 1
 
             MarksKernel.trimMemory out count
@@ -589,17 +656,20 @@ module Glyph3D =
                     if Check3D.isFinite tipX && Check3D.isFinite tipY && Check3D.isFinite tipZ then
                         let tipPt = Point3.create tipX tipY tipZ
 
-                        match Scale3D.tryMap scale d.Origin, Scale3D.tryMap scale tipPt with
-                        | ValueSome worldOrigin, ValueSome worldTip ->
-                            let disp = (worldTip - worldOrigin) * d.LengthScale
-                            let lenSq = disp.LengthSquared ()
+                        match Scale3D.tryMap scale d.Origin with
+                        | ValueSome worldOrigin ->
+                            match Scale3D.tryMap scale tipPt with
+                            | ValueSome worldTip ->
+                                let disp = (worldTip - worldOrigin) * d.LengthScale
+                                let lenSq = disp.LengthSquared ()
 
-                            if Check3D.isFinite32 lenSq && lenSq >= 1e-12f then
-                                let arrowLen = MathF.Sqrt lenSq
-                                let worldMat = Orientation3D.anisotropicMatrix worldOrigin disp d.ShaftRadius arrowLen
-                                out[count] <- Instance3D.fromMatrix worldMat d.Color roughness d.PickId flags emissive
-                                count <- count + 1
-                        | _ -> ()
+                                if Check3D.isFinite32 lenSq && lenSq >= 1e-12f then
+                                    let arrowLen = MathF.Sqrt lenSq
+                                    let worldMat = Orientation3D.anisotropicMatrix worldOrigin disp d.ShaftRadius arrowLen
+                                    out[count] <- Instance3D.fromMatrix worldMat d.Color roughness d.PickId flags emissive
+                                    count <- count + 1
+                            | ValueNone -> ()
+                        | ValueNone -> ()
 
             MarksKernel.trimMemory out count
 
@@ -873,13 +943,17 @@ module Line3D =
                 elif not (MarksKernel.isFiniteColor col) then
                     errMsg <- Some $"Ribbon sample {i} has non-finite color channels."
                 else
-                    match Scale3D.tryMap scale pLow, Scale3D.tryMap scale pHigh with
-                    | ValueSome wl, ValueSome wh ->
-                        wLow[i] <- wl
-                        wHigh[i] <- wh
-                        wMid[i] <- (wl + wh) * 0.5f
-                        colors[i] <- col.ToVector4 ()
-                    | _ ->
+                    match Scale3D.tryMap scale pLow with
+                    | ValueSome wl ->
+                        match Scale3D.tryMap scale pHigh with
+                        | ValueSome wh ->
+                            wLow[i] <- wl
+                            wHigh[i] <- wh
+                            wMid[i] <- (wl + wh) * 0.5f
+                            colors[i] <- col.ToVector4 ()
+                        | ValueNone ->
+                            errMsg <- Some $"Ribbon sample {i} lies outside the active Scale3D domain."
+                    | ValueNone ->
                         errMsg <- Some $"Ribbon sample {i} lies outside the active Scale3D domain."
 
                 i <- i + 1
