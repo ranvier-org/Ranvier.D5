@@ -432,14 +432,24 @@ let main args =
     | [||] ->
         use demo = createDemo false LayoutSceneId.PoincareH3 ViewportW ViewportH
         let clock = Stopwatch.StartNew ()
+        let mutable prevClockSec = 0.0
+        let mutable simTimeSec = 0.0
 
         while demo.Window.Step () do
+            let nowSec = clock.Elapsed.TotalSeconds
+            let dt = max 0.0 (nowSec - prevClockSec)
+            prevClockSec <- nowSec
+
             if not demo.Paused.Value then
-                let t = clock.Elapsed.TotalSeconds
+                simTimeSec <- simTimeSec + dt
 
                 demo.Graph.Run (fun () ->
-                    demo.Stage.StepScene (demo.ActiveScene.Value, t)
-                    demo.FrameTick.Value <- t)
+                    demo.Stage.StepScene (demo.ActiveScene.Value, simTimeSec)
+                    demo.FrameTick.Value <- simTimeSec)
+            elif demo.ActiveScene.Value = LayoutSceneId.PoincareH3 && demo.Stage.HasPendingPoincareTransition then
+                demo.Graph.Run (fun () ->
+                    demo.Stage.StepPendingPoincare dt
+                    demo.FrameTick.Value <- demo.FrameTick.Value + 1e-4)
 
         0
     | _ ->
