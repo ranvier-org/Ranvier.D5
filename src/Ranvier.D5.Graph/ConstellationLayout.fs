@@ -13,6 +13,8 @@ type ConstellationClusterMode =
     | LeidenAuto of resolution: float
     /// <summary>Preserves explicit <c>DiagramGroup</c> hierarchy and splits ungrouped graphs or leaf groups larger than <c>maxGroupSize</c> via Leiden at <c>resolution</c>.</summary>
     | HybridGroupsAndLeiden of maxGroupSize: int * resolution: float
+    /// <summary>Directory-tree + greedy Newman-Girvan file modularity agglomeration with bottom-up tree DP and sparse-satellite coalescing (<c>minClusterFraction</c> in <c>[0, 0.5]</c>).</summary>
+    | DirectoryModularity of resolution: float * minClusterFraction: float
 
 /// <summary>A circular cluster boundary in a multi-scale <c>ConstellationLayout</c> hierarchy.</summary>
 type ClusterDisc =
@@ -24,8 +26,10 @@ type ClusterDisc =
       Depth: int
       /// <summary>Euclidean center of the cluster disc in viewport coordinates.</summary>
       Center: Point
-      /// <summary>Positive Euclidean radius of the cluster disc in layout units.</summary>
+      /// <summary>Outer Euclidean packing radius of the cluster disc in layout units (includes reserved annular clearance for <c>SectorArcs</c>).</summary>
       Radius: float
+      /// <summary>Tight inner Welzl child-enclosure radius for dashed parent directory rims (<c>InnerRadius = Radius</c> on leaf discs).</summary>
+      InnerRadius: float
       /// <summary>True when this disc directly hosts a local <c>PoincareDisk</c> node sub-layout rather than child cluster discs.</summary>
       IsLeafCluster: bool
       /// <summary>Total count of descendant graph nodes enclosed within this cluster disc.</summary>
@@ -52,7 +56,11 @@ type ConstellationConfig =
       /// <summary>Holten hierarchical spline bundling strength in <c>[0.0, 1.0]</c> for inter-cluster associations.</summary>
       BundleBeta: float
       /// <summary>Circular barycenter crossing-reduction sweeps per leaf Poincaré sub-disc.</summary>
-      BarycenterSweeps: int }
+      BarycenterSweeps: int
+      /// <summary>Topological hub-vs-stardust node sizing rule inside each leaf Poincaré sub-disc.</summary>
+      SizeBy: PoincareSizeBy
+      /// <summary>Angular node ordering policy inside each leaf Poincaré sub-disc.</summary>
+      RingOrder: PoincareRingOrder }
 
 /// <summary>Constructors for <c>ConstellationConfig</c>.</summary>
 [<RequireQualifiedAccess>]
@@ -66,7 +74,9 @@ module ConstellationConfig =
           CenterBias = PoincareCenterBias.FoundationsInner
           ConformalExponent = 0.55
           BundleBeta = 0.82
-          BarycenterSweeps = 6 }
+          BarycenterSweeps = 6
+          SizeBy = PoincareSizeBy.Uniform
+          RingOrder = PoincareRingOrder.Barycenter }
 
 /// <summary>Complete multi-scale constellation layout result including the 2D diagram layout and enclosing <c>ClusterDisc</c> hierarchy.</summary>
 type ConstellationOutput =
@@ -386,6 +396,44 @@ module ConstellationLayout =
           mutable TotalMembers: int
           IsExplicitGroup: bool }
 
+    type private FileModBucket =
+        { Name: string
+          Members: ResizeArray<int>
+          mutable InsideEdges: int
+          mutable TotalDegree: int }
+
+    type private DirModTree =
+        { Name: string
+          Parent: DirModTree option
+          Dirs: Dictionary<string, DirModTree>
+          Files: Dictionary<string, FileModBucket>
+          FileLinks: Dictionary<string, int>
+          mutable InsideEdges: int
+          mutable TotalDegree: int
+          mutable LooseInside: int
+          mutable LooseDegree: int }
+
+    type private ModPart =
+        { Label: string
+          Home: string
+          Kind: string
+          Files: string list
+          Members: int[]
+          Inside: int
+          Degree: int
+          Score: float }
+
+    type private AggrFileCluster =
+        { Files: ResizeArray<FileModBucket>
+          mutable Inside: int
+          mutable Degree: int
+          mutable Alive: bool }
+
+    type private DirHierarchyEntry =
+        { Path: string
+          SubDirs: ResizeArray<string>
+          Clusters: ResizeArray<int> }
+
     let private uniqueSyntheticId (reserved: HashSet<string>) (preferred: string) : string =
         if reserved.Add preferred then
             preferred
@@ -396,6 +444,410 @@ module ConstellationLayout =
                 sfx <- sfx + 1
                 cand <- preferred + ":" + string sfx
             cand
+
+    // Exact directory-tree + greedy Newman-Girvan file modularity agglomeration + bottom-up tree DP (matching &Atlas An + On).
+    let private buildDirectoryModularitySpecs
+        (eff: EffectiveDiagram)
+        (csr: CsrGraph)
+        (reserved: HashSet<string>)
+        (specs: ResizeArray<ClusterNodeSpec>)
+        (resolution: float)
+        (minFrac: float)
+        : unit =
+        let n = eff.Nodes.Length
+        // Reconstruct slash-delimited file path per node from ParentGroup chain (or slash/underscore prefix of Id when ungrouped)
+        let gParent = Dictionary<string, string option>(StringComparer.Ordinal)
+        for gi = 0 to eff.Groups.Length - 1 do
+            gParent[eff.Groups[gi].Id] <- eff.Groups[gi].ParentGroup
+        let rec fullGroupPath (gid: string) (acc: string) =
+            match gParent.TryGetValue gid with
+            | true, Some pid -> fullGroupPath pid (pid + "/" + acc)
+            | _ -> acc
+
+        let filePathOf =
+            Array.init n (fun i ->
+                let nd = eff.Nodes[i]
+                match nd.ParentGroup with
+                | Some gid -> fullGroupPath gid gid
+                | None ->
+                    let idStr = nd.Id
+                    let slashIdx = idStr.LastIndexOf('/')
+                    if slashIdx > 0 then idStr.Substring(0, slashIdx)
+                    else
+                        let usIdx = idStr.IndexOf('_')
+                        if usIdx > 0 then idStr.Substring(0, usIdx)
+                        else "(no file)")
+
+        // Count undirected non-self edges and node degrees
+        let mutable edgeCount = 0
+        let nodeDeg = Array.zeroCreate<int> n
+        let nonSelfEdges = ResizeArray<struct(int * int)>(csr.EdgeCount)
+        for e = 0 to csr.EdgeCount - 1 do
+            let u = csr.Src[e]
+            let v = csr.Dst[e]
+            if u <> v then
+                edgeCount <- edgeCount + 1
+                nodeDeg[u] <- nodeDeg[u] + 1
+                nodeDeg[v] <- nodeDeg[v] + 1
+                nonSelfEdges.Add(struct(u, v))
+
+        let addSpec id parentIdx depth directMembers =
+            let idx = specs.Count
+            specs.Add
+                { Id = id
+                  ParentIdx = parentIdx
+                  Depth = depth
+                  Children = [||]
+                  DirectMembers = directMembers
+                  TotalMembers = directMembers.Length
+                  IsExplicitGroup = false }
+            idx
+
+        if edgeCount = 0 || n < 2 then
+            let rootId = uniqueSyntheticId reserved "constellation"
+            addSpec rootId -1 0 (Array.init n id) |> ignore
+        else
+            let mkDir name parent =
+                { Name = name
+                  Parent = parent
+                  Dirs = Dictionary<string, DirModTree>(StringComparer.Ordinal)
+                  Files = Dictionary<string, FileModBucket>(StringComparer.Ordinal)
+                  FileLinks = Dictionary<string, int>(StringComparer.Ordinal)
+                  InsideEdges = 0
+                  TotalDegree = 0
+                  LooseInside = 0
+                  LooseDegree = 0 }
+
+            let rootDir = mkDir "" None
+            let nodeFileRef = Array.zeroCreate<DirModTree * FileModBucket> n
+
+            for i = 0 to n - 1 do
+                let raw = filePathOf[i]
+                let segs = raw.Split('/') |> Array.filter (fun s -> s.Length > 0)
+                let dirSegs, fileName =
+                    if segs.Length = 0 then [||], "(no file)"
+                    else segs[0 .. segs.Length - 2], segs[segs.Length - 1]
+                let mutable cur = rootDir
+                for d = 0 to dirSegs.Length - 1 do
+                    let dn = dirSegs[d]
+                    match cur.Dirs.TryGetValue dn with
+                    | true, sub -> cur <- sub
+                    | _ ->
+                        let sub = mkDir dn (Some cur)
+                        cur.Dirs[dn] <- sub
+                        cur <- sub
+                let fb =
+                    match cur.Files.TryGetValue fileName with
+                    | true, existing -> existing
+                    | _ ->
+                        let created =
+                            { Name = fileName
+                              Members = ResizeArray<int>()
+                              InsideEdges = 0
+                              TotalDegree = 0 }
+                        cur.Files[fileName] <- created
+                        created
+                fb.Members.Add i
+                let dg = nodeDeg[i]
+                fb.TotalDegree <- fb.TotalDegree + dg
+                cur.LooseDegree <- cur.LooseDegree + dg
+                nodeFileRef[i] <- (cur, fb)
+                let mutable anc : DirModTree option = Some cur
+                while anc.IsSome do
+                    anc.Value.TotalDegree <- anc.Value.TotalDegree + dg
+                    anc <- anc.Value.Parent
+
+            for k = 0 to nonSelfEdges.Count - 1 do
+                let struct(u, v) = nonSelfEdges[k]
+                let dU, fU = nodeFileRef[u]
+                let dV, fV = nodeFileRef[v]
+                if Object.ReferenceEquals(fU, fV) then
+                    fU.InsideEdges <- fU.InsideEdges + 1
+                if Object.ReferenceEquals(dU, dV) then
+                    dU.LooseInside <- dU.LooseInside + 1
+                    if not (Object.ReferenceEquals(fU, fV)) then
+                        let pairKey =
+                            if String.CompareOrdinal(fU.Name, fV.Name) < 0 then fU.Name + "\t" + fV.Name
+                            else fV.Name + "\t" + fU.Name
+                        match dU.FileLinks.TryGetValue pairKey with
+                        | true, cnt -> dU.FileLinks[pairKey] <- cnt + 1
+                        | _ -> dU.FileLinks[pairKey] <- 1
+                let seenAnc = HashSet<DirModTree>()
+                let mutable pU : DirModTree option = Some dU
+                while pU.IsSome do
+                    seenAnc.Add pU.Value |> ignore
+                    pU <- pU.Value.Parent
+                let mutable lcaDir = dV
+                while not (seenAnc.Contains lcaDir) && lcaDir.Parent.IsSome do
+                    lcaDir <- lcaDir.Parent.Value
+                let mutable pL : DirModTree option = Some lcaDir
+                while pL.IsSome do
+                    pL.Value.InsideEdges <- pL.Value.InsideEdges + 1
+                    pL <- pL.Value.Parent
+
+            let mEdgesF = float edgeCount
+            let inline modScore (ins: int) (deg: int) : float =
+                let ratio = float deg / (2. * mEdgesF)
+                float ins / mEdgesF - resolution * ratio * ratio
+
+            let rec collectAllMembers (d: DirModTree) (acc: ResizeArray<int>) =
+                for kv in d.Files do
+                    let mems = kv.Value.Members
+                    for i = 0 to mems.Count - 1 do acc.Add mems[i]
+                for kv in d.Dirs do
+                    collectAllMembers kv.Value acc
+
+            // Greedy Newman-Girvan agglomeration among sibling files inside directory d
+            let agglomerateFiles (d: DirModTree) : AggrFileCluster[] =
+                let fileArr = [| for kv in d.Files -> kv.Value |]
+                Array.sortInPlaceWith (fun (a: FileModBucket) (b: FileModBucket) -> String.CompareOrdinal(a.Name, b.Name)) fileArr
+                let fLen = fileArr.Length
+                let idxByName = Dictionary<string, int>(fLen, StringComparer.Ordinal)
+                let clusters =
+                    Array.init fLen (fun idx ->
+                        idxByName[fileArr[idx].Name] <- idx
+                        let fs = ResizeArray<FileModBucket>(2)
+                        fs.Add fileArr[idx]
+                        { Files = fs
+                          Inside = fileArr[idx].InsideEdges
+                          Degree = fileArr[idx].TotalDegree
+                          Alive = true })
+                let links = Dictionary<uint64, int>()
+                let inline packPair (a: int) (b: int) =
+                    let lo = min a b
+                    let hi = max a b
+                    (uint64 lo <<< 32) ||| uint64 (uint32 hi)
+                for kv in d.FileLinks do
+                    let parts = kv.Key.Split('\t')
+                    if parts.Length = 2 then
+                        let ia = idxByName[parts[0]]
+                        let ib = idxByName[parts[1]]
+                        if ia <> ib then links[packPair ia ib] <- kv.Value
+
+                let twoM2 = 2. * mEdgesF * mEdgesF
+                let mutable merging = true
+                while merging do
+                    let mutable bestGain = 1e-12
+                    let mutable bestI = -1
+                    let mutable bestW = -1
+                    let mutable bestE = 0
+                    for kv in links do
+                        let ia = int (kv.Key >>> 32)
+                        let ib = int (uint32 kv.Key)
+                        if clusters[ia].Alive && clusters[ib].Alive then
+                            let gain = float kv.Value / mEdgesF - resolution * float clusters[ia].Degree * float clusters[ib].Degree / twoM2
+                            if gain > bestGain then
+                                bestGain <- gain
+                                bestI <- ia
+                                bestW <- ib
+                                bestE <- kv.Value
+                    if bestI < 0 then
+                        merging <- false
+                    else
+                        let p = clusters[bestI]
+                        let w = clusters[bestW]
+                        for k = 0 to w.Files.Count - 1 do p.Files.Add w.Files[k]
+                        p.Inside <- p.Inside + w.Inside + bestE
+                        p.Degree <- p.Degree + w.Degree
+                        w.Alive <- false
+                        links.Remove(packPair bestI bestW) |> ignore
+                        let snapshot = [| for kv in links -> kv.Key, kv.Value |]
+                        for key, cnt in snapshot do
+                            let x = int (key >>> 32)
+                            let z = int (uint32 key)
+                            if x = bestW || z = bestW then
+                                links.Remove key |> ignore
+                                let other = if x = bestW then z else x
+                                if other <> bestI && clusters[other].Alive then
+                                    let nk = packPair bestI other
+                                    match links.TryGetValue nk with
+                                    | true, cur -> links[nk] <- cur + cnt
+                                    | _ -> links[nk] <- cnt
+
+                clusters |> Array.filter (fun c -> c.Alive)
+
+            let minSize = max 1 (int (ceil (minFrac * float n)))
+            let inline isTooSmall (p: ModPart) = minSize > 1 && p.Members.Length < minSize
+            let inline isStrong (p: ModPart) = (not (isTooSmall p)) && (p.Kind = "dir" || 4 * p.Inside > p.Degree)
+
+            let coalesceWeakAtHome (parts: ModPart list) (home: string) : ModPart list =
+                let inline atHome (p: ModPart) =
+                    String.Equals(p.Home, home, StringComparison.Ordinal) && (p.Kind <> "dir" || isTooSmall p)
+                let kept = parts |> List.filter (fun p -> (not (atHome p)) || isStrong p)
+                let weak = parts |> List.filter (fun p -> atHome p && not (isStrong p))
+                if weak.Length < 2 then
+                    parts
+                else
+                    let allFiles = weak |> List.forall (fun p -> p.Kind <> "dir" && String.Equals(p.Home, home, StringComparison.Ordinal))
+                    let ins = weak |> List.sumBy (fun p -> p.Inside)
+                    let deg = weak |> List.sumBy (fun p -> p.Degree)
+                    let mems = [| for p in weak do yield! p.Members |]
+                    let fls = [ for p in weak do yield! p.Files ]
+                    let merged =
+                        { Label = if home.Length = 0 then "other" else home + "other"
+                          Home = home
+                          Kind = if allFiles then "other" else "rest"
+                          Files = fls
+                          Members = mems
+                          Inside = ins
+                          Degree = deg
+                          Score = modScore ins deg }
+                    kept @ [ merged ]
+
+            let rec solveDirDP (d0: DirModTree) (prefix0: string) (home: string) : float * ModPart list =
+                let mutable d = d0
+                let mutable prefix = prefix0
+                while d.Dirs.Count = 1 && d.Files.Count = 0 do
+                    let mutable child = d
+                    for kv in d.Dirs do
+                        child <- kv.Value
+                    prefix <- prefix + child.Name + "/"
+                    d <- child
+
+                let allBuf = ResizeArray<int>()
+                collectAllMembers d allBuf
+                let wholePart =
+                    { Label = if prefix.Length = 0 then "all" else prefix
+                      Home = home
+                      Kind = "dir"
+                      Files = []
+                      Members = allBuf.ToArray()
+                      Inside = d.InsideEdges
+                      Degree = d.TotalDegree
+                      Score = modScore d.InsideEdges d.TotalDegree }
+
+                let mutable bestScore = wholePart.Score
+                let mutable bestParts = [ wholePart ]
+
+                let subKeys = [| for k in d.Dirs.Keys -> k |]
+                Array.sortInPlaceWith (fun a b -> String.CompareOrdinal(a, b)) subKeys
+                let subParts =
+                    [ for sk in subKeys do
+                        let _, sp = solveDirDP (d.Dirs[sk]) (prefix + sk + "/") prefix
+                        yield! sp ]
+
+                let tryCandidate (cand: ModPart list) =
+                    let sc = cand |> List.sumBy (fun p -> p.Score)
+                    if sc > bestScore + 1e-12 then
+                        bestScore <- sc
+                        bestParts <- cand
+
+                if subKeys.Length > 0 then
+                    let looseList =
+                        if d.Files.Count > 0 then
+                            let lMems = ResizeArray<int>()
+                            let lNames = ResizeArray<string>()
+                            for kv in d.Files do
+                                lNames.Add kv.Key
+                                let ms = kv.Value.Members
+                                for idx = 0 to ms.Count - 1 do lMems.Add ms[idx]
+                            [ { Label = if prefix.Length = 0 then "files" else prefix + "files"
+                                Home = prefix
+                                Kind = "files"
+                                Files = Seq.toList lNames
+                                Members = lMems.ToArray()
+                                Inside = d.LooseInside
+                                Degree = d.LooseDegree
+                                Score = modScore d.LooseInside d.LooseDegree } ]
+                        else
+                            []
+                    tryCandidate (coalesceWeakAtHome (subParts @ looseList) prefix)
+
+                if d.Files.Count > 1 then
+                    let aggr = agglomerateFiles d
+                    let fileClusterParts =
+                        [ for c in aggr ->
+                            let fNames = [ for fb in c.Files -> fb.Name ]
+                            let fMems = [| for fb in c.Files do for k in 0 .. fb.Members.Count - 1 do yield fb.Members[k] |]
+                            let primary = c.Files[0].Name
+                            let lbl =
+                                if c.Files.Count = 1 then prefix + primary
+                                else sprintf "%s%s+%d" prefix primary (c.Files.Count - 1)
+                            { Label = lbl
+                              Home = prefix
+                              Kind = "files"
+                              Files = fNames
+                              Members = fMems
+                              Inside = c.Inside
+                              Degree = c.Degree
+                              Score = modScore c.Inside c.Degree } ]
+                    tryCandidate (coalesceWeakAtHome (subParts @ fileClusterParts) prefix)
+
+                bestScore, bestParts
+
+            let _, rawParts = solveDirDP rootDir "" ""
+            let parts = rawParts |> List.filter (fun p -> p.Members.Length > 0) |> List.toArray
+            if parts.Length = 0 then
+                let rootId = uniqueSyntheticId reserved "constellation"
+                addSpec rootId -1 0 (Array.init n id) |> ignore
+            elif parts.Length = 1 then
+                let rootId = uniqueSyntheticId reserved (if parts[0].Label.Length > 0 then parts[0].Label else "constellation")
+                addSpec rootId -1 0 parts[0].Members |> ignore
+            else
+                // Reconstruct nested directory-group hull hierarchy above the winning modularity clusters (matching &Atlas On)
+                let parentDirPath (path: string) : string option =
+                    if path.Length = 0 then None
+                    else
+                        let trimmed = if path.EndsWith("/") then path.Substring(0, path.Length - 1) else path
+                        let slash = trimmed.LastIndexOf('/')
+                        if slash < 0 then Some "" else Some(trimmed.Substring(0, slash + 1))
+
+                let dirEntries = Dictionary<string, DirHierarchyEntry>(StringComparer.Ordinal)
+                let rec ensureDir (path: string) : DirHierarchyEntry =
+                    match dirEntries.TryGetValue path with
+                    | true, entry -> entry
+                    | _ ->
+                        let created =
+                            { Path = path
+                              SubDirs = ResizeArray<string>()
+                              Clusters = ResizeArray<int>() }
+                        dirEntries[path] <- created
+                        match parentDirPath path with
+                        | Some pPath ->
+                            let pEntry = ensureDir pPath
+                            pEntry.SubDirs.Add path
+                        | None -> ()
+                        created
+
+                for cIdx = 0 to parts.Length - 1 do
+                    let homeEntry = ensureDir parts[cIdx].Home
+                    homeEntry.Clusters.Add cIdx
+
+                let rec emitDirTree (path: string) (parentSpecIdx: int) (depth: int) : int option =
+                    let entry = dirEntries[path]
+                    let subDirs = entry.SubDirs.ToArray()
+                    Array.sortInPlaceWith (fun a b -> String.CompareOrdinal(a, b)) subDirs
+                    let clIdxs = entry.Clusters.ToArray()
+                    Array.sortInPlaceWith (fun a b -> String.CompareOrdinal(parts[a].Label, parts[b].Label)) clIdxs
+
+                    let totalItems = subDirs.Length + clIdxs.Length
+                    if totalItems = 0 then
+                        None
+                    elif totalItems = 1 && parentSpecIdx >= 0 then
+                        // Collapse unary intermediate directory wrapper
+                        if subDirs.Length = 1 then emitDirTree subDirs[0] parentSpecIdx depth
+                        else
+                            let p = parts[clIdxs[0]]
+                            let cid = uniqueSyntheticId reserved p.Label
+                            Some(addSpec cid parentSpecIdx depth p.Members)
+                    else
+                        let dirName = if path.Length = 0 then "constellation" else path
+                        let myId = uniqueSyntheticId reserved dirName
+                        let myIdx = addSpec myId parentSpecIdx depth [||]
+                        let kids = ResizeArray<int>(totalItems)
+                        for k = 0 to subDirs.Length - 1 do
+                            match emitDirTree subDirs[k] myIdx (depth + 1) with
+                            | Some childIdx -> kids.Add childIdx
+                            | None -> ()
+                        for k = 0 to clIdxs.Length - 1 do
+                            let p = parts[clIdxs[k]]
+                            let cid = uniqueSyntheticId reserved p.Label
+                            kids.Add(addSpec cid myIdx (depth + 1) p.Members)
+                        specs[myIdx].Children <- kids.ToArray()
+                        Some myIdx
+
+                ensureDir "" |> ignore
+                emitDirTree "" -1 0 |> ignore
 
     let private inducedSubgraph (eff: EffectiveDiagram) (csr: CsrGraph) (members: int[]) : DiagramGraph option =
         let mLen = members.Length
@@ -469,11 +921,21 @@ module ConstellationLayout =
             | ConstellationClusterMode.ExplicitGroups -> true
             | ConstellationClusterMode.LeidenAuto res -> Double.IsFinite res && res >= 0.
             | ConstellationClusterMode.HybridGroupsAndLeiden(maxSz, res) -> maxSz >= 1 && Double.IsFinite res && res >= 0.
+            | ConstellationClusterMode.DirectoryModularity(res, minFrac) ->
+                Double.IsFinite res && res >= 0. && Double.IsFinite minFrac && minFrac >= 0. && minFrac <= 0.5
+        let sizeOk =
+            match config.SizeBy with
+            | PoincareSizeBy.Uniform -> true
+            | PoincareSizeBy.InDegree m
+            | PoincareSizeBy.TransitiveReach m
+            | PoincareSizeBy.DagDepth m -> Double.IsFinite m && m >= 1. && m <= 12.
         if not (Double.IsFinite vx && Double.IsFinite vy && Double.IsFinite vw && Double.IsFinite vh)
            || vw <= 0. || vh <= 0. then
             Error [ InvalidObservation "ConstellationConfig Viewport must have finite coordinates and positive width and height." ]
         elif not modeOk then
-            Error [ InvalidObservation "ConstellationConfig ClusterMode requires positive maxGroupSize and finite nonnegative Leiden resolution." ]
+            Error [ InvalidObservation "ConstellationConfig ClusterMode requires positive maxGroupSize, finite nonnegative resolution and minClusterFraction in [0.0, 0.5]." ]
+        elif not sizeOk then
+            Error [ InvalidObservation "ConstellationConfig SizeBy maxScale must be finite and in [1.0, 12.0]." ]
         elif not (Double.IsFinite config.ClusterPadding) || config.ClusterPadding < 0. then
             Error [ InvalidObservation "ConstellationConfig ClusterPadding must be finite and nonnegative." ]
         elif not (Double.IsFinite config.ConformalExponent) || config.ConformalExponent < 0. then
@@ -697,6 +1159,9 @@ module ConstellationLayout =
                     | ConstellationClusterMode.ExplicitGroups -> buildGroupTree None
                     | ConstellationClusterMode.LeidenAuto res -> buildLeidenRoot res None
                     | ConstellationClusterMode.HybridGroupsAndLeiden(maxSz, res) -> buildGroupTree (Some(maxSz, res))
+                    | ConstellationClusterMode.DirectoryModularity(res, minFrac) ->
+                        buildDirectoryModularitySpecs eff csr reserved specs res minFrac
+                        Ok()
 
                 match treeResult with
                 | Error errs -> Error errs
@@ -725,6 +1190,7 @@ module ConstellationLayout =
 
                     let clusterRelPos = Array.create cCount (Point.create 0. 0.)
                     let clusterLocalR = Array.zeroCreate<float> cCount
+                    let clusterTightR = Array.zeroCreate<float> cCount
                     let localInnerRings = Array.create cCount ([||] : float[])
                     let localSectorSlots = Array.create cCount ([||] : (string * float * float)[])
                     let innerPad = max 4. (config.ClusterPadding * 0.4)
@@ -739,7 +1205,9 @@ module ConstellationLayout =
                             let mLen = mems.Length
                             sp.TotalMembers <- mLen
                             if mLen = 0 then
-                                clusterLocalR[cIdx] <- max 28. (config.ClusterPadding + 16.)
+                                let r0 = max 28. (config.ClusterPadding + 16.)
+                                clusterLocalR[cIdx] <- r0
+                                clusterTightR[cIdx] <- r0
                             elif mLen = 1 then
                                 let u = mems[0]
                                 let nd = eff.Nodes[u]
@@ -749,7 +1217,9 @@ module ConstellationLayout =
                                 localNodeW[u] <- nd.Size.Width
                                 localNodeH[u] <- nd.Size.Height
                                 localNodeLayer[u] <- 0
-                                clusterLocalR[cIdx] <- 0.5 * Double.Hypot(nd.Size.Width, nd.Size.Height) + innerPad
+                                let r1 = 0.5 * Double.Hypot(nd.Size.Width, nd.Size.Height) + innerPad
+                                clusterLocalR[cIdx] <- r1
+                                clusterTightR[cIdx] <- r1
                             else
                                 let mutable areaSum = 0.
                                 let mutable maxDiag = 0.
@@ -769,7 +1239,9 @@ module ConstellationLayout =
                                         BarycenterSweeps = config.BarycenterSweeps
                                         MinNodeScale = 0.28
                                         Padding = innerPad
-                                        SplitDenseRings = true }
+                                        SplitDenseRings = true
+                                        SizeBy = config.SizeBy
+                                        RingOrder = config.RingOrder }
 
                                 match inducedSubgraph eff csr mems with
                                 | Some subG ->
@@ -808,7 +1280,9 @@ module ConstellationLayout =
                                             |> List.filter (fun r -> r > 0.5 && r < maxReqR - 0.5)
                                             |> List.distinct
                                             |> List.toArray
-                                        clusterLocalR[cIdx] <- max 12. maxReqR
+                                        let rLeaf = max 12. maxReqR
+                                        clusterLocalR[cIdx] <- rLeaf
+                                        clusterTightR[cIdx] <- rLeaf
                                     | Error _ ->
                                         for k = 0 to mLen - 1 do
                                             let u = mems[k]
@@ -820,8 +1294,10 @@ module ConstellationLayout =
                                             localNodeH[u] <- eff.Nodes[u].Size.Height * 0.5
                                             localNodeLayer[u] <- 0
                                         clusterLocalR[cIdx] <- targetR
+                                        clusterTightR[cIdx] <- targetR
                                 | None ->
                                     clusterLocalR[cIdx] <- targetR
+                                    clusterTightR[cIdx] <- targetR
                         else
                             let kids = sp.Children
                             let kLen = kids.Length
@@ -842,15 +1318,20 @@ module ConstellationLayout =
                             for k = 0 to kLen - 1 do
                                 clusterRelPos[sortedKids[k]] <- offsets[k]
                             localSectorSlots[cIdx] <- computeChildSectorSlots childKeys offsets childRadii
-                            clusterLocalR[cIdx] <- encR + config.ClusterPadding
+                            // Reserve dedicated annular lane outside tight Welzl radius encR so SectorArcs never collide with sibling/parent rims (matching &Atlas b(E, fileRings))
+                            let bandLane = max (config.ClusterPadding + 4.) (min 26. (encR * 0.08 + config.ClusterPadding))
+                            clusterTightR[cIdx] <- encR
+                            clusterLocalR[cIdx] <- encR + bandLane
 
                     // Top-down similarity transform fitting root cluster 0 into Viewport
                     let rootLocalR = max 1e-6 (clusterLocalR[0])
                     let globalScale = availOuterR / rootLocalR
                     let worldCenter = Array.zeroCreate<Point> cCount
                     let worldRadius = Array.zeroCreate<float> cCount
+                    let worldTightRadius = Array.zeroCreate<float> cCount
                     worldCenter[0] <- outerCenter
                     worldRadius[0] <- rootLocalR * globalScale
+                    worldTightRadius[0] <- clusterTightR[0] * globalScale
 
                     for pi = postorder.Count - 2 downto 0 do
                         let cIdx = postorder[pi]
@@ -859,6 +1340,7 @@ module ConstellationLayout =
                         let pc = worldCenter[pIdx]
                         worldCenter[cIdx] <- Point.create (pc.X + rel.X * globalScale) (pc.Y + rel.Y * globalScale)
                         worldRadius[cIdx] <- clusterLocalR[cIdx] * globalScale
+                        worldTightRadius[cIdx] <- clusterTightR[cIdx] * globalScale
 
                     // Position all visible nodes inside their scaled leaf discs
                     let posNodes =
@@ -893,17 +1375,18 @@ module ConstellationLayout =
                             let parentId = if sp.ParentIdx >= 0 then Some (specs[sp.ParentIdx].Id) else None
                             let wc = worldCenter[idx]
                             let wr = worldRadius[idx]
+                            let wt = worldTightRadius[idx]
+                            let isLeaf = (sp.Children.Length = 0)
                             let innerRings =
                                 localInnerRings[idx]
                                 |> Array.map (fun r -> r * globalScale)
                                 |> Array.filter (fun r -> r > 0.25 && r < wr - 0.25)
                                 |> Array.toList
-                            let rimOff = max 0.8 (min 3.2 (wr * 0.045))
-                            let rimSw = max 0.6 (min 2.4 (wr * 0.032))
+                            let arcR = if isLeaf then wr + max 0.8 (min 2.8 (wr * 0.04)) else 0.5 * (wt + wr)
+                            let rimSw = max 0.6 (min 2.4 (max 0.8 ((wr - wt) * 0.38)))
                             let secArcs =
                                 [ for key, a0, a1 in localSectorSlots[idx] do
                                     if a1 > a0 + 1e-4 then
-                                        let arcR = wr + rimOff
                                         yield
                                             { Key = Some key
                                               Center = wc
@@ -917,7 +1400,8 @@ module ConstellationLayout =
                               Depth = sp.Depth
                               Center = wc
                               Radius = wr
-                              IsLeafCluster = (sp.Children.Length = 0)
+                              InnerRadius = wt
+                              IsLeafCluster = isLeaf
                               MemberCount = sp.TotalMembers
                               InnerRingRadii = innerRings
                               SectorArcs = secArcs } ]
@@ -951,7 +1435,7 @@ module ConstellationLayout =
                         else
                             GraphKernels.computeGroupBounds eff (posNodes |> Array.map (fun pn -> pn.Bounds))
 
-                    // Hybrid Edge Routing: intra-cluster Poincaré geodesic arcs + inter-cluster LCA bundled splines
+                    // Hybrid Edge Routing: intra-cluster Poincaré geodesic arcs + inter-cluster ancestor-only midpoint QuadraticTo splines (matching &Atlas ft + vn)
                     let lookupAnchor (node: PositionedNode) (ep: Endpoint) (toward: Point) : Point =
                         match ep.PortId with
                         | Some pid ->
@@ -1022,33 +1506,28 @@ module ConstellationLayout =
                                       CenterLabel = mLbl
                                       TargetLabel = tLbl }
                             else
+                                // Start at enclosing parent directory discs (specs[lu].ParentIdx, specs[lv].ParentIdx), NEVER leaf centers lu/lv!
                                 upChain.Clear()
                                 downChain.Clear()
-                                let mutable cu = lu
-                                let mutable cv = lv
+                                let mutable cu = max 0 (specs[lu].ParentIdx)
+                                let mutable cv = max 0 (specs[lv].ParentIdx)
                                 while specs[cu].Depth > specs[cv].Depth do
                                     upChain.Add cu
-                                    cu <- specs[cu].ParentIdx
+                                    cu <- max 0 (specs[cu].ParentIdx)
                                 while specs[cv].Depth > specs[cu].Depth do
                                     downChain.Add cv
-                                    cv <- specs[cv].ParentIdx
-                                while cu <> cv && cu >= 0 && cv >= 0 do
+                                    cv <- max 0 (specs[cv].ParentIdx)
+                                while cu <> cv && cu > 0 && cv > 0 do
                                     upChain.Add cu
                                     downChain.Add cv
-                                    cu <- specs[cu].ParentIdx
-                                    cv <- specs[cv].ParentIdx
-                                let lca = if cu >= 0 then cu else 0
+                                    cu <- max 0 (specs[cu].ParentIdx)
+                                    cv <- max 0 (specs[cv].ParentIdx)
+                                let lca = if cu = cv then cu else 0
 
                                 let interior = ResizeArray<Point>(upChain.Count + downChain.Count + 1)
                                 for k = 0 to upChain.Count - 1 do
                                     interior.Add(worldCenter[upChain[k]])
-                                if lca <> 0 || (upChain.Count + downChain.Count < 2) then
-                                    interior.Add(worldCenter[lca])
-                                else
-                                    let topU = worldCenter[upChain[upChain.Count - 1]]
-                                    let topV = worldCenter[downChain[downChain.Count - 1]]
-                                    let rc = worldCenter[0]
-                                    interior.Add(Point.create (0.5 * rc.X + 0.25 * (topU.X + topV.X)) (0.5 * rc.Y + 0.25 * (topU.Y + topV.Y)))
+                                interior.Add(worldCenter[lca])
                                 for k = downChain.Count - 1 downto 0 do
                                     interior.Add(worldCenter[downChain[k]])
 
@@ -1057,32 +1536,52 @@ module ConstellationLayout =
                                 let pStart = lookupAnchor uNode a.Source firstAim
                                 let pEnd = lookupAnchor vNode a.Target lastAim
 
-                                let ctrlLen = interior.Count + 2
-                                let ctrlPts = Array.zeroCreate<Point> ctrlLen
-                                ctrlPts[0] <- pStart
-                                for k = 0 to interior.Count - 1 do
-                                    ctrlPts[k + 1] <- interior[k]
-                                ctrlPts[ctrlLen - 1] <- pEnd
-
                                 let beta = config.BundleBeta
                                 let path, wpsArr =
-                                    if beta <= 1e-6 || ctrlLen <= 2 then
+                                    if beta <= 1e-6 || interior.Count = 0 then
                                         Path.ofCommands [ MoveTo pStart; LineTo pEnd ], [| pStart; pEnd |]
                                     else
-                                        let optPts = [ for k in 0 .. ctrlLen - 1 -> Some (ctrlPts[k]) ]
-                                        let p = Curves.line (CurveSpec.Bundle beta) optPts
-                                        let straightened =
-                                            Array.init ctrlLen (fun k ->
-                                                if k = 0 then pStart
-                                                elif k = ctrlLen - 1 then pEnd
+                                        let mWay = interior.Count
+                                        let blended =
+                                            Array.init mWay (fun k ->
+                                                let t = float (k + 1) / float (mWay + 1)
+                                                let chordX = pStart.X + (pEnd.X - pStart.X) * t
+                                                let chordY = pStart.Y + (pEnd.Y - pStart.Y) * t
+                                                Point.create
+                                                    (chordX + (interior[k].X - chordX) * beta)
+                                                    (chordY + (interior[k].Y - chordY) * beta))
+
+                                        let cmds = ResizeArray<PathCommand>(mWay + 1)
+                                        cmds.Add(MoveTo pStart)
+                                        for k = 0 to mWay - 1 do
+                                            let ctrl = blended[k]
+                                            let endPt =
+                                                if k + 1 < mWay then
+                                                    Point.create (0.5 * (ctrl.X + blended[k + 1].X)) (0.5 * (ctrl.Y + blended[k + 1].Y))
                                                 else
-                                                    let t = float k / float (ctrlLen - 1)
-                                                    let chordX = pStart.X + (pEnd.X - pStart.X) * t
-                                                    let chordY = pStart.Y + (pEnd.Y - pStart.Y) * t
-                                                    Point.create
-                                                        (chordX + (ctrlPts[k].X - chordX) * beta)
-                                                        (chordY + (ctrlPts[k].Y - chordY) * beta))
-                                        p, straightened
+                                                    pEnd
+                                            cmds.Add(QuadraticTo(ctrl, endPt))
+
+                                        // Sample smooth waypoint polyline along the C1 quadratic spline chain
+                                        let sampled = ResizeArray<Point>(mWay * 4 + 3)
+                                        sampled.Add pStart
+                                        let mutable segStart = pStart
+                                        for k = 0 to mWay - 1 do
+                                            let ctrl = blended[k]
+                                            let segEnd =
+                                                if k + 1 < mWay then
+                                                    Point.create (0.5 * (ctrl.X + blended[k + 1].X)) (0.5 * (ctrl.Y + blended[k + 1].Y))
+                                                else
+                                                    pEnd
+                                            for s = 1 to 4 do
+                                                let t = float s / 4.
+                                                let omt = 1. - t
+                                                let sx = omt * omt * segStart.X + 2. * omt * t * ctrl.X + t * t * segEnd.X
+                                                let sy = omt * omt * segStart.Y + 2. * omt * t * ctrl.Y + t * t * segEnd.Y
+                                                sampled.Add(Point.create sx sy)
+                                            segStart <- segEnd
+
+                                        Path.ofCommands (Seq.toList cmds), sampled.ToArray()
 
                                 let sLbl, mLbl, tLbl =
                                     if hasLabels then GraphKernels.placeLabelsOnWaypoints a wpsArr

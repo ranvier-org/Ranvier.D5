@@ -498,8 +498,9 @@ let private renderConstellationCard (phase: float) : SceneNode list * Point =
     let out =
         ConstellationLayout.compute
             { ConstellationConfig.create constBounds with
-                ClusterMode = ConstellationClusterMode.ExplicitGroups
-                ClusterPadding = 7.5
+                ClusterMode = ConstellationClusterMode.DirectoryModularity(0.85, 0.02)
+                ClusterPadding = 6.5
+                SizeBy = PoincareSizeBy.InDegree 2.4
                 BundleBeta = beta }
             constellationGraph
         |> ok
@@ -524,14 +525,13 @@ let private renderConstellationCard (phase: float) : SceneNode list * Point =
             ))
 
     let subsysOf (m: string) =
-        match m with
-        | "Memory" | "Arena" | "Thread" | "Runtime" -> "Runtime"
-        | "Lexer" | "Parser" | "Codegen" | "Compiler" -> "Compiler"
-        | _ -> "Protocol"
+        if m.Contains "Runtime" || m = "Memory" || m = "Arena" || m = "Thread" then "Runtime"
+        elif m.Contains "Compiler" || m = "Lexer" || m = "Parser" || m = "Codegen" then "Compiler"
+        else "Protocol"
 
     let discPalette (cid: string) (isLeaf: bool) =
         if not isLeaf then
-            Paint.rgb 30 41 59, Paint.rgb 100 116 139, 0.55
+            Paint.rgb 30 41 59, Paint.rgb 148 163 184, 0.42
         else
             match subsysOf cid with
             | "Runtime" -> Paint.rgb 12 74 110, Paint.rgb 56 189 248, 0.72
@@ -544,9 +544,13 @@ let private renderConstellationCard (phase: float) : SceneNode list * Point =
         |> List.sortBy (fun c -> c.Depth)
         |> List.collect (fun cd ->
             let fill, stroke, op = discPalette cd.Id cd.IsLeafCluster
+            let drawR = if cd.IsLeafCluster then cd.Radius else cd.InnerRadius
             let mainDisc =
-                discMark ("const:disc:" + cd.Id) cd.Center cd.Radius fill stroke (if cd.IsLeafCluster then 1.1 else 0.9)
-                |> Mark.withOpacity op
+                if cd.IsLeafCluster then
+                    discMark ("const:disc:" + cd.Id) cd.Center drawR fill stroke 1.05
+                    |> Mark.withOpacity op
+                else
+                    ringOutline ("const:disc:" + cd.Id) cd.Center drawR stroke 0.9 0.48
             let ringGuides =
                 cd.InnerRingRadii
                 |> List.mapi (fun ri r ->
@@ -579,11 +583,11 @@ let private renderConstellationCard (phase: float) : SceneNode list * Point =
             let mV = modOf ra.Target.NodeId
             let stroke, sw, op =
                 if mU = mV then
-                    (if subsysOf mU = "Compiler" then Paint.rgb 165 180 252 elif subsysOf mU = "Runtime" then Paint.rgb 125 211 252 else Paint.rgb 94 234 212), 0.85, 0.58
+                    (if subsysOf mU = "Compiler" then Paint.rgb 165 180 252 elif subsysOf mU = "Runtime" then Paint.rgb 125 211 252 else Paint.rgb 94 234 212), 0.80, 0.54
                 elif subsysOf mU = subsysOf mV then
-                    Paint.rgb 192 132 252, 1.35, 0.78
+                    Paint.rgb 192 132 252, 1.25, 0.76
                 else
-                    Paint.rgb 251 191 36, 1.45, 0.84
+                    Paint.rgb 251 191 36, 1.35, 0.82
             Leaf(
                 Mark.path ("const:edge:" + ra.Id) ra.Path
                 |> Mark.withFill Paint.none
@@ -604,7 +608,7 @@ let private renderConstellationCard (phase: float) : SceneNode list * Point =
     let nodeRadii =
         out.Layout.Nodes
         |> List.map (fun pn ->
-            let r = Math.Clamp(min (Bounds.width pn.Bounds) (Bounds.height pn.Bounds) * 0.34, 1.4, 3.2)
+            let r = Math.Clamp(min (Bounds.width pn.Bounds) (Bounds.height pn.Bounds) * 0.36, 1.2, 4.6)
             pn, r)
 
     let nodeMarks =
@@ -616,12 +620,18 @@ let private renderConstellationCard (phase: float) : SceneNode list * Point =
         nodeRadii
         |> List.map (fun (pn, r) -> Bounds.create (pn.Center.X - r - 1.) (pn.Center.Y - r - 1.) (2. * r + 2.) (2. * r + 2.))
 
+    let shortClusterName (cid: string) =
+        let trimmed = cid.TrimEnd('/')
+        let idx = trimmed.LastIndexOf('/')
+        if idx >= 0 && idx + 1 < trimmed.Length then trimmed.Substring(idx + 1) else trimmed
+
     let clusterLabelCands =
         out.Clusters
         |> List.filter (fun c -> c.IsLeafCluster)
         |> List.map (fun cd ->
-            let wEst = float cd.Id.Length * 5.6 + 6.
-            { LabelCandidate.Id = cd.Id
+            let sName = shortClusterName cd.Id
+            let wEst = float sName.Length * 5.6 + 6.
+            { LabelCandidate.Id = sName
               Anchor = Point.create cd.Center.X (cd.Center.Y - cd.Radius - 5.)
               Width = wEst
               Height = 11.

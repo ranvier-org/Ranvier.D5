@@ -530,6 +530,30 @@ type PoincareCenterBias =
     /// <summary>Places source / root nodes (<c>in-degree = 0</c> in <c>parent -&gt; child</c>, highest outgoing reach) at ring 0.</summary>
     | RootsInner
 
+/// <summary>Topological node importance sizing rule multiplied with conformal foreshortening inside a Poincaré disk.</summary>
+[<RequireQualifiedAccess>]
+type PoincareSizeBy =
+    /// <summary>Uses each node's input <c>DiagramNode.Size</c> with conformal foreshortening only.</summary>
+    | Uniform
+    /// <summary>Scales node dimensions in <c>[1.0, maxScale]</c> (<c>maxScale &gt;= 1.0</c>) by square-root normalized incoming edge count (dependents/callers).</summary>
+    | InDegree of maxScale: float
+    /// <summary>Scales node dimensions in <c>[1.0, maxScale]</c> (<c>maxScale &gt;= 1.0</c>) by logarithmic transitive reach <c>log(1 + reach)</c>.</summary>
+    | TransitiveReach of maxScale: float
+    /// <summary>Scales node dimensions in <c>[1.0, maxScale]</c> (<c>maxScale &gt;= 1.0</c>) by square-root normalized topological DAG height.</summary>
+    | DagDepth of maxScale: float
+
+/// <summary>Angular node ordering policy around each concentric Poincaré ring.</summary>
+[<RequireQualifiedAccess>]
+type PoincareRingOrder =
+    /// <summary>Initializes hierarchical spanning-forest wedges and refines angles with alternating neighbor barycenter sweeps.</summary>
+    | Barycenter
+    /// <summary>Preserves pure dominant-parent spanning-forest angular wedges without neighbor over-rotation (yields radial fan/petal bouquets and crisp target rings).</summary>
+    | SpanningTree
+    /// <summary>Orders nodes strictly by <c>ParentGroup</c> sector hierarchy and ordinal ID.</summary>
+    | GroupSector
+    /// <summary>Orders nodes around each ring by descending topological reach/importance.</summary>
+    | Importance
+
 /// <summary>Configuration for concentric 2D Poincaré disk hyperbolic layout and interactive Möbius focus.</summary>
 type PoincareDiskConfig =
     { /// <summary>Target viewport into which the Poincaré disk is inscribed.</summary>
@@ -551,7 +575,11 @@ type PoincareDiskConfig =
       /// <summary>When positive and smaller than node count, promotes the top <c>HubCount</c> highest-reach hubs into innermost ring 0.</summary>
       HubCount: int
       /// <summary>Angular gap in radians (<c>[0, 0.4]</c>) inserted between distinct <c>ParentGroup</c> perimeter sectors.</summary>
-      GroupSectorGap: float }
+      GroupSectorGap: float
+      /// <summary>Topological hub-vs-stardust node sizing rule.</summary>
+      SizeBy: PoincareSizeBy
+      /// <summary>Angular ordering policy around each concentric ring.</summary>
+      RingOrder: PoincareRingOrder }
 
 /// <summary>Constructors for <c>PoincareDiskConfig</c>.</summary>
 [<RequireQualifiedAccess>]
@@ -567,7 +595,9 @@ module PoincareDiskConfig =
           Padding = 16.
           SplitDenseRings = true
           HubCount = 0
-          GroupSectorGap = 0.035 }
+          GroupSectorGap = 0.035
+          SizeBy = PoincareSizeBy.Uniform
+          RingOrder = PoincareRingOrder.Barycenter }
 
 /// <summary>Unit-disk hyperbolic coordinate, ring metadata and unscaled dimensions of a node in a <c>PoincareDiskState</c>.</summary>
 type PoincareNodeCoord =
@@ -600,6 +630,7 @@ type PoincareDiskState =
           CurrentDisk: PoincarePoint[]
           Rings: int[]
           SubRings: int[]
+          ImportanceScale: float[]
           CanonicalAngles: float[]
           CurrentAngles: float[]
           Reach: int[]
@@ -616,9 +647,17 @@ module PoincareDisk =
         let vy = Bounds.y config.Viewport
         let vw = Bounds.width config.Viewport
         let vh = Bounds.height config.Viewport
+        let sizeOk =
+            match config.SizeBy with
+            | PoincareSizeBy.Uniform -> true
+            | PoincareSizeBy.InDegree m
+            | PoincareSizeBy.TransitiveReach m
+            | PoincareSizeBy.DagDepth m -> Double.IsFinite m && m >= 1.0 && m <= 12.0
         if not (Double.IsFinite vx && Double.IsFinite vy && Double.IsFinite vw && Double.IsFinite vh)
            || vw <= 0. || vh <= 0. then
             Error [ InvalidObservation "PoincareDisk Viewport must have finite coordinates and positive width and height." ]
+        elif not sizeOk then
+            Error [ InvalidObservation "PoincareDisk SizeBy maxScale must be finite and in [1.0, 12.0]." ]
         elif not (Double.IsFinite config.ConformalExponent) || config.ConformalExponent < 0. then
             Error [ InvalidObservation "PoincareDisk ConformalExponent must be finite and nonnegative." ]
         elif not (Double.IsFinite config.Padding) || config.Padding < 0. then
@@ -746,6 +785,7 @@ module PoincareDisk =
                       CurrentDisk = [||]
                       Rings = [||]
                       SubRings = [||]
+                      ImportanceScale = [||]
                       CanonicalAngles = [||]
                       CurrentAngles = [||]
                       Reach = [||]
@@ -762,6 +802,7 @@ module PoincareDisk =
                       CurrentDisk = [| Hyperbolic2D.origin |]
                       Rings = [| 0 |]
                       SubRings = [| 0 |]
+                      ImportanceScale = [| 1.0 |]
                       CanonicalAngles = [| 0. |]
                       CurrentAngles = [| 0. |]
                       Reach = [| 0 |]
@@ -817,10 +858,39 @@ module PoincareDisk =
                 for i = 0 to n - 1 do ringBuckets[rings[i]].Add i
                 let ringMembers = Array.init numRings (fun r -> ringBuckets[r].ToArray())
 
+                // Compute topological hub-vs-stardust node importance scale factor (matching &Atlas ut + En)
+                let impScale =
+                    match config.SizeBy with
+                    | PoincareSizeBy.Uniform -> Array.create n 1.0
+                    | PoincareSizeBy.InDegree maxSc ->
+                        let inDeg = Array.zeroCreate<int> n
+                        for e = 0 to csr.EdgeCount - 1 do
+                            let s = csr.Src[e]
+                            let d = csr.Dst[e]
+                            if s <> d then inDeg[d] <- inDeg[d] + 1
+                        let sorted = inDeg |> Array.map float |> Array.sort
+                        let capVal = max 1.0 sorted[min (n - 1) (int (floor (0.95 * float (n - 1))))]
+                        let denom = max 1e-9 (sqrt capVal)
+                        Array.init n (fun i -> 1.0 + (maxSc - 1.0) * (sqrt (min capVal (float inDeg[i])) / denom))
+                    | PoincareSizeBy.TransitiveReach maxSc ->
+                        let sorted = reachArr |> Array.map float |> Array.sort
+                        let capVal = max 1.0 sorted[min (n - 1) (int (floor (0.95 * float (n - 1))))]
+                        let denom = max 1e-9 (log (1.0 + capVal))
+                        Array.init n (fun i -> 1.0 + (maxSc - 1.0) * (log (1.0 + min capVal (float reachArr[i])) / denom))
+                    | PoincareSizeBy.DagDepth maxSc ->
+                        let depths =
+                            match config.CenterBias with
+                            | PoincareCenterBias.FoundationsInner -> cond.DistFromSource
+                            | PoincareCenterBias.RootsInner -> cond.DistToSink
+                        let sorted = depths |> Array.map float |> Array.sort
+                        let capVal = max 1.0 sorted[min (n - 1) (int (floor (0.95 * float (n - 1))))]
+                        let denom = max 1e-9 (sqrt capVal)
+                        Array.init n (fun i -> 1.0 + (maxSc - 1.0) * (sqrt (min capVal (float depths[i])) / denom))
+
                 let diagArr =
                     Array.init n (fun i ->
                         let s = eff.Nodes[i].Size
-                        Double.Hypot(s.Width, s.Height))
+                        Double.Hypot(s.Width, s.Height) * impScale[i])
                 let baseSpan = Array.init n (fun i -> diagArr[i] + 4.)
 
                 // Dominant-parent spanning-forest angular wedge allocation + group sector gaps (radial fan bouquets)
@@ -853,7 +923,7 @@ module PoincareDisk =
                     for k = 0 to mems.Length - 1 do
                         let u = mems[k]
                         let kids = treeChildren[u]
-                        let mutable w = 1.0
+                        let mutable w = impScale[u]
                         for c = 0 to kids.Count - 1 do
                             w <- w + subtreeWeight[kids[c]]
                         subtreeWeight[u] <- w
@@ -898,8 +968,26 @@ module PoincareDisk =
                                 assignSubtreeWedges (treeChildren[u].ToArray()) cur (cur + wShare) false
                             cur <- cur + wShare
 
-                let roots = [| for i in 0 .. n - 1 do if domParent[i] < 0 then yield i |]
-                assignSubtreeWedges roots (-0.5 * Math.PI) (1.5 * Math.PI) true
+                match config.RingOrder with
+                | PoincareRingOrder.GroupSector ->
+                    let order = Array.init n id
+                    sortBySector order
+                    for pos = 0 to n - 1 do
+                        initAngle[order[pos]] <- wrapAnglePi (-0.5 * Math.PI + 2. * Math.PI * (float pos + 0.5) / float n)
+                | PoincareRingOrder.Importance ->
+                    let order = Array.init n id
+                    Array.sortInPlaceWith (fun a b ->
+                        let c1 = compare reachArr[b] reachArr[a]
+                        if c1 <> 0 then c1
+                        else
+                            let c2 = compare impScale[b] impScale[a]
+                            if c2 <> 0 then c2 else String.CompareOrdinal(sectorKeys[a], sectorKeys[b])) order
+                    for pos = 0 to n - 1 do
+                        initAngle[order[pos]] <- wrapAnglePi (-0.5 * Math.PI + 2. * Math.PI * (float pos + 0.5) / float n)
+                | PoincareRingOrder.Barycenter
+                | PoincareRingOrder.SpanningTree ->
+                    let roots = [| for i in 0 .. n - 1 do if domParent[i] < 0 then yield i |]
+                    assignSubtreeWedges roots (-0.5 * Math.PI) (1.5 * Math.PI) true
 
                 let angles = Array.copy initAngle
                 let targetAngles = Array.copy initAngle
@@ -911,8 +999,12 @@ module PoincareDisk =
                     if not (r = 0 && singleCenter) then
                         placeProportionalAngles (ringMembers[r]) initAngle baseSpan angles
 
-                // Alternating inner-to-outer and outer-to-inner circular barycenter sweeps
-                for sweep = 0 to config.BarycenterSweeps - 1 do
+                // Alternating inner-to-outer and outer-to-inner circular barycenter sweeps (when RingOrder = Barycenter)
+                let sweepCount =
+                    match config.RingOrder with
+                    | PoincareRingOrder.Barycenter -> config.BarycenterSweeps
+                    | _ -> 0
+                for sweep = 0 to sweepCount - 1 do
                     token.ThrowIfCancellationRequested()
                     let outward = (sweep % 2 = 0)
                     let startR = if outward then (if singleCenter then 1 else 0) else numRings - 1
@@ -1129,6 +1221,7 @@ module PoincareDisk =
                       CurrentDisk = Array.copy canonicalDisk
                       Rings = rings
                       SubRings = subRings
+                      ImportanceScale = impScale
                       CanonicalAngles = finalAngles
                       CurrentAngles = Array.copy finalAngles
                       Reach = reachArr
@@ -1297,7 +1390,7 @@ module PoincareDisk =
                     let nd = eff.Nodes[i]
                     let w = state.CurrentDisk[i]
                     let r2 = min (1. - 1e-12) (w.X * w.X + w.Y * w.Y)
-                    let scale = max minScale (Math.Pow(max 0. (1. - r2), expAlpha))
+                    let scale = max minScale (Math.Pow(max 0. (1. - r2), expAlpha)) * state.ImportanceScale[i]
                     let cx = cx0 + diskR * w.X
                     let cy = cy0 + diskR * w.Y
                     let sw = max 2. (nd.Size.Width * scale)

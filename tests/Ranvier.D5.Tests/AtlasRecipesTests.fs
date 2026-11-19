@@ -703,4 +703,77 @@ let tests =
                         Expect.isTrue
                             (dist2D inlay.Center cd.Center + cd.Radius <= inlay.Radius + 1e-3)
                             (sprintf "inlay %s sub-cluster %s contained inside host disc" inlay.HostNodeId cd.Id)
+
+        testCase "DirectoryModularity DP, PoincareSizeBy hub contrast, SpanningTree ringOrder, InnerRadius clearance and QuadraticTo midpoint splines" <| fun _ ->
+            // Build multi-directory codebase (src/core/{mem.c, arena.c}, src/codec/{lz.c, huff.c}, tools/cli.c, tools/tinyA.c, tools/tinyB.c)
+            let dirGroups =
+                [ DiagramGroup.create "src"
+                  DiagramGroup.create "core" |> DiagramGroup.inGroup "src"
+                  DiagramGroup.create "mem" |> DiagramGroup.inGroup "core"
+                  DiagramGroup.create "arena" |> DiagramGroup.inGroup "core"
+                  DiagramGroup.create "codec" |> DiagramGroup.inGroup "src"
+                  DiagramGroup.create "lz" |> DiagramGroup.inGroup "codec"
+                  DiagramGroup.create "huff" |> DiagramGroup.inGroup "codec"
+                  DiagramGroup.create "tools"
+                  DiagramGroup.create "cli" |> DiagramGroup.inGroup "tools"
+                  DiagramGroup.create "tinyA" |> DiagramGroup.inGroup "tools"
+                  DiagramGroup.create "tinyB" |> DiagramGroup.inGroup "tools" ]
+
+            let fileSpecs = [ "mem", 9; "arena", 8; "lz", 9; "huff", 8; "cli", 7; "tinyA", 2; "tinyB", 2 ]
+            let cbNodes =
+                [ for fName, cnt in fileSpecs do
+                    for k in 0 .. cnt - 1 do
+                        yield DiagramNode.sized (sprintf "%s_%d" fName k) 12. 12. |> DiagramNode.inGroup fName ]
+
+            let cbEdges =
+                [ // Strong intra-file trees with hub f_0 called by many f_k (triggers PoincareSizeBy.InDegree hub contrast)
+                  for fName, cnt in fileSpecs do
+                      for k in 1 .. cnt - 1 do
+                          yield Association.create (sprintf "in_%s_%d" fName k) (sprintf "%s_%d" fName k) (sprintf "%s_0" fName)
+                  // Dense mutual calls between mem <-> arena inside src/core so Newman-Girvan merges them into one core cluster!
+                  for k in 0 .. 6 do
+                      yield Association.create (sprintf "ma_%d" k) (sprintf "arena_%d" k) (sprintf "mem_%d" (k % 4))
+                      yield Association.create (sprintf "am_%d" k) (sprintf "mem_%d" (k + 1)) (sprintf "arena_%d" (k % 3))
+                  // Cross-directory calls from tools/cli -> src/codec and src/core
+                  yield Association.create "xc_0" "cli_3" "lz_0"
+                  yield Association.create "xc_1" "cli_4" "huff_0"
+                  yield Association.create "xc_2" "lz_5" "mem_0"
+                  yield Association.create "xc_3" "tinyA_1" "cli_0"
+                  yield Association.create "xc_4" "tinyB_1" "cli_0" ]
+
+            let cbGraph = DiagramGraph.create cbNodes dirGroups cbEdges |> ok
+
+            let dmOut =
+                ConstellationLayout.compute
+                    { ConstellationConfig.create viewport with
+                        ClusterMode = ConstellationClusterMode.DirectoryModularity(1.0, 0.06)
+                        SizeBy = PoincareSizeBy.InDegree 2.6
+                        RingOrder = PoincareRingOrder.SpanningTree
+                        BundleBeta = 0.85 }
+                    cbGraph
+                |> ok
+
+            Expect.equal dmOut.Layout.Nodes.Length 45 "DirectoryModularity places all 45 codebase functions"
+            let nonLeafDirs = dmOut.Clusters |> List.filter (fun c -> not c.IsLeafCluster)
+            Expect.isNonEmpty nonLeafDirs "DirectoryModularity produces nested non-leaf directory discs"
+            for dirDisc in nonLeafDirs do
+                Expect.isTrue
+                    (dirDisc.InnerRadius < dirDisc.Radius)
+                    (sprintf "directory disc %s reserves annular clearance between InnerRadius (%g) and Radius (%g)" dirDisc.Id dirDisc.InnerRadius dirDisc.Radius)
+                for sa in dirDisc.SectorArcs do
+                    Expect.isTrue
+                        (sa.Radius > dirDisc.InnerRadius && sa.Radius < dirDisc.Radius)
+                        "directory SectorArcs sit strictly inside reserved annular lane"
+
+            // Verify mem_0 (high in-degree hub) is rendered strictly larger than outer leaf mem_8 at comparable scale
+            let byNodeId = dmOut.Layout.Nodes |> List.map (fun n -> n.Id, n) |> Map.ofList
+            let wHub = Bounds.width byNodeId["lz_0"].Bounds
+            let wLeaf = Bounds.width byNodeId["lz_8"].Bounds
+            Expect.isTrue (wHub > wLeaf * 1.4) (sprintf "PoincareSizeBy.InDegree enlarges hub lz_0 over leaf lz_8 (%g > 1.4 * %g)" wHub wLeaf)
+
+            // Verify inter-cluster edges use QuadraticTo midpoint spline commands without diving through leaf centers
+            let xcEdge = dmOut.Layout.Associations |> List.find (fun a -> a.Id = "xc_0")
+            Expect.isTrue
+                (Path.commands xcEdge.Path |> List.exists (function QuadraticTo _ -> true | _ -> false))
+                "inter-cluster edge uses QuadraticTo midpoint spline chain"
     ]
