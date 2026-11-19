@@ -478,10 +478,117 @@ let graphLayoutsNative () =
         mounted.Dispose()
         host.Cycle()
 
+let spatialOrganisationNative () =
+        use host = WebCoreHost.Create(420, 320)
+        use graph = new Graph()
+        let container = host.Document.createElement "div"
+        host.Document.body.appendChild container |> ignore
+        let ok = function Ok v -> v | Error e -> failwithf "%A" e
+        let closedPoly (pts: Point list) =
+            match pts with
+            | p0 :: rest when not rest.IsEmpty -> Path.ofCommands (MoveTo p0 :: (rest |> List.map LineTo) @ [ Close ])
+            | _ -> Path.empty
+        let tree =
+            Hierarchy.node "root" 0.
+                [ Hierarchy.node "gA" 0. [ Hierarchy.node "a1" 30. []; Hierarchy.node "a2" 20. [] ]
+                  Hierarchy.node "gB" 0. [ Hierarchy.node "b1" 25. []; Hierarchy.node "b2" 15. [] ] ]
+        let gosperRegions = GosperMap.layout (GosperMapConfig.create (Bounds.create 20. 20. 360. 260.)) tree |> ok
+        let gosperLeaf = gosperRegions |> List.find (fun r -> r.Id = "a1")
+        let gosperMarks =
+            gosperRegions
+            |> List.filter (fun r -> r.Depth = 2 && not r.Boundary.IsEmpty)
+            |> List.map (fun r ->
+                let fill = if r.Id = "a1" then Paint.rgb 16 185 129 else Paint.rgb 59 130 246
+                Mark.path ("gosper:" + r.Id) (Path.concat (r.Boundary |> List.map closedPoly))
+                |> Mark.withFill fill
+                |> Mark.withStroke (Paint.rgb 15 23 42) 1.0)
+        let gosperScene = Scene.create 400. 300. "Native GosperMap" gosperMarks
+
+        let cuboids =
+            Ranvier.D5.Graph3D.Treemap3D.layout
+                { Ranvier.D5.Graph3D.Treemap3DConfig.create (Bounds3.create -60. -60. -60. 120. 120. 120.) with
+                    Tiling = Ranvier.D5.Graph3D.Treemap3DTiling.CubeHilbert
+                    ExplodeFactor = 0.12 }
+                tree
+            |> ok
+        let tmDiag3D = Ranvier.D5.Graph3D.Treemap3D.toDiagramLayout cuboids
+        let camTm = Ranvier.D5.Graph3D.Camera3D.orbit (Point3.create 0. 0. 0.) 0.55 0.35 280.
+        let themeTm =
+            { Ranvier.D5.Graph3D.Scene3DTheme.create 400. 300. "Native Treemap3D" with
+                NodeFill = fun _ -> Paint.rgb 225 29 72
+                NodeLabel = fun _ -> None }
+        let tmScene = Ranvier.D5.Graph3D.Scene3D.render themeTm camTm tmDiag3D
+
+        let sphGraph =
+            Ranvier.D5.Graph.DiagramGraph.simple
+                [ for i in 0 .. 5 -> Ranvier.D5.Graph.DiagramNode.sized (sprintf "s%d" i) 12. 12. ]
+                [ for i in 0 .. 5 -> Ranvier.D5.Graph.Association.create (sprintf "se%d" i) (sprintf "s%d" i) (sprintf "s%d" ((i + 1) % 6)) ]
+            |> ok
+        let sphLayout =
+            Ranvier.D5.Graph3D.SphericalStress3D.layout
+                (Ranvier.D5.Graph3D.SphericalLayoutConfig.create (Point3.create 0. 0. 0.) 75.)
+                sphGraph
+            |> ok
+        let camSph = Ranvier.D5.Graph3D.Camera3D.orbit (Point3.create 0. 0. 0.) 0.4 0.3 240.
+        let themeSph =
+            { Ranvier.D5.Graph3D.Scene3DTheme.create 400. 300. "Native SphericalStress3D" with
+                ReferenceSphereRadius = Some 75.
+                NodeFill = fun _ -> Paint.rgb 37 99 235
+                NodeLabel = fun _ -> None }
+        let sphScene = Ranvier.D5.Graph3D.Scene3D.render themeSph camSph sphLayout
+
+        let activeScene = graph.Run(fun () -> Api.createSignal gosperScene)
+        let mounted =
+            Mounting.mount graph None (fun errors -> raise (AggregateException errors)) container None
+                (fun context -> Program.run (Component.render Renderer.passive (fun () -> activeScene.Value)) context.Backend)
+        host.Cycle()
+        host.Frame()
+        let struct(w, h) = host.PaintSize
+        let pixelsGosper = Array.zeroCreate<byte> (w * h * 4)
+        host.Paint pixelsGosper
+        let gx, gy = int (Math.Round gosperLeaf.Centroid.X) + 8, int (Math.Round gosperLeaf.Centroid.Y) + 8
+        let gIdx = (gy * w + gx) * 4
+        Expect.isLessThan (int pixelsGosper[gIdx]) 240 "GosperMap territory paints native WebCore pixels"
+
+        graph.Run(fun () -> activeScene.Value <- tmScene)
+        host.Cycle()
+        host.Frame()
+        let pixelsTm = Array.zeroCreate<byte> (w * h * 4)
+        host.Paint pixelsTm
+        let tmFront =
+            tmDiag3D.Nodes
+            |> List.choose (fun n -> Ranvier.D5.Graph3D.Camera3D.projectPoint { Width = 400.; Height = 300. } camTm n.Center |> Option.map (fun (pt, d, _) -> d, pt))
+            |> List.sortBy fst
+            |> List.head
+            |> snd
+        let tx, ty = int (Math.Round tmFront.X) + 8, int (Math.Round tmFront.Y) + 8
+        let tIdx = (ty * w + tx) * 4
+        Expect.equal (int pixelsTm[tIdx], int pixelsTm[tIdx + 1], int pixelsTm[tIdx + 2]) (225, 29, 72) "Treemap3D frontmost node paints native WebCore pixels"
+
+        graph.Run(fun () -> activeScene.Value <- sphScene)
+        host.Cycle()
+        host.Frame()
+        let pixelsSph = Array.zeroCreate<byte> (w * h * 4)
+        host.Paint pixelsSph
+        Expect.isFalse (pixelsTm = pixelsSph) "SphericalStress3D updates native WebCore pixels"
+        let sphFront =
+            sphLayout.Nodes
+            |> List.choose (fun n -> Ranvier.D5.Graph3D.Camera3D.projectPoint { Width = 400.; Height = 300. } camSph n.Center |> Option.map (fun (pt, d, _) -> d, pt))
+            |> List.sortBy fst
+            |> List.head
+            |> snd
+        let sx, sy = int (Math.Round sphFront.X) + 8, int (Math.Round sphFront.Y) + 8
+        let sIdx = (sy * w + sx) * 4
+        Expect.equal (int pixelsSph[sIdx], int pixelsSph[sIdx + 1], int pixelsSph[sIdx + 2]) (37, 99, 235) "SphericalStress3D frontmost node paints native WebCore pixels"
+
+        mounted.Dispose()
+        host.Cycle()
+
 [<EntryPoint>]
 let main _ =
     acceptance ()
     markEvents ()
     graphLayoutsNative ()
-    printfn "Native scene acceptance passed: namespace, identity, reorder, paint, events, escaping, graph layouts and disposal."
+    spatialOrganisationNative ()
+    printfn "Native scene acceptance passed: namespace, identity, reorder, paint, events, escaping, graph layouts, spatial organisation and disposal."
     0

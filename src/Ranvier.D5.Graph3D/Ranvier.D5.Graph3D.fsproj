@@ -14,6 +14,11 @@
     <Compile Include="Stress3D.fs" />
     <Compile Include="ConeTree3D.fs" />
     <Compile Include="Layered3D.fs" />
+    <Compile Include="Treemap3D.fs" />
+    <Compile Include="Pack3D.fs" />
+    <Compile Include="SphericalLayout3D.fs" />
+    <Compile Include="EdgeBundling3D.fs" />
+    <Compile Include="Manifold3D.fs" />
     <Compile Include="Scene3D.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -16,9 +16,23 @@ type BumpSpec<'T> = { Frame:ChartFrame; Key:'T->string; Series:'T->string; Perio
 type HorizonSpec<'T> = { Frame:ChartFrame; Key:'T->string; Series:'T->string; X:Encoding<'T,float>; Y:Encoding<'T,float option>; Bands:int; PositiveColor:int->Paint; NegativeColor:int->Paint; Extent:float option }
 /// <summary>Circles of one radius placed along X and dodged vertically from the centre line without overlap.</summary>
 type BeeswarmSpec<'T> = { Frame:ChartFrame; Key:'T->string; X:Encoding<'T,float option>; Radius:float; Color:'T->Paint; XDomain:DomainPolicy }
-/// <summary>Node ordering for adjacency matrices.</summary>
+/// <summary>Node ordering for adjacency matrices, including bandwidth-reducing, spectral, hierarchical leaf-optimal and barycentric seriations.</summary>
 [<RequireQualifiedAccess>]
-type MatrixOrder = Input | Label | Degree
+type MatrixOrder =
+    /// <summary>Preserves input node order.</summary>
+    | Input
+    /// <summary>Sorts by display label using ordinal comparison.</summary>
+    | Label
+    /// <summary>Sorts by descending incident link count.</summary>
+    | Degree
+    /// <summary>Gibbs-Poole-Stockmeyer Reverse Cuthill-McKee bandwidth reduction.</summary>
+    | ReverseCuthillMcKee
+    /// <summary>Atkins-Boman-Hendrickson Laplacian Fiedler eigenvector sequencing.</summary>
+    | SpectralFiedler
+    /// <summary>Average-linkage hierarchical clustering refined by Bar-Joseph exact optimal leaf ordering.</summary>
+    | OptimalLeafOrder
+    /// <summary>Alternating weighted-barycenter sweeps (reordering rows and columns independently when <c>Directed = true</c>).</summary>
+    | Barycenter
 /// <summary>A network as a matrix of cells; undirected links fill both cells.</summary>
 type AdjacencyMatrixSpec = { Frame:ChartFrame; Nodes:(string*string) list; Links:(string*string*string*float) list; Directed:bool; Order:MatrixOrder; Color:float->Paint }
 
@@ -297,16 +311,72 @@ module internal AdvancedCharts =
         if not errors.IsEmpty then Error errors
         else
             Recipe.run spec.Frame fst spec.Nodes (fun bounds ->
+                let baseIds=spec.Nodes |> List.map fst
+                let weightedEdges=spec.Links |> List.map(fun (_,source,target,weight) -> source,target,weight)
                 let degree=spec.Links |> List.collect(fun (_,source,target,_) -> [source;target]) |> List.countBy id |> Map.ofList
-                let order=
+                let rowIds,colIds=
                     match spec.Order with
-                    | MatrixOrder.Input -> spec.Nodes
-                    | MatrixOrder.Label -> spec.Nodes |> List.sortWith(fun (a,la) (b,lb) -> let c=String.CompareOrdinal(la,lb) in if c<>0 then c else String.CompareOrdinal(a,b))
-                    | MatrixOrder.Degree -> spec.Nodes |> List.sortWith(fun (a,_) (b,_) -> let c=compare (Map.tryFind b degree |> Option.defaultValue 0) (Map.tryFind a degree |> Option.defaultValue 0) in if c<>0 then c else String.CompareOrdinal(a,b))
-                let ids=order |> List.map fst
+                    | MatrixOrder.Input -> baseIds,baseIds
+                    | MatrixOrder.Label ->
+                        let ids=spec.Nodes |> List.sortWith(fun (a,la) (b,lb) -> let c=String.CompareOrdinal(la,lb) in if c<>0 then c else String.CompareOrdinal(a,b)) |> List.map fst
+                        ids,ids
+                    | MatrixOrder.Degree ->
+                        let ids=spec.Nodes |> List.sortWith(fun (a,_) (b,_) -> let c=compare (Map.tryFind b degree |> Option.defaultValue 0) (Map.tryFind a degree |> Option.defaultValue 0) in if c<>0 then c else String.CompareOrdinal(a,b)) |> List.map fst
+                        ids,ids
+                    | MatrixOrder.ReverseCuthillMcKee ->
+                        let ids=Seriation.reverseCuthillMcKee baseIds weightedEdges |> Result.defaultValue baseIds
+                        ids,ids
+                    | MatrixOrder.SpectralFiedler ->
+                        let ids=Seriation.spectralFiedler baseIds weightedEdges |> Result.defaultValue baseIds
+                        ids,ids
+                    | MatrixOrder.OptimalLeafOrder ->
+                        let nbrMap =
+                            let tbl=System.Collections.Generic.Dictionary<string,System.Collections.Generic.Dictionary<string,float>>(StringComparer.Ordinal)
+                            for id in baseIds do tbl[id]<-System.Collections.Generic.Dictionary<string,float>(StringComparer.Ordinal)
+                            for _,s,t,w in spec.Links do
+                                tbl[s][t]<- (match tbl[s].TryGetValue t with true,cur -> cur+w | _ -> w)
+                                if not spec.Directed && s<>t then
+                                    tbl[t][s]<- (match tbl[t].TryGetValue s with true,cur -> cur+w | _ -> w)
+                            tbl
+                        let norms=
+                            let d=System.Collections.Generic.Dictionary<string,float>(StringComparer.Ordinal)
+                            for id in baseIds do
+                                let mutable sq=0.
+                                for kv in nbrMap[id] do sq<-sq+kv.Value*kv.Value
+                                d[id]<-sqrt sq
+                            d
+                        let dist a b =
+                            if a=b then 0.
+                            else
+                                let na,nb=norms[a],norms[b]
+                                let direct =
+                                    (match nbrMap[a].TryGetValue b with true,w -> w | _ -> 0.)
+                                    + (match nbrMap[b].TryGetValue a with true,w -> w | _ -> 0.)
+                                if na<=1e-12 || nb<=1e-12 then (if direct>0. then 0.5 else 1.)
+                                else
+                                    let mutable dot=0.
+                                    for kv in nbrMap[a] do
+                                        match nbrMap[b].TryGetValue kv.Key with
+                                        | true,wb -> dot<-dot+kv.Value*wb
+                                        | _ -> ()
+                                    let cosSim=max 0. (min 1. (dot/(na*nb)))
+                                    let bonus=if direct>0. then 0.15 else 0.
+                                    max 0. (1. - cosSim - bonus)
+                        let ids=
+                            match Seriation.hierarchicalCluster Linkage.Average baseIds dist with
+                            | Ok(Some tree) -> Seriation.optimalLeafOrder tree dist
+                            | _ -> baseIds
+                        ids,ids
+                    | MatrixOrder.Barycenter ->
+                        let symEntries=
+                            if spec.Directed then weightedEdges
+                            else weightedEdges |> List.collect(fun (s,t,w) -> if s=t then [s,t,w] else [s,t,w;t,s,w])
+                        match Seriation.barycenterOrder 12 baseIds baseIds symEntries with
+                        | Ok(rIds,cIds) -> if spec.Directed then rIds,cIds else rIds,rIds
+                        | Error _ -> baseIds,baseIds
                 let size=min (Bounds.width bounds) (Bounds.height bounds)
-                let columns=Scale.band ids (Bounds.x bounds,Bounds.x bounds+size) 0.05 0.
-                let rows=Scale.band ids (Bounds.y bounds,Bounds.y bounds+size) 0.05 0.
+                let columns=Scale.band colIds (Bounds.x bounds,Bounds.x bounds+size) 0.05 0.
+                let rows=Scale.band rowIds (Bounds.y bounds,Bounds.y bounds+size) 0.05 0.
                 let largest=spec.Links |> List.fold(fun state (_,_,_,weight) -> max state weight) 0.
                 let labels=Map.ofList spec.Nodes
                 let cells=spec.Links |> List.collect(fun (id,source,target,weight) ->

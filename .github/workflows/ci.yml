@@ -67,6 +67,13 @@ jobs:
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-advanced artifacts/advanced.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-graph-layouts artifacts/graph-layouts.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-graph-3d artifacts/graph-3d.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-spatial-indexing artifacts/spatial-indexing.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-seriation-sets artifacts/seriation-sets.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-voronoi-treemaps artifacts/voronoi-treemaps.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-bundling-routing artifacts/bundling-routing.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-cluster-manifolds-2d artifacts/cluster-manifolds-2d.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-hierarchies-3d artifacts/hierarchies-3d.bmp
+          "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-spherical-manifolds-3d artifacts/spherical-manifolds-3d.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-projection-families artifacts/projection-families.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture-map artifacts/map.bmp
           "${prefix[@]}" dotnet run --project examples/Ranvier.D5.Gallery -c Release -p:RanvierTrace=${{ matrix.traced }} -- --capture artifacts/gallery.bmp
@@ -215,6 +222,25 @@ jobs:
           if h3.Nodes.Length <> 2 then failwith "Packed H3 layout failed"
           let walrus = Ranvier.D5.Graph3D.Walrus.layout { Ranvier.D5.Graph3D.WalrusConfig.defaultValue with RootId = Some "n1" } diagram |> Result.defaultWith (fun errors -> failwithf "%A" errors)
           if walrus.Nodes.Length <> 2 then failwith "Packed Walrus layout failed"
+          if Hilbert2D.decodeOrder 4 (Hilbert2D.encodeOrder 4 5 9) <> (5, 9) then failwith "Packed Hilbert2D failed"
+          let rt2 = RTree2D.build snd [ "a", Bounds.create 0. 0. 10. 10.; "b", Bounds.create 50. 50. 10. 10. ]
+          if (RTree2D.search (Bounds.create 2. 2. 4. 4.) rt2 |> List.map fst) <> ["a"] then failwith "Packed RTree2D failed"
+          let bvh = Bvh3D.build snd [ "box", Bounds3.create -5. -5. 10. 10. 10. 10. ]
+          if (Bvh3D.raycastClosest (Point3.create 0. 0. 0.) (Point3.create 0. 0. 1.) 100. bvh).IsNone then failwith "Packed Bvh3D failed"
+          let upsetChart = Ranvier.D5.Charts.Chart.upset (Ranvier.D5.Charts.UpSetSpec.create (Ranvier.D5.Charts.ChartFrame.create 320. 220. "Packed UpSet")) [ "S1", [1;2;3]; "S2", [2;3;4] ] |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if upsetChart.HitTargets.IsEmpty then failwith "Packed UpSet chart failed"
+          if (Ranvier.D5.Geo.SphericalFibonacci.points 16 |> Result.defaultWith (fun errors -> failwithf "%A" errors)).Length <> 16 then failwith "Packed SphericalFibonacci failed"
+          let leiden = Ranvier.D5.Graph.Leiden.detect Ranvier.D5.Graph.LeidenConfig.defaultValue diagram |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if leiden.CommunityCount < 1 then failwith "Packed Leiden failed"
+          let octRouted = Ranvier.D5.Graph.OctilinearRouter.route Ranvier.D5.Graph.OctilinearRouterConfig.defaultValue diagram sugiyama |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if octRouted.Associations.Length <> 1 then failwith "Packed OctilinearRouter failed"
+          let fds = Ranvier.D5.Graph.FeatureDataset.ofRows [ "p0", [0.;0.]; "p1", [0.1;0.1]; "p2", [5.;5.]; "p3", [5.1;5.1] ] |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          let umap2 = Ranvier.D5.Graph.Umap2D.embed { Ranvier.D5.Graph.UmapConfig.create (Bounds.create 0. 0. 100. 100.) with Neighbors = 2; Epochs = 20 } fds |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if umap2.Length <> 4 then failwith "Packed Umap2D failed"
+          let tm3 = Ranvier.D5.Graph3D.Treemap3D.layout (Ranvier.D5.Graph3D.Treemap3DConfig.create (Bounds3.create 0. 0. 0. 50. 50. 50.)) (Hierarchy.node "r" 0. [ Hierarchy.node "c" 10. [] ]) |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if tm3.Length <> 2 then failwith "Packed Treemap3D failed"
+          let sph3 = Ranvier.D5.Graph3D.SphericalStress3D.layout (Ranvier.D5.Graph3D.SphericalLayoutConfig.create (Point3.create 0. 0. 0.) 50.) diagram |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          if sph3.Nodes.Length <> 2 then failwith "Packed SphericalStress3D failed"
           let scale3d = Ranvier.D5.Wgpu.Scale3D.cartesian (-2., 2.) (-2., 2.) (-1., 1.)
           let world3d = Ranvier.D5.Wgpu.Scale3D.map scale3d (Point3.create 2. 2. 1.)
           if abs (world3d.X - 1.0f) > 1e-4f then failwith "Packed Scale3D failed"
