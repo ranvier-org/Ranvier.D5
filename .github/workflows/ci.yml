@@ -136,7 +136,7 @@ jobs:
           if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
           mkdir -p artifacts/consumer
           cat > artifacts/consumer/Consumer.fsproj <<EOF
-          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.2.0]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.2.0]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.2.0]" /><PackageReference Include="Ranvier.D5.Graph$suffix" Version="[0.2.0]" /><PackageReference Include="Ranvier.D5.Graph3D$suffix" Version="[0.2.0]" /><PackageReference Include="Ranvier.D5.Wgpu$suffix" Version="[0.2.0]" /><PackageReference Include="Ranvier.D5.Wgpu.Sdl$suffix" Version="[0.2.0]" /></ItemGroup></Project>
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.2.1]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.2.1]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.2.1]" /><PackageReference Include="Ranvier.D5.Graph$suffix" Version="[0.2.1]" /><PackageReference Include="Ranvier.D5.Graph3D$suffix" Version="[0.2.1]" /><PackageReference Include="Ranvier.D5.Wgpu$suffix" Version="[0.2.1]" /><PackageReference Include="Ranvier.D5.Wgpu.Sdl$suffix" Version="[0.2.1]" /></ItemGroup></Project>
           EOF
           cat > artifacts/consumer/Program.fs <<'EOF'
           open Ranvier
@@ -279,7 +279,7 @@ jobs:
             </PropertyGroup>
             <ItemGroup>
               <Compile Include="Program.fs" />
-              <PackageReference Include="Fable.Ranvier.D5.Wgpu" Version="[0.2.0]" />
+              <PackageReference Include="Fable.Ranvier.D5.Wgpu" Version="[0.2.1]" />
             </ItemGroup>
           </Project>
           EOF
@@ -305,7 +305,7 @@ jobs:
           let catScale = Scale3D.create BoxAspect.ChartDefault UpAxis.ZUp catX catY (AxisScale3D.linear (0.0, 10.0))
           let cam = Camera3D.orthographic Vector3.Zero 35.0f 25.0f 1.5f 8.0f
           let frame = Axis3D.build (Axis3D.defaultSpec catScale) 640 480 cam
-          if (Axis3D.panelInstances frame).Length <> 3 || (Axis3D.lineVertices frame).Length = 0 then
+          if (Axis3D.panelInstances frame).Length <> 3 || (Axis3D.lineVertices frame).Length = 0 || (Axis3D.lineVertices frame).Span[0].Pad <> 1.0f then
               failwith "Axis3D.build panels/lines JS failed"
           let xCatTexts =
               Axis3D.labels frame
