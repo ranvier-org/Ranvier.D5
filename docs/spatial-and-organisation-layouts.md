@@ -1,6 +1,6 @@
 # 2D & 3D Spatial Indexes, Data Organisation, Hierarchy, Bundling & Manifold Engines
 
-Building on the foundational 2D/3D diagram engines in [graph-layouts.md](graph-layouts.md) and the primary-source literature survey in [spatial-and-organisation-research.md](spatial-and-organisation-research.md), `Ranvier.D5` `v0.4.0` provides ten additional families of deterministic, AOT-compatible (`.NET 10` SIMD + `Fickl`/Fable JavaScript) spatial indexing, combinatorial seriation, tessellation, space-filling hierarchy, edge bundling, schematic routing, cluster hull, and high-dimensional manifold engines across 2D and 3D space.
+Building on the foundational 2D/3D diagram engines in [graph-layouts.md](graph-layouts.md) and the primary-source literature survey in [spatial-and-organisation-research.md](spatial-and-organisation-research.md), `Ranvier.D5` `v0.5.0` provides ten additional families of deterministic, AOT-compatible (`.NET 10` SIMD + `Fickl`/Fable JavaScript) spatial indexing, combinatorial seriation, tessellation, space-filling hierarchy, edge bundling, schematic routing, cluster hull, and high-dimensional manifold engines across 2D and 3D space.
 
 ---
 

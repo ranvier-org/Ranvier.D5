@@ -18,7 +18,7 @@ Functional-first visualization foundations for native F# applications. Compose i
 - **Fable.Ranvier.D5.Wgpu.View**: Browser WebGPU and WebGL2 interactive 3D plot host (`PlotView3D.create`, `PlotView3D.createContextAsync`, `PlotPass3D`, `PlotViewConfig3D`, `PlotKeyMap3D`) and multi-pass `SubplotGrid3D` over `Ranvier.View.Dsl` and `Fable.Ranvier.D5.Wgpu`.
 - All 12 packages (`Ranvier.D5*` and `Fable.Ranvier.D5.*`) have a **.Traced** variant (`-p:RanvierTrace=true`). Use one variant throughout the dependency graph.
 
-Target: .NET 10. Version: **0.4.0**. This is a pre-1.0 release: APIs may still change between 0.x versions. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
+Target: .NET 10. Version: **0.5.0**. This is a pre-1.0 release: APIs may still change between 0.x versions. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
 
 ## A reactive scene
 
@@ -72,7 +72,7 @@ Run `dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --linked` fo
 
 Run `dotnet run --project examples/Ranvier.D5.Wgpu.WaveDemo -c Release` (or `-- --capture wgpu-wave.bmp` for a hidden-window frame capture) to explore the live WebGPU `(96 × 96)` wave plane colored by instantaneous phase velocity (`4`th dimension `ColorRamp.turbo`), `Axis3D` bounded frame, `Editable<PlotCamera3D>`, interactive `Editable<SectionPlane>`, and `KeyedCollection` extrema markers.
 
-Run `dotnet run --project examples/Ranvier.D5.Wgpu.LayoutsDemo -c Release` (or `-- --capture-all artifacts` for hidden-window captures of all four scenes) to explore the interactive `0.3.0` 3D layout showcase driven by `KeyedCollection`, `Projection`, and `Reactive3D` GPU sinks: `H3` Poincaré hyperbolic Lorentz focus, `CodeCity` ↔ exploded `CubeHilbert` `Treemap3D` morphing, `SphericalStress3D` + `HierarchicalBundle3D`/`KdeBundle3D` 3D streamtube bundling with animated packet discs, and `Umap3D` + reactive `Dbscan3D` density clustering with `Hilbert3D` tour and `Bvh3D` raycasting.
+Run `dotnet run --project examples/Ranvier.D5.Wgpu.LayoutsDemo -c Release` (or `-- --capture-all artifacts` for hidden-window captures of all four scenes) to explore the interactive `0.5.0` 3D layout showcase driven by `KeyedCollection`, `Projection`, and `Reactive3D` GPU sinks: `H3` Poincaré hyperbolic Lorentz focus, `CodeCity` ↔ exploded `CubeHilbert` `Treemap3D` morphing, `SphericalStress3D` + `HierarchicalBundle3D`/`KdeBundle3D` 3D streamtube bundling with animated packet discs, and `Umap3D` + reactive `Dbscan3D` density clustering with `Hilbert3D` tour and `Bvh3D` raycasting.
 
 ## Build and verify
 
