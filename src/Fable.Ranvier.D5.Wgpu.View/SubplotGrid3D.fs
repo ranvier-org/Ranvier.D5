@@ -83,6 +83,11 @@ type private SubplotCellRuntime
     let emptyExtraOverlay = Scene.create (float cell.Viewport.Width) (float cell.Viewport.Height) $"SubplotCell3D.{index}.ExtraOverlay" []
     let extraOverlaySig = Api.createSignal emptyExtraOverlay
 
+    let formatOverlayStyle (vp: ViewportRect) =
+        $"position:absolute;left:{vp.X}px;top:{vp.Y}px;width:{vp.Width}px;height:{vp.Height}px;pointer-events:none;overflow:hidden;"
+
+    let overlayStyleSig = Api.createSignal (formatOverlayStyle cell.Viewport)
+
     let mutable disposed = false
     let mutable latestCam: Camera3D option = None
     let mutable latestPass: PlotPass3D option = None
@@ -90,6 +95,7 @@ type private SubplotCellRuntime
     let mutable lastHoverHit: PickHit voption = ValueNone
     let mutable prevHadExtraMarks = false
     let mutable prevExtraScene: Scene voption = ValueNone
+    let mutable prevOverlayVp = cell.Viewport
 
     let liveCssViewport () : ViewportRect =
         let struct (cssW, cssH) = readCssSize ()
@@ -100,6 +106,14 @@ type private SubplotCellRuntime
         let x1 = int (Math.Round (float (cell.Viewport.X + cell.Viewport.Width) * sx))
         let y1 = int (Math.Round (float (cell.Viewport.Y + cell.Viewport.Height) * sy))
         ViewportRect.create x0 y0 (max 1 (x1 - x0)) (max 1 (y1 - y0))
+
+    let syncOverlayStyle (cssVp: ViewportRect) : bool =
+        if cssVp <> prevOverlayVp then
+            prevOverlayVp <- cssVp
+            overlayStyleSig.Value <- formatOverlayStyle cssVp
+            true
+        else
+            false
 
     let applyOverlayMarks (logicalW: int) (logicalH: int) (baseOverlay: Scene) (extraMarks: Mark list) =
         let hasExtra = not (List.isEmpty extraMarks)
@@ -113,6 +127,7 @@ type private SubplotCellRuntime
                 let pass = cell.ReadPass ()
                 let gpuCam = PlotCamera3D.toCamera3D pass.AxisSpec.Scale plotCam
                 let cssVp = liveCssViewport ()
+                syncOverlayStyle cssVp |> ignore
 
                 let hadAxisBefore = axisMemo.HasCached
                 let update = axisMemo.Update (pass.AxisSpec, cssVp.Width, cssVp.Height, gpuCam)
@@ -163,12 +178,11 @@ type private SubplotCellRuntime
         let gy1 = int (Math.Round (float (cssVp.Y + cssVp.Height) * dpr))
         ViewportRect.create gx0 gy0 (max 1 (gx1 - gx0)) (max 1 (gy1 - gy0))
 
-    member _.OverlayStyle: string =
-        let vp = cell.Viewport
-        $"position:absolute;left:{vp.X}px;top:{vp.Y}px;width:{vp.Width}px;height:{vp.Height}px;pointer-events:none;overflow:hidden;"
+    member _.ReadOverlayStyle() : string = overlayStyleSig.Value
 
     member _.SyncViewport() : bool =
         let cssVp = liveCssViewport ()
+        let styleChanged = syncOverlayStyle cssVp
 
         match axisMemo.CurrentSpec, latestCam, latestPass with
         | ValueSome spec, Some gpuCam, Some pass ->
@@ -178,8 +192,8 @@ type private SubplotCellRuntime
                 applyOverlayMarks cssVp.Width cssVp.Height update.BaseOverlay pass.ExtraOverlayMarks
                 true
             else
-                false
-        | _ -> false
+                styleChanged
+        | _ -> styleChanged
 
     member _.FitRadius: float32 =
         match latestPass with
@@ -788,14 +802,14 @@ module SubplotGrid3D =
                                 div<SubplotCellRuntime>(
                                     [|
                                         div.attribute ("data-subplot-cell", (fun (cs: SubplotCellRuntime) -> Some (string cs.Index)))
-                                        div.style (fun (cs: SubplotCellRuntime) -> cs.OverlayStyle)
+                                        div.style (fun (cs: SubplotCellRuntime) -> cs.ReadOverlayStyle ())
                                     |]
                                 )
                                     .Run [| view (fun (cs: SubplotCellRuntime) -> Component.render Renderer.passive cs.ReadOverlay) |]
                                 div<SubplotCellRuntime>(
                                     [|
                                         div.attribute ("data-subplot-extra", (fun (cs: SubplotCellRuntime) -> Some (string cs.Index)))
-                                        div.style (fun (cs: SubplotCellRuntime) -> cs.OverlayStyle)
+                                        div.style (fun (cs: SubplotCellRuntime) -> cs.ReadOverlayStyle ())
                                     |]
                                 )
                                     .Run [| view (fun (cs: SubplotCellRuntime) -> Component.render Renderer.passive cs.ReadExtraOverlay) |]

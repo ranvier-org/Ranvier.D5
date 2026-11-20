@@ -901,13 +901,39 @@ let private runSubplotGridChecks () =
     Expect.isGreaterThan leftNonBg 500 "SubplotGrid3D renders left viewport pixels"
     Expect.isGreaterThan rightNonBg 500 "SubplotGrid3D renders right viewport pixels"
 
-    // Verify each cell's SVG overlay div is positioned at its ViewportRect
+    // Verify each cell's SVG overlay div (both main and extra) is positioned at its ViewportRect and scales reactively on CSS resize
     let cellOverlays = container.querySelectorAll "[data-subplot-cell]"
+    let extraOverlays = container.querySelectorAll "[data-subplot-extra]"
     Expect.equal cellOverlays.length 2u "Each subplot cell mounts an SVG overlay host"
+    Expect.equal extraOverlays.length 2u "Each subplot cell mounts an extra SVG overlay host"
     let style0 = (cellOverlays.item 0u :?> Element).getAttribute "style"
     let style1 = (cellOverlays.item 1u :?> Element).getAttribute "style"
+    let extraStyle1 = (extraOverlays.item 1u :?> Element).getAttribute "style"
     Expect.stringContains style0 "left:0px" "Cell 0 SVG overlay offset at left:0px"
     Expect.stringContains style1 "left:245px" "Cell 1 SVG overlay offset at left:245px"
+    Expect.stringContains extraStyle1 "left:245px" "Cell 1 extra SVG overlay offset at left:245px"
+
+    let plotRoot = container.querySelector "[tabindex='0']" :?> HTMLElement
+    plotRoot.setAttribute ("style", "position:relative;width:960px;height:720px;overflow:hidden;outline:none;user-select:none;")
+    graph.Run (fun () ->
+        let c = cam0.Value
+        cam0.Value <- { c with AzimuthRad = c.AzimuthRad + 0.01f })
+    pumpFrames win 3
+
+    let scaledCell0 = (cellOverlays.item 0u :?> Element).getAttribute "style"
+    let scaledCell1 = (cellOverlays.item 1u :?> Element).getAttribute "style"
+    let scaledExtra0 = (extraOverlays.item 0u :?> Element).getAttribute "style"
+    let scaledExtra1 = (extraOverlays.item 1u :?> Element).getAttribute "style"
+    Expect.stringContains scaledCell0 "width:470px;height:720px" "Resized cell 0 overlay width/height scaled to 470x720"
+    Expect.stringContains scaledCell1 "left:490px;top:0px;width:470px;height:720px" "Resized cell 1 overlay rect scaled to left:490px, 470x720"
+    Expect.stringContains scaledExtra0 "width:470px;height:720px" "Resized cell 0 extra overlay width/height scaled to 470x720"
+    Expect.stringContains scaledExtra1 "left:490px;top:0px;width:470px;height:720px" "Resized cell 1 extra overlay rect scaled to left:490px, 470x720"
+
+    // Restore 480x360 CSS dimensions for subsequent pixel/pick routing checks below
+    plotRoot.setAttribute ("style", "position:relative;width:480px;height:360px;overflow:hidden;outline:none;user-select:none;")
+    graph.Run (fun () -> cam0.Reset ())
+    pumpFrames win 3
+    Expect.stringContains ((cellOverlays.item 1u :?> Element).getAttribute "style") "left:245px;top:0px;width:235px;height:360px" "Cell 1 overlay restored to 480x360 layout"
 
     // Verify independent pointer orbit/wheel routing per cell
     let cam0Initial = graph.Run (fun () -> cam0.Value)
