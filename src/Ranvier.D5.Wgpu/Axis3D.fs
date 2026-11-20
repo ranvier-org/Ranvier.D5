@@ -99,7 +99,38 @@ type Axis3DSpec =
         Protrusions: Protrusions
         /// <summary>When true, also draws the 3 frontmost cuboid edges meeting at the camera-facing corner.</summary>
         ShowFrontSpines: bool
+        /// <summary>Optional overall plot title centered near the top of the viewport in the SVG overlay.</summary>
+        PlotTitle: string option
     }
+
+/// <summary>Built-in dark and high-contrast light themes for 3D axis frames and overlays.</summary>
+[<RequireQualifiedAccess>]
+module AxisTheme3D =
+    /// <summary>Default dark-slate theme tuned for dark 3D viewports.</summary>
+    let darkDefault: AxisTheme3D =
+        {
+            GridColor = RgbaColor (0.35f, 0.42f, 0.56f, 0.28f)
+            SpineColor = RgbaColor (0.58f, 0.65f, 0.78f, 0.90f)
+            TickColor = RgbaColor (0.72f, 0.78f, 0.88f, 0.95f)
+            PanelColor = RgbaColor (0.06f, 0.09f, 0.14f, 0.55f)
+            LabelColor = Paint.rgb 203 213 225
+            TitleColor = Paint.rgb 241 245 249
+            FontSize = 11.0
+            TitleFontSize = 13.0
+        }
+
+    /// <summary>High-contrast light-paper theme tuned for bright and print-ready 3D viewports.</summary>
+    let lightDefault: AxisTheme3D =
+        {
+            GridColor = RgbaColor (0.45f, 0.50f, 0.58f, 0.30f)
+            SpineColor = RgbaColor (0.18f, 0.22f, 0.28f, 0.92f)
+            TickColor = RgbaColor (0.12f, 0.16f, 0.22f, 0.95f)
+            PanelColor = RgbaColor (0.94f, 0.96f, 0.98f, 0.75f)
+            LabelColor = Paint.rgb 51 65 85
+            TitleColor = Paint.rgb 15 23 42
+            FontSize = 11.0
+            TitleFontSize = 13.0
+        }
 
 /// <summary>Projected 2D screen-space label descriptor carrying a stable semantic key for DOM reconciliation.</summary>
 type AxisLabel2D =
@@ -149,19 +180,9 @@ module Axis3D =
             FormatCategoryTick = None
         }
 
-    let private defaultTheme: AxisTheme3D =
-        {
-            GridColor = RgbaColor (0.35f, 0.42f, 0.56f, 0.28f)
-            SpineColor = RgbaColor (0.58f, 0.65f, 0.78f, 0.90f)
-            TickColor = RgbaColor (0.72f, 0.78f, 0.88f, 0.95f)
-            PanelColor = RgbaColor (0.06f, 0.09f, 0.14f, 0.55f)
-            LabelColor = Paint.rgb 203 213 225
-            TitleColor = Paint.rgb 241 245 249
-            FontSize = 11.0
-            TitleFontSize = 13.0
-        }
+    let private defaultTheme: AxisTheme3D = AxisTheme3D.darkDefault
 
-    /// <summary>Creates a default <c>Axis3DSpec</c> with titles <c>"X"</c>, <c>"Y"</c>, <c>"Z"</c>, 5 ticks, grids and panels enabled, and front spines off.</summary>
+    /// <summary>Creates a default <c>Axis3DSpec</c> with titles <c>"X"</c>, <c>"Y"</c>, <c>"Z"</c>, 5 ticks, grids and panels enabled, front spines off, and no overall plot title.</summary>
     let defaultSpec (scale: Scale3D) : Axis3DSpec =
         {
             Scale = scale
@@ -171,7 +192,47 @@ module Axis3D =
             Theme = defaultTheme
             Protrusions = Protrusions.defaultValue
             ShowFrontSpines = false
+            PlotTitle = None
         }
+
+    /// <summary>Sets display titles on the X, Y, and Z axes.</summary>
+    let withTitles (xTitle: string) (yTitle: string) (zTitle: string) (spec: Axis3DSpec) : Axis3DSpec =
+        if isNull xTitle then nullArg (nameof xTitle)
+        if isNull yTitle then nullArg (nameof yTitle)
+        if isNull zTitle then nullArg (nameof zTitle)
+
+        { spec with
+            X = { spec.X with Title = xTitle }
+            Y = { spec.Y with Title = yTitle }
+            Z = { spec.Z with Title = zTitle }
+        }
+
+    /// <summary>Sets (or clears when empty/whitespace) the overall centered plot title rendered near the top of the viewport.</summary>
+    let withPlotTitle (title: string) (spec: Axis3DSpec) : Axis3DSpec =
+        { spec with
+            PlotTitle = if String.IsNullOrWhiteSpace title then None else Some title
+        }
+
+    /// <summary>Sets target nice tick counts for the X, Y, and Z axes.</summary>
+    let withTickCounts (nx: int) (ny: int) (nz: int) (spec: Axis3DSpec) : Axis3DSpec =
+        if nx < 0 then raise (ArgumentOutOfRangeException (nameof nx, "TickCount must be nonnegative."))
+        if ny < 0 then raise (ArgumentOutOfRangeException (nameof ny, "TickCount must be nonnegative."))
+        if nz < 0 then raise (ArgumentOutOfRangeException (nameof nz, "TickCount must be nonnegative."))
+
+        { spec with
+            X = { spec.X with TickCount = nx }
+            Y = { spec.Y with TickCount = ny }
+            Z = { spec.Z with TickCount = nz }
+        }
+
+    /// <summary>Configures whether the 3 frontmost cuboid edges meeting at the camera-facing corner are rendered.</summary>
+    let withFrontSpines (show: bool) (spec: Axis3DSpec) : Axis3DSpec =
+        { spec with ShowFrontSpines = show }
+
+    /// <summary>Applies an <c>AxisTheme3D</c> color and typography theme to the axis specification.</summary>
+    let withTheme (theme: AxisTheme3D) (spec: Axis3DSpec) : Axis3DSpec =
+        if isNull (box theme) then nullArg (nameof theme)
+        { spec with Theme = theme }
 
     let private validateConfig (name: string) (cfg: AxisConfig3D) =
         if isNull cfg.Title then
@@ -651,11 +712,14 @@ module Axis3D =
     let labels (frame: AxisFrame3D) : IReadOnlyList<AxisLabel2D> =
         frame.LabelsList :> IReadOnlyList<AxisLabel2D>
 
-    /// <summary>Builds a passive <c>Ranvier.D5.Scene</c> of SVG text marks with stable keys (<c>"axis/x/tick/0"</c>, <c>"axis/x/title"</c>, etc.).</summary>
+    /// <summary>Builds a passive <c>Ranvier.D5.Scene</c> of SVG text marks with stable keys (<c>"axis/x/tick/0"</c>, <c>"axis/x/title"</c>, <c>"axis/plot/title"</c>, etc.).</summary>
     let overlayScene (viewportWidth: float) (viewportHeight: float) (frame: AxisFrame3D) : Scene =
+        if isNull (box frame) then
+            nullArg (nameof frame)
+
         let theme = frame.Spec.Theme
 
-        let marks =
+        let labelMarks =
             frame.LabelsList
             |> List.map (fun lbl ->
                 let baseMark = Mark.text lbl.Key lbl.ScreenPosition lbl.Text
@@ -672,6 +736,22 @@ module Axis3D =
                 |> Mark.withFill (if lbl.IsTitle then theme.TitleColor else theme.LabelColor)
                 |> Mark.withFontSize (if lbl.IsTitle then theme.TitleFontSize else theme.FontSize)
                 |> Mark.withTextStyle updatedStyle)
+
+        let marks =
+            match frame.Spec.PlotTitle with
+            | Some title when not (String.IsNullOrWhiteSpace title) ->
+                let titleY = max 16.0 (frame.Spec.Protrusions.Top * 0.65)
+                let titleMark = Mark.text "axis/plot/title" (Point.create (viewportWidth * 0.5) titleY) title
+                let baseStyle = Mark.textStyle titleMark
+
+                let styledTitle =
+                    titleMark
+                    |> Mark.withFill theme.TitleColor
+                    |> Mark.withFontSize (theme.TitleFontSize + 2.0)
+                    |> Mark.withTextStyle { baseStyle with Anchor = "middle"; Baseline = "middle"; Weight = 700 }
+
+                styledTitle :: labelMarks
+            | _ -> labelMarks
 
         Scene.create viewportWidth viewportHeight "Axis3D" marks
 

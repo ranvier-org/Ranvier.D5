@@ -1852,6 +1852,35 @@ module Bvh3D =
                             stack.Add(struct(rc, tR))
                 if found then Some(bvh.BvhItems[bestOrig], bestT) else None
 
+    /// <summary>Packs point items as centered <c>2 * halfExtent</c> cubes into a <c>Bvh3D</c>; throws for negative or non-finite <c>halfExtent</c>.</summary>
+    let buildPoints (halfExtent: float) (project: 'T -> Point3) (items: seq<'T>) : Bvh3D<'T> =
+        if isNull (box project) then nullArg (nameof project)
+        if isNull (box items) then nullArg (nameof items)
+        Check.finite "halfExtent" halfExtent
+        if halfExtent < 0. then
+            invalidArg "halfExtent" "Half-extent must be nonnegative."
+        let fullExtent = 2. * halfExtent
+        Check.finite "halfExtent" fullExtent
+        build
+            (fun item ->
+                let pt = project item
+                Bounds3.create (pt.X - halfExtent) (pt.Y - halfExtent) (pt.Z - halfExtent) fullExtent fullExtent fullExtent)
+            items
+
+    /// <summary>Normalizes <c>direction</c> before running <c>raycastClosest</c> so returned <c>t</c> is always true Euclidean world distance in <c>[0, maxDistance]</c>.</summary>
+    let raycastNormalized (origin: Point3) (direction: Point3) (maxDistance: float) (bvh: Bvh3D<'T>) : ('T * float) option =
+        Check.finite "directionX" direction.X
+        Check.finite "directionY" direction.Y
+        Check.finite "directionZ" direction.Z
+        let ax, ay, az = abs direction.X, abs direction.Y, abs direction.Z
+        let m = max ax (max ay az)
+        if m = 0. then
+            invalidArg "direction" "Ray direction must be nonzero."
+        let rx, ry, rz = direction.X / m, direction.Y / m, direction.Z / m
+        let inv = 1. / sqrt (rx * rx + ry * ry + rz * rz)
+        let unitDir = Point3(rx * inv, ry * inv, rz * inv)
+        raycastClosest origin unitDir maxDistance bvh
+
 [<Struct>]
 type private FlatSpatialNode3D<'T> =
     { Px: float

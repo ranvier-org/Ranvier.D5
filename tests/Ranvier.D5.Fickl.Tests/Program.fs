@@ -393,5 +393,35 @@ let main _ =
         (pbl0.Nodes.Length = 31 && (pbl1.Nodes |> List.forall (fun n -> abs n.Center.Z < 1e-8)))
         "PoincareBallLift.morph in JS"
 
-    printfn "Fickl JS runtime suite passed: all Wave 1, Wave 2 and Atlas Recipe 2D/3D engines executed cleanly in JavaScript."
+    // 11. Task D4 (Sub-Stage 2B B1) ergonomics in JS
+    let va = Point3.create 1. 2. 3.
+    let vb = Point3.create 4. -2. 3.
+    let vSum = va + vb
+    check (abs (vSum.X - 5.) < 1e-9 && abs (vSum.Y - 0.) < 1e-9 && abs (Point3.dot va vb - 9.) < 1e-9) "Point3 vector ops in JS"
+    let vn = Point3.normalize (Point3.create 0. 3. 4.)
+    check (abs (Point3.length vn - 1.) < 1e-9) "Point3.normalize in JS"
+    let vB = Bounds3.ofPoints [ va; vb ] |> Option.get
+    check (abs (Bounds3.sizeX vB - 3.) < 1e-9) "Bounds3.ofPoints in JS"
+
+    let dbItems = Dbscan3D.clusterItems 4.0 3 fst snd db3Pts |> ok "Dbscan3D.clusterItems"
+    check (dbItems.Length = db3Pts.Length && dbItems |> List.exists (fun x -> x.ClusterId.IsNone)) "Dbscan3D.clusterItems in JS"
+
+    let ptBvh = Bvh3D.buildPoints 0.5 snd [| "a", Point3.create 5. 0. 0.; "b", Point3.create 20. 0. 0. |]
+    let hit = Bvh3D.raycastNormalized Point3.zero (Point3.create 10. 0. 0.) 10. ptBvh
+    check (hit |> Option.exists (fun ((k, _), t) -> k = "a" && abs (t - 4.5) < 1e-9)) "Bvh3D.raycastNormalized in JS"
+
+    let sl = Hyperbolic3D.slerp Hyperbolic3D.origin mp 0.5
+    check (abs (Hyperbolic3D.minkowskiDot sl sl + 1.) < 1e-9) "Hyperbolic3D.slerp stays on sheet in JS"
+
+    let h3Dest = Array.zeroCreate<Point3> treeNodes.Length
+    let written = H3.projectCentersInto HyperbolicModel.Klein (H3.viewTransform h3State) h3State (Span<Point3> h3Dest)
+    check (written = treeNodes.Length) "H3.projectCentersInto in JS"
+
+    let heb3Auto = HierarchicalBundle3D.bundleGraph 0.85 8 groupedMesh sphFib3 |> ok "HierarchicalBundle3D.bundleGraph"
+    check (heb3Auto.Associations.Length = 60) "HierarchicalBundle3D.bundleGraph in JS"
+
+    let umapPts3, umapLinks3 = Umap3D.embedWithLinks { Umap3DConfig.create vp3D with Neighbors = 6; Epochs = 40 } featDs |> ok "Umap3D.embedWithLinks"
+    check (umapPts3.Length = 30 && umapLinks3.Length = 180) "Umap3D.embedWithLinks in JS"
+
+    printfn "Fickl JS runtime suite passed: all Wave 1, Wave 2, Atlas Recipe and B1 ergonomics engines executed cleanly in JavaScript."
     0

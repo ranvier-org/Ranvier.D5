@@ -823,4 +823,82 @@ let channelTests =
                 let struct (srAfter, sgAfter, sbAfter, _) = pixelAt ctx sx sy
                 Expect.isGreaterThan sgAfter (srAfter + 80uy) "switching back to CPU ColorRamp disables UseColorLut and renders pure green despite active packScopedUniforms"
                 Expect.isGreaterThan sgAfter (sbAfter + 80uy) "switching back to CPU ColorRamp omits scoped LUT blue shift"
+
+            testCase "ShadingMode.ExactUnlit maps to ExactColor without breaking Unlit, ColorRamp palettes (plasma/inferno/magma/cividis/categorical/tableau10/okabeIto) allocate 0 bytes, and ColorConv3D round-trips"
+            <| fun () ->
+                let scale = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+                let midBlue = RgbaColor (0.25f, 0.50f, 0.75f, 1.0f)
+
+                let exactGlyph : GlyphDatum3D =
+                    {
+                        Position = Point3.zero
+                        Scale = Vector3 (1.5f, 1.5f, 1.5f)
+                        Rotation = Quaternion.Identity
+                        Color = midBlue
+                        Shading = ShadingMode.ExactUnlit
+                        PickId = 1u
+                        Selected = false
+                    }
+
+                let unlitGlyph = { exactGlyph with Shading = ShadingMode.Unlit }
+                let packedExact = Glyph3D.packGlyphs scale (ReadOnlySpan<GlyphDatum3D> [| exactGlyph |])
+                let packedUnlit = Glyph3D.packGlyphs scale (ReadOnlySpan<GlyphDatum3D> [| unlitGlyph |])
+                Expect.equal packedExact.Span[0].Flags (InstanceFlags.Unlit ||| InstanceFlags.ExactColor) "ExactUnlit sets Unlit ||| ExactColor (9u)"
+                Expect.equal packedUnlit.Span[0].Flags InstanceFlags.Unlit "Unlit preserves InstanceFlags.Unlit (1u)"
+
+                // SurfaceSpec ExactUnlit also emits ExactColor on WgpuContext
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64)
+                use boxMesh = ctx.UploadMesh (Glyph3D.unitMesh GlyphShape3D.Box)
+                use batch = ctx.CreateBatch boxMesh
+                batch.UpdateInstances packedExact.Span
+                let cam = Camera3D.orthographic Vector3.Zero 0.0f 0.0f 1.0f 6.0f
+                ScenePass.create cam
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withBatches [| batch |]
+                |> WgpuContext.render ctx
+                |> ignore
+                let struct (pxR, pxG, pxB, _) = pixelAt ctx 32 32
+                Expect.isLessThanOrEqual (abs (int pxR - 64)) 3 "ExactUnlit preserves linear/exact R=0.25 -> ~64 without tone-mapping"
+                Expect.isLessThanOrEqual (abs (int pxG - 128)) 3 "ExactUnlit preserves G=0.50 -> ~128"
+                Expect.isLessThanOrEqual (abs (int pxB - 191)) 3 "ExactUnlit preserves B=0.75 -> ~191"
+
+                let surfSpecExact = SurfaceSpec.create scale (ColorRamp.viridis (-1.0, 1.0)) |> SurfaceSpec.withShading ShadingMode.ExactUnlit
+                let exactInst = Surface3D.build (surfSpecExact) (SurfaceGrid.fromFunction3D 4 4 (-1.0, 1.0) (-1.0, 1.0) (fun _ _ -> 0.0) |> Result.defaultWith (fun e -> failtestf "%A" e))
+                Expect.equal (SurfaceMesh.vertices exactInst).Length 16 "ExactUnlit SurfaceSpec builds cleanly"
+
+                // Sequential palettes: plasma, inferno, magma, cividis + 0-alloc lookup
+                for name, ramp in
+                    [
+                        "plasma", ColorRamp.plasma (0.0, 10.0)
+                        "inferno", ColorRamp.inferno (0.0, 10.0)
+                        "magma", ColorRamp.magma (0.0, 10.0)
+                        "cividis", ColorRamp.cividis (0.0, 10.0)
+                    ] do
+                    let c0 = ColorRamp.tryMap ramp 0.0 |> ValueOption.get
+                    let c1 = ColorRamp.tryMap ramp 10.0 |> ValueOption.get
+                    Expect.notEqual c0 c1 $"{name} ramp spans distinct colors"
+                    for _ = 1 to 10 do ColorRamp.tryMap ramp 3.7 |> ignore
+                    let a0 = GC.GetAllocatedBytesForCurrentThread ()
+                    for i = 1 to 100 do ColorRamp.tryMap ramp (float i * 0.1) |> ignore
+                    let a1 = GC.GetAllocatedBytesForCurrentThread ()
+                    Expect.equal (a1 - a0) 0L $"{name} ramp tryMap allocates 0 bytes"
+
+                // Categorical palettes & mapping
+                Expect.equal ColorRamp.tableau10.Length 10 "tableau10 has 10 colors"
+                Expect.equal ColorRamp.okabeIto.Length 8 "okabeIto has 8 colors"
+                let catMap = ColorRamp.categorical Chromatic.category10 [ "A"; "B"; "C" ]
+                Expect.equal catMap.Count 3 "ColorRamp.categorical maps all 3 categories"
+                Expect.equal (catMap["A"]) (ColorConv3D.ofRgba Chromatic.category10[0]) "categorical maps in palette order"
+
+                // ColorConv3D round-trips
+                let cGpu = RgbaColor (0.4f, 0.6f, 0.8f, 0.5f)
+                let cAnime = ColorConv3D.toRgba cGpu
+                expectRgbaClose 1e-6f (ColorConv3D.ofRgba cAnime) cGpu "RgbaColor <-> Rgba round-trip"
+                let paint = ColorConv3D.toPaint cGpu
+                let backGpu = ColorConv3D.tryOfPaint paint |> ValueOption.get
+                expectRgbaClose 1e-4f backGpu cGpu "RgbaColor <-> Paint round-trip"
+                let hexPaint = Paint.rgb 64 128 192
+                expectRgbaClose 1e-3f (ColorConv3D.tryOfPaint hexPaint |> ValueOption.get) (RgbaColor (64.0f / 255.0f, 128.0f / 255.0f, 192.0f / 255.0f, 1.0f)) "tryOfPaint parses #rrggbb"
+                Expect.equal (ColorConv3D.tryOfPaint Paint.none) ValueNone "tryOfPaint Paint.none returns ValueNone"
+                Expect.equal (ColorConv3D.tryOfPaint Paint.currentColor) ValueNone "tryOfPaint Paint.currentColor returns ValueNone"
         ]

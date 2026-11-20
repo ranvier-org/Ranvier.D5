@@ -27,7 +27,7 @@ type SurfaceSpec =
         Scale: Scale3D
         /// <summary>Scalar-to-color lookup ramp.</summary>
         Color: ColorRamp
-        /// <summary>Unlit perceptual palette shading or directional studio lighting.</summary>
+        /// <summary>Unlit perceptual palette shading, exact tone-map-free sRGB shading, or directional studio lighting.</summary>
         Shading: ShadingMode
         /// <summary>Surface alpha multiplier in <c>[0.0, 1.0]</c>.</summary>
         Opacity: float32
@@ -36,6 +36,42 @@ type SurfaceSpec =
         /// <summary>Hardware picking identifier (<c>0u</c> disables picking).</summary>
         PickId: uint32
     }
+
+/// <summary>Constructors and pipeable modifiers for <c>SurfaceSpec</c>.</summary>
+[<RequireQualifiedAccess>]
+module SurfaceSpec =
+    /// <summary>Creates a studio-lit, opaque, pick-disabled <c>SurfaceSpec</c> with <c>Wireframe = ValueNone</c>.</summary>
+    let create (scale: Scale3D) (color: ColorRamp) : SurfaceSpec =
+        if isNull (box scale) then nullArg (nameof scale)
+        if isNull (box color) then nullArg (nameof color)
+
+        {
+            Scale = scale
+            Color = color
+            Shading = ShadingMode.Lit (0.45f, 0.0f)
+            Opacity = 1.0f
+            Wireframe = ValueNone
+            PickId = 0u
+        }
+
+    /// <summary>Sets the surface <c>ShadingMode</c>.</summary>
+    let withShading (shading: ShadingMode) (spec: SurfaceSpec) : SurfaceSpec =
+        { spec with Shading = shading }
+
+    /// <summary>Sets the surface alpha multiplier in <c>[0.0, 1.0]</c>.</summary>
+    let withOpacity (opacity: float32) (spec: SurfaceSpec) : SurfaceSpec =
+        Check3D.finite32 (nameof opacity) opacity
+        if opacity < 0.0f || opacity > 1.0f then
+            raise (ArgumentOutOfRangeException (nameof opacity, "Surface opacity must be within [0, 1]."))
+        { spec with Opacity = opacity }
+
+    /// <summary>Sets or clears the optional grid wireframe line color.</summary>
+    let withWireframe (wireframe: RgbaColor voption) (spec: SurfaceSpec) : SurfaceSpec =
+        { spec with Wireframe = wireframe }
+
+    /// <summary>Sets the hardware picking identifier.</summary>
+    let withPickId (pickId: uint32) (spec: SurfaceSpec) : SurfaceSpec =
+        { spec with PickId = pickId }
 
 /// <summary>Immutable CPU-side triangulated 3D surface mesh with optional wireframe line-list vertices.</summary>
 type SurfaceMesh =
@@ -149,7 +185,8 @@ module private SurfaceKernel =
             raise (ArgumentOutOfRangeException ("spec.Opacity", "Surface opacity must be within [0, 1]."))
 
         match spec.Shading with
-        | ShadingMode.Unlit -> ()
+        | ShadingMode.Unlit
+        | ShadingMode.ExactUnlit -> ()
         | ShadingMode.Lit (roughness, emissive) ->
             Check3D.nonNegative32 "spec.Shading.roughness" roughness
             Check3D.nonNegative32 "spec.Shading.emissive" emissive
@@ -434,6 +471,8 @@ module private SurfaceKernel =
         match spec.Shading with
         | ShadingMode.Unlit ->
             Instance3D.fromMatrix Matrix4x4.Identity RgbaColor.white 0.5f spec.PickId (InstanceFlags.Unlit ||| lutFlag) 0.0f
+        | ShadingMode.ExactUnlit ->
+            Instance3D.fromMatrix Matrix4x4.Identity RgbaColor.white 0.5f spec.PickId (InstanceFlags.Unlit ||| InstanceFlags.ExactColor ||| lutFlag) 0.0f
         | ShadingMode.Lit (r, e) ->
             Instance3D.fromMatrix Matrix4x4.Identity RgbaColor.white r spec.PickId lutFlag e
 
@@ -470,6 +509,16 @@ module SurfaceGrid =
                         Scalars = SurfaceKernel.copySpan scalars
                         CurviPoints = [||]
                     }
+
+    /// <summary>Creates a uniformly spaced height grid over <c>xDomain</c> and <c>yDomain</c> without a separate 4th-dimension scalar field.</summary>
+    let uniform3D
+        (columns: int)
+        (rows: int)
+        (xDomain: float * float)
+        (yDomain: float * float)
+        (heights: ReadOnlySpan<float>)
+        : Result<SurfaceGrid, LayoutError list> =
+        uniform columns rows xDomain yDomain heights ReadOnlySpan.Empty
 
     /// <summary>Evaluates a uniform grid from analytical height and optional 4th-dimension scalar functions.</summary>
     let fromFunction
@@ -527,6 +576,16 @@ module SurfaceGrid =
                         CurviPoints = [||]
                     }
 
+    /// <summary>Evaluates a uniform grid from an analytical 3D height function without separate 4th-dimension scalars.</summary>
+    let fromFunction3D
+        (columns: int)
+        (rows: int)
+        (xDomain: float * float)
+        (yDomain: float * float)
+        (evalHeight: float -> float -> float)
+        : Result<SurfaceGrid, LayoutError list> =
+        fromFunction columns rows xDomain yDomain evalHeight ValueNone
+
     /// <summary>Creates a rectilinear grid with explicit strictly monotone finite <c>xs</c> and <c>ys</c> axis coordinate arrays.</summary>
     let rectilinear
         (xs: ReadOnlySpan<float>)
@@ -556,6 +615,14 @@ module SurfaceGrid =
                         CurviPoints = [||]
                     }
 
+    /// <summary>Creates a rectilinear grid without separate 4th-dimension scalars.</summary>
+    let rectilinear3D
+        (xs: ReadOnlySpan<float>)
+        (ys: ReadOnlySpan<float>)
+        (heights: ReadOnlySpan<float>)
+        : Result<SurfaceGrid, LayoutError list> =
+        rectilinear xs ys heights ReadOnlySpan.Empty
+
     /// <summary>Creates a structured curvilinear surface grid from <c>columns * rows</c> 3D points and optional 4th-dimension scalars.</summary>
     let curvilinear
         (columns: int)
@@ -582,6 +649,14 @@ module SurfaceGrid =
                         Scalars = SurfaceKernel.copySpan scalars
                         CurviPoints = SurfaceKernel.copySpan points
                     }
+
+    /// <summary>Creates a structured curvilinear surface grid from <c>columns * rows</c> 3D points without separate 4th-dimension scalars.</summary>
+    let curvilinear3D
+        (columns: int)
+        (rows: int)
+        (points: ReadOnlySpan<Point3>)
+        : Result<SurfaceGrid, LayoutError list> =
+        curvilinear columns rows points ReadOnlySpan.Empty
 
     /// <summary>Returns the grid column count.</summary>
     let columns (grid: SurfaceGrid) : int = grid.Columns
@@ -839,6 +914,10 @@ module Surface3D =
                             IndicesArr = activeIndices.ToArray ()
                             WireframeArr = wireArr
                         }
+
+    /// <summary>Triangulates scattered 3D points via 2D <c>Delaunay</c> over <c>(X, Y)</c> lifted and colored directly by <c>Z</c>.</summary>
+    let triangulatePoints3D (spec: SurfaceSpec) (points: IReadOnlyList<Point3>) : Result<SurfaceMesh, LayoutError list> =
+        triangulatePoints spec points ReadOnlySpan.Empty
 
 /// <summary>Dynamic deforming GPU surface batch reusing vertex/index buffers and skipping index uploads when the hole mask is unchanged.</summary>
 [<Sealed>]
@@ -1249,6 +1328,10 @@ type SurfaceBatch private
 
         let flipChanged = refreshScaleCaches spec false
         applyData spec heights scalars flipChanged
+
+    /// <summary>Updates heights in place without a 4th-dimension scalar field, allocating zero bytes when the hole mask is unchanged.</summary>
+    member this.UpdateHeights(spec: SurfaceSpec, heights: ReadOnlySpan<float>) : unit =
+        this.Update (spec, heights, ReadOnlySpan<float>.Empty)
 
     /// <summary>Updates the surface from a complete <c>SurfaceGrid</c>, resizing scratch and index buffers when grid dimensions change.</summary>
     member _.UpdateGrid(spec: SurfaceSpec, grid: SurfaceGrid) : unit =

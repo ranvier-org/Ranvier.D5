@@ -1,6 +1,7 @@
 namespace Ranvier.D5.Wgpu
 
 open System
+open System.Globalization
 open System.Numerics
 open Ranvier.Anime
 open Ranvier.D5
@@ -109,11 +110,13 @@ module ColorClipPolicy =
             HighClip = highClip
         }
 
-/// <summary>Controls whether 3D geometry preserves raw perceptual palette colors (<c>Unlit</c>) or receives studio lighting.</summary>
+/// <summary>Controls whether 3D geometry preserves raw perceptual palette colors (<c>Unlit</c> / <c>ExactUnlit</c>) or receives studio lighting.</summary>
 [<RequireQualifiedAccess; Struct>]
 type ShadingMode =
-    /// <summary>Renders exact colormap colors without directional surface shading.</summary>
+    /// <summary>Renders raw albedo colors without directional surface shading (subject to scene tone-mapping).</summary>
     | Unlit
+    /// <summary>Preserves exact linear/sRGB brand and categorical colors without directional lighting or filmic tone-mapping.</summary>
+    | ExactUnlit
     /// <summary>Applies studio hemisphere and key/rim lighting with explicit surface roughness and emissive boost.</summary>
     | Lit of roughness: float32 * emissive: float32
 
@@ -188,6 +191,104 @@ module ColorRamp =
         ]
         |> List.map hexStop
 
+    let private plasmaPalette =
+        [
+            0x0d0887
+            0x46039f
+            0x7201a8
+            0x9c179e
+            0xbd3786
+            0xd8576b
+            0xed7953
+            0xfb9f3a
+            0xfdca26
+            0xf0f921
+        ]
+        |> List.map hexStop
+
+    let private infernoPalette =
+        [
+            0x000004
+            0x1b0c41
+            0x4a0c6b
+            0x781c6d
+            0xa52c60
+            0xcf4446
+            0xed6925
+            0xfb9b06
+            0xf7d13d
+            0xfcffa4
+        ]
+        |> List.map hexStop
+
+    let private magmaPalette =
+        [
+            0x000004
+            0x180f3d
+            0x440f76
+            0x721f81
+            0x9e2f7f
+            0xcd4071
+            0xf1605d
+            0xfd9668
+            0xfeca8d
+            0xfcfdbf
+        ]
+        |> List.map hexStop
+
+    let private cividisPalette =
+        [
+            0x00224e
+            0x123570
+            0x3b496c
+            0x575d6d
+            0x707173
+            0x8a8678
+            0xa59c74
+            0xc3b369
+            0xe1cc55
+            0xfee838
+        ]
+        |> List.map hexStop
+
+    let private hexColor (value: int) : RgbaColor =
+        RgbaColor (
+            float32 ((value >>> 16) &&& 255) / 255.0f,
+            float32 ((value >>> 8) &&& 255) / 255.0f,
+            float32 (value &&& 255) / 255.0f,
+            1.0f
+        )
+
+    /// <summary>10-color Tableau categorical palette in sRGB <c>RgbaColor</c>.</summary>
+    let tableau10: RgbaColor list =
+        [
+            0x4e79a7
+            0xf28e2b
+            0xe15759
+            0x76b7b2
+            0x59a14f
+            0xedc948
+            0xb07aa1
+            0xff9da7
+            0x9c755f
+            0xbab0ac
+        ]
+        |> List.map hexColor
+
+    /// <summary>8-color Okabe-Ito colorblind-safe categorical palette in sRGB <c>RgbaColor</c>.</summary>
+    let okabeIto: RgbaColor list =
+        [
+            0x000000
+            0xe69f00
+            0x56b4e9
+            0x009e73
+            0xf0e442
+            0x0072b2
+            0xd55e00
+            0xcc79a7
+        ]
+        |> List.map hexColor
+
     let private samplePaletteLut (eval: float -> Rgba) : RgbaColor array =
         let lut = Array.zeroCreate<RgbaColor> 256
 
@@ -259,6 +360,44 @@ module ColorRamp =
     /// <summary>Creates a Moreland Cool-Warm diverging ramp over <c>domain</c> with a neutral midpoint, clamping, and missing-value omission.</summary>
     let coolWarm (domain: float * float) : ColorRamp =
         diverging (Scale.linear domain (0.0, 1.0)) coolWarmPalette ColorClipPolicy.clampAndOmit
+
+    /// <summary>Creates a perceptually uniform Plasma sequential ramp over <c>domain</c> with clamping and missing-value omission.</summary>
+    let plasma (domain: float * float) : ColorRamp =
+        sequential (Scale.linear domain (0.0, 1.0)) plasmaPalette ColorClipPolicy.clampAndOmit
+
+    /// <summary>Creates a perceptually uniform Inferno sequential ramp over <c>domain</c> with clamping and missing-value omission.</summary>
+    let inferno (domain: float * float) : ColorRamp =
+        sequential (Scale.linear domain (0.0, 1.0)) infernoPalette ColorClipPolicy.clampAndOmit
+
+    /// <summary>Creates a perceptually uniform Magma sequential ramp over <c>domain</c> with clamping and missing-value omission.</summary>
+    let magma (domain: float * float) : ColorRamp =
+        sequential (Scale.linear domain (0.0, 1.0)) magmaPalette ColorClipPolicy.clampAndOmit
+
+    /// <summary>Creates a colorblind-friendly Cividis sequential ramp over <c>domain</c> with clamping and missing-value omission.</summary>
+    let cividis (domain: float * float) : ColorRamp =
+        sequential (Scale.linear domain (0.0, 1.0)) cividisPalette ColorClipPolicy.clampAndOmit
+
+    /// <summary>Builds a deterministic category-to-<c>RgbaColor</c> lookup map cycling through <c>palette</c> in <c>categories</c> order.</summary>
+    let categorical (palette: Rgba list) (categories: 'K list) : Map<'K, RgbaColor> when 'K: comparison =
+        if isNull (box palette) then
+            nullArg (nameof palette)
+
+        if List.isEmpty palette then
+            invalidArg (nameof palette) "Categorical palette requires at least one color."
+
+        if isNull (box categories) then
+            nullArg (nameof categories)
+
+        let colors =
+            palette
+            |> List.map (fun c ->
+                let srgb = ColorSpace.applyGamut GamutPolicy.Clip c
+                RgbaColor (float32 srgb.Red, float32 srgb.Green, float32 srgb.Blue, float32 srgb.Alpha))
+            |> List.toArray
+
+        categories
+        |> List.mapi (fun i k -> k, colors[i % colors.Length])
+        |> Map.ofList
 
     /// <summary>
     /// Creates a scalar-passthrough <c>ColorRamp</c> encoding finite raw <c>float32</c> scalars directly into the vertex red channel (<c>RgbaColor (float32 v, 1.0f, 1.0f, 1.0f)</c>)
@@ -344,6 +483,139 @@ module ColorRamp =
                 arr[i] <- sampleNormalizedLut ramp.Lut (float i / denom)
 
             ReadOnlyMemory<RgbaColor>(arr)
+
+/// <summary>Conversions between GPU <c>RgbaColor</c>, <c>Ranvier.Anime.Rgba</c>, and CSS <c>Ranvier.D5.Paint</c>.</summary>
+[<RequireQualifiedAccess>]
+module ColorConv3D =
+    let private hexDigit (ch: char) : int =
+        if ch >= '0' && ch <= '9' then int ch - int '0'
+        elif ch >= 'a' && ch <= 'f' then 10 + int ch - int 'a'
+        elif ch >= 'A' && ch <= 'F' then 10 + int ch - int 'A'
+        else -1
+
+    let private parseHexByte (hi: char) (lo: char) : float32 voption =
+        let a = hexDigit hi
+        let b = hexDigit lo
+        if a < 0 || b < 0 then ValueNone else ValueSome (float32 ((a <<< 4) ||| b) / 255.0f)
+
+    let private parseHexNibble (ch: char) : float32 voption =
+        let a = hexDigit ch
+        if a < 0 then ValueNone else ValueSome (float32 ((a <<< 4) ||| a) / 255.0f)
+
+    let private tryParseFloat (s: string) : float voption =
+        let ok, v =
+#if FABLE_COMPILER
+            Double.TryParse s
+#else
+            Double.TryParse (s, NumberStyles.Float, CultureInfo.InvariantCulture)
+#endif
+        if ok && Check3D.isFinite v then ValueSome v else ValueNone
+
+    let private tryParseNormalized (percentDenom: float) (unitDenom: float) (token: string) : float voption =
+        let s = token.Trim ()
+        if s.Length = 0 then
+            ValueNone
+        elif s.EndsWith ("%", StringComparison.Ordinal) then
+            match tryParseFloat (s.Substring (0, s.Length - 1)) with
+            | ValueSome v -> ValueSome (Math.Clamp (v / percentDenom, 0.0, 1.0))
+            | ValueNone -> ValueNone
+        else
+            match tryParseFloat s with
+            | ValueSome v -> ValueSome (Math.Clamp (v / unitDenom, 0.0, 1.0))
+            | ValueNone -> ValueNone
+
+    let private tryParseRgbChannel (token: string) = tryParseNormalized 100.0 255.0 token
+
+    let private tryParseAlphaChannel (token: string) = tryParseNormalized 100.0 1.0 token
+
+    /// <summary>Converts an <c>Rgba</c> color in <c>[0, 1]</c> into a clipped <c>RgbaColor</c>.</summary>
+    let ofRgba (c: Rgba) : RgbaColor =
+        Check3D.finite "c.Red" c.Red
+        Check3D.finite "c.Green" c.Green
+        Check3D.finite "c.Blue" c.Blue
+        Check3D.finite "c.Alpha" c.Alpha
+
+        RgbaColor (
+            float32 (Math.Clamp (c.Red, 0.0, 1.0)),
+            float32 (Math.Clamp (c.Green, 0.0, 1.0)),
+            float32 (Math.Clamp (c.Blue, 0.0, 1.0)),
+            float32 (Math.Clamp (c.Alpha, 0.0, 1.0))
+        )
+
+    /// <summary>Converts an <c>RgbaColor</c> into a <c>Ranvier.Anime.Rgba</c> color.</summary>
+    let toRgba (c: RgbaColor) : Rgba =
+        Check3D.finite32 "c.R" c.R
+        Check3D.finite32 "c.G" c.G
+        Check3D.finite32 "c.B" c.B
+        Check3D.finite32 "c.A" c.A
+        ColorSpace.rgba (float c.R) (float c.G) (float c.B) (float c.A)
+
+    /// <summary>Serializes an <c>RgbaColor</c> into a CSS <c>Ranvier.D5.Paint</c> using straight alpha in sRGB gamut.</summary>
+    let toPaint (c: RgbaColor) : Paint =
+        Chromatic.paint GamutPolicy.Clip (toRgba c)
+
+    /// <summary>Attempts to parse a CSS <c>Paint</c> (<c>#rgb</c>, <c>#rgba</c>, <c>#rrggbb</c>, <c>#rrggbbaa</c>, <c>rgb(...)</c>, <c>rgba(...)</c>, or standard named colors) into <c>RgbaColor</c>; returns <c>ValueNone</c> for <c>none</c>, <c>currentColor</c>, or unsupported syntax.</summary>
+    let tryOfPaint (paint: Paint) : RgbaColor voption =
+        if isNull (box paint) then
+            nullArg (nameof paint)
+
+        let raw = Paint.toCss paint
+        if String.IsNullOrWhiteSpace raw then
+            ValueNone
+        else
+            let s = raw.Trim().ToLowerInvariant()
+            if s = "none" || s = "currentcolor" then
+                ValueNone
+            elif s.StartsWith ("#", StringComparison.Ordinal) then
+                match s.Length with
+                | 4 ->
+                    match parseHexNibble s[1], parseHexNibble s[2], parseHexNibble s[3] with
+                    | ValueSome r, ValueSome g, ValueSome b -> ValueSome (RgbaColor (r, g, b, 1.0f))
+                    | _ -> ValueNone
+                | 5 ->
+                    match parseHexNibble s[1], parseHexNibble s[2], parseHexNibble s[3], parseHexNibble s[4] with
+                    | ValueSome r, ValueSome g, ValueSome b, ValueSome a -> ValueSome (RgbaColor (r, g, b, a))
+                    | _ -> ValueNone
+                | 7 ->
+                    match parseHexByte s[1] s[2], parseHexByte s[3] s[4], parseHexByte s[5] s[6] with
+                    | ValueSome r, ValueSome g, ValueSome b -> ValueSome (RgbaColor (r, g, b, 1.0f))
+                    | _ -> ValueNone
+                | 9 ->
+                    match parseHexByte s[1] s[2], parseHexByte s[3] s[4], parseHexByte s[5] s[6], parseHexByte s[7] s[8] with
+                    | ValueSome r, ValueSome g, ValueSome b, ValueSome a -> ValueSome (RgbaColor (r, g, b, a))
+                    | _ -> ValueNone
+                | _ -> ValueNone
+            elif (s.StartsWith ("rgb(", StringComparison.Ordinal) || s.StartsWith ("rgba(", StringComparison.Ordinal))
+                 && s.EndsWith (")", StringComparison.Ordinal) then
+                let openIdx = s.IndexOf '('
+                let inner = s.Substring (openIdx + 1, s.Length - openIdx - 2)
+                let parts = inner.Split ([| ','; ' '; '\t'; '/' |], StringSplitOptions.RemoveEmptyEntries)
+                if parts.Length = 3 then
+                    match tryParseRgbChannel parts[0], tryParseRgbChannel parts[1], tryParseRgbChannel parts[2] with
+                    | ValueSome r, ValueSome g, ValueSome b -> ValueSome (RgbaColor (float32 r, float32 g, float32 b, 1.0f))
+                    | _ -> ValueNone
+                elif parts.Length = 4 then
+                    match tryParseRgbChannel parts[0], tryParseRgbChannel parts[1], tryParseRgbChannel parts[2], tryParseAlphaChannel parts[3] with
+                    | ValueSome r, ValueSome g, ValueSome b, ValueSome a -> ValueSome (RgbaColor (float32 r, float32 g, float32 b, float32 a))
+                    | _ -> ValueNone
+                else
+                    ValueNone
+            else
+                match s with
+                | "transparent" -> ValueSome (RgbaColor (0.0f, 0.0f, 0.0f, 0.0f))
+                | "black" -> ValueSome (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                | "white" -> ValueSome (RgbaColor (1.0f, 1.0f, 1.0f, 1.0f))
+                | "red" -> ValueSome (RgbaColor (1.0f, 0.0f, 0.0f, 1.0f))
+                | "green" -> ValueSome (RgbaColor (0.0f, 128.0f / 255.0f, 0.0f, 1.0f))
+                | "blue" -> ValueSome (RgbaColor (0.0f, 0.0f, 1.0f, 1.0f))
+                | "yellow" -> ValueSome (RgbaColor (1.0f, 1.0f, 0.0f, 1.0f))
+                | "cyan" | "aqua" -> ValueSome (RgbaColor (0.0f, 1.0f, 1.0f, 1.0f))
+                | "magenta" | "fuchsia" -> ValueSome (RgbaColor (1.0f, 0.0f, 1.0f, 1.0f))
+                | "gray" | "grey" -> ValueSome (RgbaColor (128.0f / 255.0f, 128.0f / 255.0f, 128.0f / 255.0f, 1.0f))
+                | "silver" -> ValueSome (RgbaColor (192.0f / 255.0f, 192.0f / 255.0f, 192.0f / 255.0f, 1.0f))
+                | "orange" -> ValueSome (RgbaColor (1.0f, 165.0f / 255.0f, 0.0f, 1.0f))
+                | "purple" -> ValueSome (RgbaColor (128.0f / 255.0f, 0.0f, 128.0f / 255.0f, 1.0f))
+                | _ -> ValueNone
 
 /// <summary>Twist-free 3D vector orientation quaternions and anisotropic glyph transform matrices.</summary>
 [<RequireQualifiedAccess>]

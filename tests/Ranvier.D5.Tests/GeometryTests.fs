@@ -2,6 +2,7 @@ module Ranvier.D5.Tests.GeometryTests
 
 open System
 open System.Globalization
+open System.Numerics
 open Expecto
 open Ranvier.D5
 
@@ -116,4 +117,55 @@ let tests = testList "Geometry and layouts" [
         Expect.equal axis.Length 13 "domain plus six lines and six labels"
         let scene = Scene.create 100. 100. "Axis" axis
         Expect.equal (Scene.marks scene |> List.length) 13 "composable axis"
+
+    testCase "Point3 vector operators, normalization, Vector3 interop and Bounds3 helpers enforce finiteness invariants" <| fun _ ->
+        let a = Point3.create 1. -2. 3.
+        let b = Point3.create -4. 5. 6.
+        Expect.equal Point3.zero (Point3.create 0. 0. 0.) "Point3.zero"
+        Expect.equal Point3.origin Point3.zero "Point3.origin"
+        Expect.equal (a + b) (Point3.create -3. 3. 9.) "Point3.(+)"
+        Expect.equal (a - b) (Point3.create 5. -7. -3.) "Point3.(-)"
+        Expect.equal (a * 2.) (Point3.create 2. -4. 6.) "Point3.(* rhs)"
+        Expect.equal (2. * a) (Point3.create 2. -4. 6.) "Point3.(* lhs)"
+        Expect.equal (a / 2.) (Point3.create 0.5 -1. 1.5) "Point3.(/)"
+        Expect.equal (-a) (Point3.create -1. 2. -3.) "Point3.(~-)"
+        Expect.equal (Point3.add a b) (a + b) "Point3.add"
+        Expect.equal (Point3.sub a b) (a - b) "Point3.sub"
+        Expect.equal (Point3.scale 3. a) (Point3.create 3. -6. 9.) "Point3.scale"
+        Expect.floatClose Accuracy.veryHigh (Point3.dot a b) (-4. - 10. + 18.) "Point3.dot"
+        Expect.equal (Point3.cross (Point3.create 1. 0. 0.) (Point3.create 0. 1. 0.)) (Point3.create 0. 0. 1.) "Point3.cross i x j = k"
+        Expect.floatClose Accuracy.veryHigh (Point3.lengthSquared (Point3.create 2. 3. 6.)) 49. "Point3.lengthSquared"
+        Expect.floatClose Accuracy.veryHigh (Point3.length (Point3.create 2. 3. 6.)) 7. "Point3.length"
+
+        let huge = Point3.create 1e200 1e200 1e200
+        let hugeLen = Point3.length huge
+        Expect.isTrue (Double.IsFinite hugeLen) "Point3.length avoids overflow at 1e200"
+        Expect.floatClose Accuracy.high hugeLen (1e200 * sqrt 3.) "Point3.length accurate at 1e200"
+
+        Expect.equal (Point3.tryNormalize Point3.zero) ValueNone "tryNormalize zero returns ValueNone"
+        Expect.equal (Point3.tryNormalize (Point3.create 1e-16 0. 0.)) ValueNone "tryNormalize <= 1e-15 returns ValueNone"
+        let u = Point3.normalize (Point3.create 3. 4. 0.)
+        Expect.floatClose Accuracy.veryHigh (Point3.length u) 1. "Point3.normalize unit length"
+        Expect.floatClose Accuracy.veryHigh u.X 0.6 "Point3.normalize x"
+        Expect.floatClose Accuracy.veryHigh u.Y 0.8 "Point3.normalize y"
+
+        Expect.throwsT<ArgumentException> (fun () -> Point3.normalize Point3.zero |> ignore) "normalize rejects zero"
+        Expect.throwsT<ArgumentException> (fun () -> (a / 0.) |> ignore) "division by zero rejects"
+        Expect.throwsT<ArgumentException> (fun () -> (a * nan) |> ignore) "NaN scalar rejects"
+        Expect.throwsT<ArgumentException> (fun () -> (Point3.create 1e308 0. 0. + Point3.create 1e308 0. 0.) |> ignore) "overflow addition rejects"
+
+        let v3 = Point3.toVector3 a
+        Expect.equal v3 (Vector3(1.0f, -2.0f, 3.0f)) "Point3.toVector3"
+        Expect.equal (Point3.ofVector3 v3) a "Point3.ofVector3"
+        Expect.throwsT<ArgumentException> (fun () -> Point3.ofVector3 (Vector3(Single.NaN, 0.0f, 0.0f)) |> ignore) "ofVector3 rejects NaN"
+        Expect.throwsT<ArgumentException> (fun () -> Point3.toVector3 (Point3.create 1e100 0. 0.) |> ignore) "toVector3 rejects float32 overflow"
+
+        let cs = Bounds3.ofCenterSize (Point3.create 10. 20. 30.) 4. 6. 8.
+        Expect.equal (Bounds3.minPoint cs) (Point3.create 8. 17. 26.) "ofCenterSize min"
+        Expect.equal (Bounds3.maxPoint cs) (Point3.create 12. 23. 34.) "ofCenterSize max"
+        Expect.throwsT<ArgumentException> (fun () -> Bounds3.ofCenterSize Point3.zero -1. 1. 1. |> ignore) "ofCenterSize rejects negative"
+        Expect.equal (Bounds3.ofPoints []) None "ofPoints empty returns None"
+        let bp = Bounds3.ofPoints (seq { yield a; yield b }) |> Option.get
+        Expect.equal (Bounds3.minPoint bp) (Point3.create -4. -2. 3.) "ofPoints min"
+        Expect.equal (Bounds3.maxPoint bp) (Point3.create 1. 5. 6.) "ofPoints max"
 ]

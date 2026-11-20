@@ -11,6 +11,7 @@
     <Compile Include="Marks3DTests.fs" />
     <Compile Include="VolumeTests.fs" />
     <Compile Include="Reactive3DTests.fs" />
+    <Compile Include="Legend3DTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

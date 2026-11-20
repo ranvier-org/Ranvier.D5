@@ -60,6 +60,9 @@ type HyperbolicLayoutState =
           BaseW: float[]
           ViewTransform: HyperbolicTransform }
 
+/// <summary>Ergonomic alias for <c>HyperbolicLayoutState</c> used with interactive H3 projection helpers.</summary>
+type H3State = HyperbolicLayoutState
+
 /// <summary>Tamara Munzner's H3 3D hyperbolic hemisphere-packing layout and interactive Lorentz focus engine.</summary>
 [<RequireQualifiedAccess>]
 module H3 =
@@ -265,6 +268,19 @@ module H3 =
 
     /// <summary>Returns the current <c>HyperbolicTransform</c> view matrix of the state.</summary>
     let viewTransform (state: HyperbolicLayoutState) = state.ViewTransform
+
+    /// <summary>Projects all node centers from <c>state</c> under <c>model</c> and <c>transform</c> directly into <c>destination</c> with zero heap allocations, returning the number of points written.</summary>
+    let projectCentersInto (model: HyperbolicModel) (transform: HyperbolicTransform) (state: H3State) (destination: Span<Point3>) : int =
+        if isNull (box state) then
+            nullArg (nameof state)
+        if isNull (box transform) then
+            nullArg (nameof transform)
+        let n = state.Nodes.Length
+        if destination.Length < n then
+            raise (ArgumentException("Destination span length must be at least the number of nodes in state.", nameof destination))
+        if n > 0 then
+            HyperbolicTransform.projectBallWorldSpan model transform state.Config.BallRadius state.BaseX state.BaseY state.BaseZ state.BaseW n destination
+        n
 
     /// <summary>Returns the transformed <c>MinkowskiPoint</c> of <c>nodeId</c> under the current view, or <c>None</c> if unknown.</summary>
     let tryNodeMinkowski (nodeId: string) (state: HyperbolicLayoutState) : MinkowskiPoint option =

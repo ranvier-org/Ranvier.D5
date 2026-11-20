@@ -516,6 +516,42 @@ let tests =
             Expect.isNone (db3Map["out3_1"].ClusterId) "3D outlier 1 is noise"
             Expect.isNone (db3Map["out3_2"].ClusterId) "3D outlier 2 is noise"
 
+            // 8. Dbscan3D.clusterItems returns enriched ClusteredPoint3D over seq<'T>
+            let seqPts = seq { for (id, p) in cl3Pts -> {| Name = id; Coord = p; Payload = id.Length |} }
+            let enriched =
+                Dbscan3D.clusterItems
+                    8.0
+                    4
+                    (fun (x: {| Name: string; Coord: Point3; Payload: int |}) -> x.Name)
+                    (fun x -> x.Coord)
+                    seqPts
+                |> ok
+            Expect.equal enriched.Length cl3Pts.Length "clusterItems keeps all input items in order"
+            for raw, cp in List.zip db3 enriched do
+                Expect.equal cp.Id raw.Id "clusterItems matches Id"
+                Expect.equal cp.Item.Name raw.Id "clusterItems retains original Item"
+                Expect.equal cp.ClusterId raw.ClusterId "clusterItems matches ClusterId"
+                Expect.equal cp.IsCore raw.IsCore "clusterItems matches IsCore"
+            Expect.isTrue (Dbscan3D.clusterItems -1.0 4 fst snd [| "x", Point3.zero |] |> Result.isError) "clusterItems validates negative epsilon"
+            Expect.equal (Dbscan3D.clusterItems 1.0 2 fst snd Array.empty<string * Point3> |> ok) [] "clusterItems handles empty seq"
+
+            // 9. Bvh3D.buildPoints and Bvh3D.raycastNormalized normalize direction -> true world distance
+            let ptTargets =
+                [| "near", Point3.create 5. 0. 0.
+                   "far", Point3.create 20. 0. 0.
+                   "off", Point3.create 10. 8. 0. |]
+            let ptBvh = Bvh3D.buildPoints 0.5 snd ptTargets
+            let rayOrig = Point3.create 0. 0. 0.
+            let longHit = Bvh3D.raycastNormalized rayOrig (Point3.create 10. 0. 0.) 10. ptBvh
+            let shortHit = Bvh3D.raycastNormalized rayOrig (Point3.create 0.1 0. 0.) 10. ptBvh
+            Expect.equal (longHit |> Option.map (fst >> fst)) (Some "near") "raycastNormalized hits near box with long dir"
+            Expect.equal (shortHit |> Option.map (fst >> fst)) (Some "near") "raycastNormalized hits near box with short dir"
+            Expect.floatClose Accuracy.veryHigh (snd longHit.Value) 4.5 "long dir returns true world t = 4.5"
+            Expect.floatClose Accuracy.veryHigh (snd shortHit.Value) 4.5 "short dir returns true world t = 4.5"
+            Expect.isNone (Bvh3D.raycastNormalized rayOrig (Point3.create 10. 0. 0.) 4.0 ptBvh) "maxDistance bounds Euclidean distance"
+            Expect.throwsT<ArgumentException> (fun () -> Bvh3D.buildPoints -0.1 snd ptTargets |> ignore) "buildPoints rejects negative halfExtent"
+            Expect.throwsT<ArgumentException> (fun () -> Bvh3D.raycastNormalized rayOrig Point3.zero 10. ptBvh |> ignore) "raycastNormalized rejects zero direction"
+
         testCase "PowerDiagram, VoronoiTreemap, Cvt2D, Voronoi3D and Cvt3D conserve area/volume and reduce CVT energy" <| fun _ ->
             // 1. PowerDiagram positive weights partition Bounds into convex polygons summing to Bounds area within 1e-5
             let pBounds = Bounds.create 0. 0. 200. 150.

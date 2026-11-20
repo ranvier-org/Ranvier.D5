@@ -39,6 +39,9 @@
     <Compile Include="../Ranvier.D5.Wgpu/Reactive3D.fs">
       <Link>./Reactive3D.fs</Link>
     </Compile>
+    <Compile Include="../Ranvier.D5.Wgpu/Legend3D.fs">
+      <Link>./Legend3D.fs</Link>
+    </Compile>
   </ItemGroup>
   <ItemGroup>
     <Content Include="Fable.Ranvier.D5.Wgpu.fsproj" PackagePath="fable/" />

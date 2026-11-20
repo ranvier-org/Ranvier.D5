@@ -873,4 +873,79 @@ let scaleAxisTests =
                     |> Seq.map _.Text
                     |> Seq.toList
                 Expect.isTrue (fallbackTicks |> List.forall (fun s -> s.StartsWith "t=")) "FormatTick normalized fallback preserved when FormatCategoryTick is None"
+
+            testCase "AxisScale3D.pow/sqrt, Scale3D.cartesianYUp/cubeYUp/ofBounds3, AxisCoord3D, projectToScreen and fluent Axis3D helpers"
+            <| fun () ->
+                let sPow = AxisScale3D.pow 2.0 (0.0, 10.0)
+                let sSqrt = AxisScale3D.sqrt (0.0, 100.0)
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } (AxisScale3D.tryMapNormalized sPow 5.0 |> ValueOption.get) 0.25 "pow(2) maps 5/10 -> 0.25"
+                Expect.floatClose { absolute = 1e-9; relative = 0.0 } (AxisScale3D.tryMapNormalized sSqrt 25.0 |> ValueOption.get) 0.5 "sqrt maps 25 in [0,100] -> 0.5"
+                Expect.isFalse (AxisScale3D.isLogScale sPow) "pow is not classified as log scale"
+                Expect.isFalse (AxisScale3D.isLogScale sSqrt) "sqrt is not classified as log scale"
+
+                let yUpCart = Scale3D.cartesianYUp (0.0, 2.0) (0.0, 10.0) (0.0, 2.0)
+                Expect.equal yUpCart.UpAxis UpAxis.YUp "cartesianYUp sets YUp"
+                expectVec3Close 1e-5f (Scale3D.worldExtents yUpCart) (Vector3 (2.0f, 4.0f / 3.0f, 2.0f)) "cartesianYUp ChartDefault proportions"
+
+                let yUpCube = Scale3D.cubeYUp (0.0, 1.0) (0.0, 1.0) (0.0, 1.0)
+                Expect.equal yUpCube.UpAxis UpAxis.YUp "cubeYUp sets YUp"
+                expectVec3Close 1e-5f (Scale3D.worldExtents yUpCube) (Vector3 (2.0f, 2.0f, 2.0f)) "cubeYUp equal cube extents"
+
+                let b = Bounds3.create -5. 0. -2. 10. 20. 4.
+                let fromB = Scale3D.ofBounds3 BoxAspect.Cube UpAxis.YUp b
+                expectVec3Close 1e-5f (Scale3D.map fromB (Point3.create 0. 10. 0.)) Vector3.Zero "ofBounds3 center maps to world origin"
+
+                let t0 = DateTimeOffset (2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
+                let t1 = DateTimeOffset (2026, 1, 11, 0, 0, 0, TimeSpan.Zero)
+                let tMid = DateTimeOffset (2026, 1, 6, 0, 0, 0, TimeSpan.Zero)
+                let mixedScale =
+                    Scale3D.create
+                        BoxAspect.Cube
+                        UpAxis.ZUp
+                        (AxisScale3D.band [ "A"; "B" ] 0.2 0.1)
+                        (AxisScale3D.timeUtc (t0, t1))
+                        sSqrt
+
+                let txCat = Scale3D.tryMapCoord mixedScale.XScale (AxisCoord3D.Cat "A")
+                Expect.isTrue txCat.IsSome "tryMapCoord resolves Cat on Categorical"
+                Expect.equal (Scale3D.tryMapCoord mixedScale.XScale (AxisCoord3D.Cat "Missing")) ValueNone "tryMapCoord rejects unknown category"
+                Expect.equal (Scale3D.tryMapCoord mixedScale.XScale (AxisCoord3D.Num 0.5)) ValueNone "tryMapCoord rejects Num on Categorical"
+                Expect.floatClose { absolute = 1e-6; relative = 0.0 } (Scale3D.tryMapCoord mixedScale.YScale (AxisCoord3D.Time tMid) |> ValueOption.get) 0.5 "tryMapCoord Time midpoint"
+                Expect.floatClose { absolute = 1e-6; relative = 0.0 } (Scale3D.tryMapCoord mixedScale.ZScale (AxisCoord3D.Num 25.0) |> ValueOption.get) 0.5 "tryMapCoord Num sqrt"
+
+                let wp = Scale3D.tryMapCoordPoint mixedScale (AxisCoord3D.Cat "B") (AxisCoord3D.Time tMid) (AxisCoord3D.Num 25.0) |> ValueOption.get
+                let direct = Scale3D.tryMapCategory mixedScale (Some "B") None 25.0 |> ValueOption.get
+                expectVec3Close 1e-5f wp direct "tryMapCoordPoint matches tryMapCategory centered Y and sqrt Z"
+
+                let cam = Camera3D.orthographic Vector3.Zero 0.0f 0.0f 1.5f 6.0f
+                let scrCenter = Scale3D.projectToScreen 640 480 cam fromB (Point3.create 0. 10. 0.) |> ValueOption.get
+                Expect.floatClose { absolute = 1.0; relative = 0.0 } scrCenter.X 320.0 "projectToScreen center X"
+                Expect.floatClose { absolute = 1.0; relative = 0.0 } scrCenter.Y 240.0 "projectToScreen center Y"
+
+                Expect.equal AxisTheme3D.darkDefault (Axis3D.defaultSpec yUpCube).Theme "AxisTheme3D.darkDefault exposes dark theme"
+                Expect.notEqual AxisTheme3D.lightDefault AxisTheme3D.darkDefault "AxisTheme3D.lightDefault differs from darkDefault"
+
+                let styledSpec =
+                    Axis3D.defaultSpec yUpCube
+                    |> Axis3D.withTitles "Width" "Height" "Depth"
+                    |> Axis3D.withPlotTitle "3D Metrics"
+                    |> Axis3D.withTickCounts 4 6 3
+                    |> Axis3D.withFrontSpines true
+                    |> Axis3D.withTheme AxisTheme3D.lightDefault
+
+                Expect.equal styledSpec.X.Title "Width" "withTitles X"
+                Expect.equal styledSpec.Y.Title "Height" "withTitles Y"
+                Expect.equal styledSpec.Z.Title "Depth" "withTitles Z"
+                Expect.equal styledSpec.PlotTitle (Some "3D Metrics") "withPlotTitle sets PlotTitle"
+                Expect.equal styledSpec.X.TickCount 4 "withTickCounts X"
+                Expect.equal styledSpec.Y.TickCount 6 "withTickCounts Y"
+                Expect.equal styledSpec.Z.TickCount 3 "withTickCounts Z"
+                Expect.isTrue styledSpec.ShowFrontSpines "withFrontSpines true"
+                Expect.equal styledSpec.Theme AxisTheme3D.lightDefault "withTheme sets lightDefault"
+
+                let styledFrame = Axis3D.build styledSpec 640 480 cam
+                let overlay = Axis3D.overlayScene 640.0 480.0 styledFrame
+                let plotTitleMark = Scene.marks overlay |> List.tryFind (fun m -> Mark.key m = "axis/plot/title")
+                Expect.isSome plotTitleMark "overlayScene emits axis/plot/title when PlotTitle is Some"
+                Expect.equal (Scene.marks (Axis3D.overlayScene 640.0 480.0 (Axis3D.build (Axis3D.defaultSpec yUpCube) 640 480 cam)) |> List.exists (fun m -> Mark.key m = "axis/plot/title")) false "no axis/plot/title when PlotTitle is None"
         ]

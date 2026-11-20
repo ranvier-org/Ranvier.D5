@@ -1366,6 +1366,20 @@ module NnDescent =
                             outDist[dstOff + s] <- heapDist[srcOff + s]
                     outIdx, outDist
 
+    /// <summary>Materializes directed <c>NeighborLink&lt;'Id&gt;</c> records from indexed k-NN arrays.</summary>
+    let internal linksFromIndexedKnn (ids: 'Id[]) (kEff: int) (knnIdx: int[]) (knnDist: float[]) : NeighborLink<'Id> list =
+        let n = ids.Length
+        [ for i = 0 to n - 1 do
+            let rowOff = i * kEff
+            let srcId = ids[i]
+            for s = 0 to kEff - 1 do
+                let tgtIdx = knnIdx[rowOff + s]
+                if tgtIdx >= 0 then
+                    yield
+                        { Source = srcId
+                          Target = ids[tgtIdx]
+                          Distance = knnDist[rowOff + s] } ]
+
     /// <summary>Builds a directed k-nearest-neighbor graph with cooperative cancellation.</summary>
     let buildGraphWithCancellation
         (token: System.Threading.CancellationToken)
@@ -1385,18 +1399,7 @@ module NnDescent =
             else
                 let kEff = min k (n - 1)
                 let knnIdx, knnDist = buildIndexedKnn token metric kEff seed n dim data
-                let links =
-                    [ for i = 0 to n - 1 do
-                        let rowOff = i * kEff
-                        let srcId = ids[i]
-                        for s = 0 to kEff - 1 do
-                            let tgtIdx = knnIdx[rowOff + s]
-                            if tgtIdx >= 0 then
-                                yield
-                                    { Source = srcId
-                                      Target = ids[tgtIdx]
-                                      Distance = knnDist[rowOff + s] } ]
-                Ok links
+                Ok(linksFromIndexedKnn ids kEff knnIdx knnDist)
 
     /// <summary>Builds a directed k-nearest-neighbor graph using exact SIMD search for <c>N &lt;= 256</c> and Dong et al. (2011) NN-Descent for larger datasets.</summary>
     let buildGraph
@@ -1862,8 +1865,8 @@ module internal ManifoldCore =
             else
                 scaleToTenWithJitter coords
 
-    /// <summary>Runs the dimension-generic McInnes et al. (2018) UMAP embedding pipeline into <c>dims</c> coordinates.</summary>
-    let embedUmapCore
+    /// <summary>Runs the dimension-generic McInnes et al. (2018) UMAP embedding pipeline into <c>dims</c> coordinates and returns the underlying indexed k-NN arrays.</summary>
+    let embedUmapCoreWithKnn
         (token: System.Threading.CancellationToken)
         (dims: int)
         (metric: DistanceMetric)
@@ -1877,9 +1880,9 @@ module internal ManifoldCore =
         (n: int)
         (dim: int)
         (data: float[])
-        : float[][] =
+        : float[][] * int * int[] * float[] =
         if n <= 1 then
-            Array.init dims (fun _ -> Array.zeroCreate<float> n)
+            Array.init dims (fun _ -> Array.zeroCreate<float> n), 0, [||], [||]
         else
             let kEff = min neighbors (n - 1)
             let knnIdx, knnDist = NnDescent.buildIndexedKnn token metric kEff seed n dim data
@@ -1972,7 +1975,26 @@ module internal ManifoldCore =
                                                     for c = 0 to dims - 1 do
                                                         coords[c][j] <- coords[c][j] + alpha * rng.NextSignedJitter(4.0)
                                         epochOfNextNeg[e] <- epochOfNextNeg[e] + float rawNeg * epochsPerNeg[e]
-            coords
+            coords, kEff, knnIdx, knnDist
+
+    /// <summary>Runs the dimension-generic McInnes et al. (2018) UMAP embedding pipeline into <c>dims</c> coordinates.</summary>
+    let embedUmapCore
+        (token: System.Threading.CancellationToken)
+        (dims: int)
+        (metric: DistanceMetric)
+        (neighbors: int)
+        (minDist: float)
+        (spread: float)
+        (epochs: int)
+        (negSampleRate: int)
+        (learningRate: float)
+        (seed: uint32)
+        (n: int)
+        (dim: int)
+        (data: float[])
+        : float[][] =
+        let coords, _, _, _ = embedUmapCoreWithKnn token dims metric neighbors minDist spread epochs negSampleRate learningRate seed n dim data
+        coords
 
     /// <summary>Binary-searches conditional Gaussian precisions <c>beta_i</c> to match Shannon <c>perplexity</c> and symmetrizes sparse CSR <c>P_ij = (p_j|i + p_i|j) / (2N)</c>.</summary>
     let buildTsneSymmetrizedP

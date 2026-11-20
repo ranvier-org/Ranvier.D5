@@ -243,6 +243,27 @@ let tests =
 
             let heb3 = HierarchicalBundle3D.bundle 0.85 16 hTree fibLayout |> ok
             Expect.equal heb3.Associations.Length edges.Length "HierarchicalBundle3D association count"
+
+            // HierarchicalBundle3D.bundleGraph synthesizes tree from graph groups and handles ungrouped graphs + reserved root ID collisions
+            let heb3Auto = HierarchicalBundle3D.bundleGraph 0.85 16 graph fibLayout |> ok
+            Expect.equal heb3Auto.Associations.Length edges.Length "HierarchicalBundle3D.bundleGraph grouped edge count"
+            for aManual, aAuto in List.zip heb3.Associations heb3Auto.Associations do
+                Expect.equal aAuto.Points.Length aManual.Points.Length "bundleGraph matches manual group hierarchy"
+                for idx = 0 to aManual.Points.Length - 1 do
+                    Expect.isTrue (Point3.distance (aAuto.Points[idx]) (aManual.Points[idx]) <= 1e-6) "bundleGraph matches manual HEB3D point-for-point"
+
+            let ungroupedNodes =
+                [ DiagramNode.create "__d5_bundle_root__"
+                  DiagramNode.create "u1"
+                  DiagramNode.create "u2" ]
+            let ungroupedEdges =
+                [ Association.create "ue1" "__d5_bundle_root__" "u1"
+                  Association.create "ue2" "u1" "u2"
+                  Association.create "ue3" "__d5_bundle_root__" "u2" ]
+            let ungroupedG = DiagramGraph.simple ungroupedNodes ungroupedEdges |> ok
+            let ungroupedLay = Force3D.layout (Force3DConfig.create (Bounds3.create -50. -50. -50. 100. 100. 100.)) ungroupedG |> ok
+            let ungroupedBundled = HierarchicalBundle3D.bundleGraph 0.8 10 ungroupedG ungroupedLay |> ok
+            Expect.equal ungroupedBundled.Associations.Length 3 "bundleGraph handles ungrouped graph and colliding __d5_bundle_root__ ID"
             for a in heb3.Associations do
                 Expect.equal a.Points.Length 17 "HierarchicalBundle3D 17 chain points"
                 let srcC = nodeCenterMap[a.Source.NodeId]
@@ -319,6 +340,11 @@ let tests =
             let umap3B = Umap3D.embed umap3Cfg ds90 |> ok
             checkEmbedding3D "Umap3D" umap3A
             Expect.equal umap3A umap3B "Umap3D deterministic seed"
+
+            let umap3WithLinks, embedLinks = Umap3D.embedWithLinks umap3Cfg ds90 |> ok
+            Expect.equal umap3WithLinks umap3A "Umap3D.embedWithLinks matches Umap3D.embed coordinates"
+            let expectedEmbedLinks = NnDescent.buildGraph umap3Cfg.Metric umap3Cfg.Neighbors umap3Cfg.Seed ds90 |> ok
+            Expect.equal embedLinks expectedEmbedLinks "Umap3D.embedWithLinks returns exact k-NN NeighborLink list without second pass"
 
             let knnLinks = NnDescent.buildGraph DistanceMetric.Euclidean 6 55u ds90 |> ok
             let umapDiag = Umap3D.toDiagramLayout 4.0 umap3A knnLinks

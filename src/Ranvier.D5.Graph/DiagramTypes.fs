@@ -78,6 +78,8 @@ type DiagramNode =
       Kind: NodeKind
       /// <summary>Optional fixed center coordinate in 2D layout space.</summary>
       Pinned: Point option
+      /// <summary>Optional fixed center coordinate in 3D layout space (takes precedence over <c>Pinned</c> in 3D solvers).</summary>
+      Pinned3D: Point3 option
       /// <summary>Positive finite mass weight for force and inertial solvers.</summary>
       Mass: float }
 
@@ -93,11 +95,15 @@ module DiagramNode =
           Ports = []
           Kind = NodeKind.Standard
           Pinned = None
+          Pinned3D = None
           Mass = 1. }
     /// <summary>Creates a standard node with explicit width and height and matching depth.</summary>
     let sized id width height =
         let depth = min width height
         { create id with Size = { Width = width; Height = height }; DepthSize = if depth > 0. then depth else 1. }
+    /// <summary>Creates a standard node with explicit width, height and 3D depth extent.</summary>
+    let sized3D (id: string) (width: float) (height: float) (depth: float) : DiagramNode =
+        { create id with Size = { Width = width; Height = height }; DepthSize = depth }
     /// <summary>Assigns the enclosing compound group identifier.</summary>
     let inGroup groupId (node: DiagramNode) = { node with ParentGroup = Some groupId }
     /// <summary>Replaces the node's explicit port list.</summary>
@@ -106,6 +112,8 @@ module DiagramNode =
     let withKind kind (node: DiagramNode) = { node with Kind = kind }
     /// <summary>Pins the node center at a fixed 2D coordinate.</summary>
     let withPin point (node: DiagramNode) = { node with Pinned = Some point }
+    /// <summary>Pins the node center at a fixed 3D coordinate in 3D solvers.</summary>
+    let withPin3D (point: Point3) (node: DiagramNode) : DiagramNode = { node with Pinned3D = Some point }
     /// <summary>Sets the node's 3D depth extent.</summary>
     let withDepth depth (node: DiagramNode) = { node with DepthSize = depth }
 

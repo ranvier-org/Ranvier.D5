@@ -75,6 +75,8 @@ module Force3D =
                 let xs = Array.zeroCreate<float> n
                 let ys = Array.zeroCreate<float> n
                 let zs = Array.zeroCreate<float> n
+                let pinXY = Array.zeroCreate<bool> n
+                let pinZ = Array.zeroCreate<bool> n
                 let radii =
                     Array.init n (fun i ->
                         let nd = nodes[i]
@@ -94,9 +96,16 @@ module Force3D =
                     xs[i] <- cx0 + shell * ringR * cos theta
                     ys[i] <- cy0 + shell * yUnit
                     zs[i] <- cz0 + shell * ringR * sin theta
-                    match nodes[i].Pinned with
-                    | Some p -> xs[i] <- p.X; ys[i] <- p.Y
-                    | None -> ()
+                    match nodes[i].Pinned3D with
+                    | Some p3 ->
+                        xs[i] <- p3.X; ys[i] <- p3.Y; zs[i] <- p3.Z
+                        pinXY[i] <- true; pinZ[i] <- true
+                    | None ->
+                        match nodes[i].Pinned with
+                        | Some p ->
+                            xs[i] <- p.X; ys[i] <- p.Y
+                            pinXY[i] <- true
+                        | None -> ()
 
                 let mAll = assocs.Length
                 let assocSrc = Array.zeroCreate<int> mAll
@@ -339,13 +348,10 @@ module Force3D =
                             let nodeSpeed = globalSpeed / (1. + globalSpeed * sqrt swArr[i])
                             let disp = min maxMove (fMag * nodeSpeed)
                             let scale = disp / fMag
-                            match nodes[i].Pinned with
-                            | Some p ->
-                                xs[i] <- p.X; ys[i] <- p.Y
-                                zs[i] <- zs[i] + fzi * scale
-                            | None ->
+                            if not pinXY[i] then
                                 xs[i] <- xs[i] + fxi * scale
                                 ys[i] <- ys[i] + fyi * scale
+                            if not pinZ[i] then
                                 zs[i] <- zs[i] + fzi * scale
                         prevFx[i] <- fxi; prevFy[i] <- fyi; prevFz[i] <- fzi
 
@@ -386,8 +392,20 @@ module Force3D =
                                                     if overlap > 0. then
                                                         let ux, uy, uz = if d < 1e-6 then 1., 0., 0. else dx / d, dy / d, dz / d
                                                         let shift = overlap * 0.5
-                                                        xs[i] <- xs[i] - ux * shift; ys[i] <- ys[i] - uy * shift; zs[i] <- zs[i] - uz * shift
-                                                        xs[j] <- xs[j] + ux * shift; ys[j] <- ys[j] + uy * shift; zs[j] <- zs[j] + uz * shift
+                                                        if not pinXY[i] && not pinXY[j] then
+                                                            xs[i] <- xs[i] - ux * shift; ys[i] <- ys[i] - uy * shift
+                                                            xs[j] <- xs[j] + ux * shift; ys[j] <- ys[j] + uy * shift
+                                                        elif pinXY[i] && not pinXY[j] then
+                                                            xs[j] <- xs[j] + ux * overlap; ys[j] <- ys[j] + uy * overlap
+                                                        elif not pinXY[i] && pinXY[j] then
+                                                            xs[i] <- xs[i] - ux * overlap; ys[i] <- ys[i] - uy * overlap
+
+                                                        if not pinZ[i] && not pinZ[j] then
+                                                            zs[i] <- zs[i] - uz * shift; zs[j] <- zs[j] + uz * shift
+                                                        elif pinZ[i] && not pinZ[j] then
+                                                            zs[j] <- zs[j] + uz * overlap
+                                                        elif not pinZ[i] && pinZ[j] then
+                                                            zs[i] <- zs[i] - uz * overlap
                                     elif nd.ChildCount > 0 then
                                         for c = nd.FirstChild + nd.ChildCount - 1 downto nd.FirstChild do
                                             stack[sp] <- c

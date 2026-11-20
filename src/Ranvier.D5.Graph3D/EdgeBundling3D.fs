@@ -274,6 +274,41 @@ module HierarchicalBundle3D =
                                 Bounds = Kernels3D.computeBounds3D layout.Bounds layout.Nodes layout.Groups routed
                                 Associations = routed }
 
+    /// <summary>Derives a tree hierarchy from <c>graph</c>'s compound groups (or spanning forest when ungrouped) under a collision-free synthetic root and applies 3D Holten hierarchical edge bundling.</summary>
+    let bundleGraph
+        (beta: float)
+        (segments: int)
+        (graph: DiagramGraph)
+        (layout: DiagramLayout3D)
+        : Result<DiagramLayout3D, LayoutError list> =
+        if isNull (box graph) then
+            nullArg (nameof graph)
+        let resolved = DiagramGraph.resolveCollapsed graph
+        let eff = DiagramGraph.effective resolved
+        let reserved = HashSet<string>(StringComparer.Ordinal)
+        for nd in eff.Nodes do reserved.Add nd.Id |> ignore
+        for g in eff.Groups do reserved.Add g.Id |> ignore
+        let mutable rootId = "__d5_bundle_root__"
+        let mutable sfx = 1
+        while not (reserved.Add rootId) do
+            rootId <- "__d5_bundle_root__" + string sfx
+            sfx <- sfx + 1
+
+        let hierarchyRes =
+            if eff.Groups.Length > 0 then
+                let rows =
+                    [ for g in eff.Groups do yield g.Id, g.ParentGroup
+                      for nd in eff.Nodes do yield nd.Id, nd.ParentGroup ]
+                Hierarchy.forest rootId fst snd rows
+            else
+                let forest = SpanningTree.extract SpanningTreeStrategy.Bfs None resolved
+                let rows = [ for nd in eff.Nodes -> nd.Id, Map.tryFind nd.Id forest.ParentOf |> Option.flatten ]
+                Hierarchy.forest rootId fst snd rows
+
+        match hierarchyRes with
+        | Error errs -> Error errs
+        | Ok hierarchy -> bundle beta segments hierarchy layout
+
 module private KdeVolumetricKernels =
     /// Uniformly resamples an existing Point3Chain into `sampleCount` points by 3D arc length, keeping endpoints exact.
     let resampleChainUniform

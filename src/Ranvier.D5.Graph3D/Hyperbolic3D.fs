@@ -96,6 +96,28 @@ module Hyperbolic3D =
     let distance (a: MinkowskiPoint) (b: MinkowskiPoint) =
         acoshSafe (-(minkowskiDot a b))
 
+    /// <summary>Exact unit-speed hyperbolic geodesic interpolation between two <c>MinkowskiPoint</c>s on the upper sheet for finite parameter <c>t</c>.</summary>
+    let slerp (a: MinkowskiPoint) (b: MinkowskiPoint) (t: float) : MinkowskiPoint =
+        if not (Double.IsFinite t) then
+            invalidArg (nameof t) "Interpolation parameter t must be finite."
+        let d = distance a b
+        if d <= 1e-7 then
+            let s = 1.0 - t
+            ofSpacelike (s * a.X + t * b.X) (s * a.Y + t * b.Y) (s * a.Z + t * b.Z)
+        elif t = 0.0 then
+            renormalize a
+        elif t = 1.0 then
+            renormalize b
+        elif d <= 700.0 then
+            let invSinh = 1.0 / sinh d
+            let wa = sinh ((1.0 - t) * d) * invSinh
+            let wb = sinh (t * d) * invSinh
+            ofSpacelike (wa * a.X + wb * b.X) (wa * a.Y + wb * b.Y) (wa * a.Z + wb * b.Z)
+        else
+            let wa = exp (-t * d)
+            let wb = exp (-(1.0 - t) * d)
+            ofSpacelike (wa * a.X + wb * b.X) (wa * a.Y + wb * b.Y) (wa * a.Z + wb * b.Z)
+
     /// <summary>Projects a Minkowski hyperboloid point into the Euclidean unit ball (<c>||v|| &lt; 1</c>) under the chosen <c>HyperbolicModel</c>.</summary>
     let toBall (model: HyperbolicModel) (p: MinkowskiPoint) : Point3 * float =
         let w = max 1. p.W
@@ -483,3 +505,32 @@ module HyperbolicTransform =
                 wx[idx] <- p.X * s; wy[idx] <- p.Y * s; wz[idx] <- p.Z * s; atten[idx] <- invW
                 idx <- idx + 1
 #endif
+
+    /// <summary>Zero-allocation Lorentz transform and unit-ball world-center projection directly into <c>destination</c>.</summary>
+    let internal projectBallWorldSpan
+        (model: HyperbolicModel)
+        (m: HyperbolicTransform)
+        (bRad: float)
+        (sx: float[]) (sy: float[]) (sz: float[]) (sw: float[])
+        (count: int)
+        (destination: Span<Point3>)
+        : unit =
+        match model with
+        | HyperbolicModel.Klein ->
+            for i = 0 to count - 1 do
+                let x, y, z, w = sx[i], sy[i], sz[i], sw[i]
+                let nx = m.M00 * x + m.M01 * y + m.M02 * z + m.M03 * w
+                let ny = m.M10 * x + m.M11 * y + m.M12 * z + m.M13 * w
+                let nz = m.M20 * x + m.M21 * y + m.M22 * z + m.M23 * w
+                let nw = max 1. (sqrt (1. + nx * nx + ny * ny + nz * nz))
+                let s = (1. / nw) * bRad
+                destination[i] <- Point3.create (nx * s) (ny * s) (nz * s)
+        | HyperbolicModel.Poincare ->
+            for i = 0 to count - 1 do
+                let x, y, z, w = sx[i], sy[i], sz[i], sw[i]
+                let nx = m.M00 * x + m.M01 * y + m.M02 * z + m.M03 * w
+                let ny = m.M10 * x + m.M11 * y + m.M12 * z + m.M13 * w
+                let nz = m.M20 * x + m.M21 * y + m.M22 * z + m.M23 * w
+                let pt = Hyperbolic3D.ofSpacelike nx ny nz
+                let invD = bRad / (1. + max 1. pt.W)
+                destination[i] <- Point3.create (pt.X * invD) (pt.Y * invD) (pt.Z * invD)
