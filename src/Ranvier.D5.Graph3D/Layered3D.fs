@@ -26,7 +26,9 @@ type Layered3DConfig =
       /// <summary>Number of 3D barycenter + repulsion sweeps across strata (1..64; default 16).</summary>
       Sweeps: int
       /// <summary>Optional explicit stratum index override per node ID.</summary>
-      ExplicitStrata: Map<string, int> }
+      ExplicitStrata: Map<string, int>
+      /// <summary>Stratum progression direction along <c>Axis</c> (<c>Increasing</c> = <c>+Y</c>/<c>+Z</c> default; <c>Decreasing</c> = <c>-Y</c>/<c>-Z</c>).</summary>
+      Direction: VerticalDirection3D }
 
 /// <summary>Constructors for <c>Layered3DConfig</c>.</summary>
 [<RequireQualifiedAccess>]
@@ -38,7 +40,8 @@ module Layered3DConfig =
           LayerSpacing = 110.
           IntraLayerSpacing = 28.
           Sweeps = 16
-          ExplicitStrata = Map.empty }
+          ExplicitStrata = Map.empty
+          Direction = VerticalDirection3D.Increasing }
 
 /// <summary>3D Stratified Compound Architecture &amp; Directed Graph Layout Engine across parallel 3D planes.</summary>
 [<RequireQualifiedAccess>]
@@ -216,10 +219,14 @@ module Layered3D =
 
                     let c3 = Bounds3.center config.Bounds
                     let totalSpan = float (max 0 (numStrata - 1)) * config.LayerSpacing
+                    let sign =
+                        match config.Direction with
+                        | VerticalDirection3D.Increasing -> 1.
+                        | VerticalDirection3D.Decreasing -> -1.
                     let startPlane = -totalSpan * 0.5
 
                     let toPoint3 ni =
-                        let planePos = startPlane + float strata[ni] * config.LayerSpacing
+                        let planePos = sign * (startPlane + float strata[ni] * config.LayerSpacing)
                         match config.Axis with
                         | StratumAxis.Y -> Point3.create (c3.X + uCoord[ni]) (c3.Y + planePos) (c3.Z + vCoord[ni])
                         | StratumAxis.Z -> Point3.create (c3.X + uCoord[ni]) (c3.Y + vCoord[ni]) (c3.Z + planePos)

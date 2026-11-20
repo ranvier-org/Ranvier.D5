@@ -38,9 +38,38 @@ type PlotPass3D =
         ExtraDiscs: ReadOnlyMemory<DiscBatch>
         /// <summary>Additional 2D SVG overlay marks rendered over the axis label overlay.</summary>
         ExtraOverlayMarks: Mark list
+        /// <summary>Optional full 2D <c>Scene</c> overlay rendered in a dedicated sibling passive container with scoped definitions.</summary>
+        ExtraOverlay: Scene voption
     }
 
-/// <summary>Viewport size, editable camera, and optional GPU pick callbacks for <c>PlotView3D</c>.</summary>
+/// <summary>Constructors for <c>PlotPass3D</c>.</summary>
+[<RequireQualifiedAccess>]
+module PlotPass3D =
+    /// <summary>Creates a <c>PlotPass3D</c> for <c>axisSpec</c> with dark backdrop, studio lighting, no section plane, and empty extra layers.</summary>
+    let create (axisSpec: Axis3DSpec) : PlotPass3D =
+        {
+            AxisSpec = axisSpec
+            ClearColor = RgbaColor.darkBackdrop
+            Lighting = ValueSome LightingRig.studioDefault
+            SectionPlane = ValueNone
+            ExtraBatches = ReadOnlyMemory.Empty
+            ExtraLines = ReadOnlyMemory.Empty
+            ExtraDiscs = ReadOnlyMemory.Empty
+            ExtraOverlayMarks = []
+            ExtraOverlay = ValueNone
+        }
+
+/// <summary>Keyboard shortcut handling policy for <c>PlotView3D</c>.</summary>
+[<RequireQualifiedAccess>]
+type PlotKeyMap3D =
+    /// <summary>Default camera shortcuts (<c>R</c>/<c>Home</c> reset, <c>P</c> projection, <c>M</c> mode, arrows orbit, <c>+</c>/<c>-</c> zoom).</summary>
+    | Default
+    /// <summary>Disables built-in keyboard camera shortcuts.</summary>
+    | Disabled
+    /// <summary>Applies a custom handler returning <c>ValueSome nextCamera</c> when the key event should update camera state and be consumed.</summary>
+    | Custom of handler: (KeyboardEvent -> PlotCamera3D -> PlotCamera3D voption)
+
+/// <summary>Viewport size, editable camera, input options, and optional GPU pick callbacks for <c>PlotView3D</c>.</summary>
 type PlotViewConfig3D =
     {
         /// <summary>Logical viewport width in CSS pixels.</summary>
@@ -53,7 +82,53 @@ type PlotViewConfig3D =
         OnHoverHit: (PickHit voption -> unit) option
         /// <summary>Optional callback invoked with the resolved <c>PickHit</c> (or <c>ValueNone</c>) on primary click without drag.</summary>
         OnClickHit: (PickHit voption -> unit) option
+        /// <summary>When true, renders axis back-wall hairline spikes to the currently hovered pick point.</summary>
+        ShowHoverSpikes: bool
+        /// <summary>Keyboard shortcut mode (<c>Default</c>, <c>Disabled</c>, or <c>Custom</c>) for camera shortcuts.</summary>
+        KeyMap: PlotKeyMap3D
+        /// <summary>When true, automatically focuses the plot container on mount/window focus and pointer-down.</summary>
+        AutoFocus: bool
     }
+
+/// <summary>Constructors and pipeable configuration helpers for <c>PlotViewConfig3D</c>.</summary>
+[<RequireQualifiedAccess>]
+module PlotViewConfig3D =
+    /// <summary>Creates a <c>PlotViewConfig3D</c> with <c>ShowHoverSpikes = true</c>, <c>KeyMap = PlotKeyMap3D.Default</c>, <c>AutoFocus = true</c>, and no pick callbacks.</summary>
+    let create (width: int) (height: int) (camera: Editable<PlotCamera3D>) : PlotViewConfig3D =
+        {
+            Width = width
+            Height = height
+            Camera = camera
+            OnHoverHit = None
+            OnClickHit = None
+            ShowHoverSpikes = true
+            KeyMap = PlotKeyMap3D.Default
+            AutoFocus = true
+        }
+
+    /// <summary>Sets the hover GPU pick callback on <c>config</c>.</summary>
+    let withOnHoverHit (handler: PickHit voption -> unit) (config: PlotViewConfig3D) : PlotViewConfig3D =
+        { config with OnHoverHit = Some handler }
+
+    /// <summary>Sets the click GPU pick callback on <c>config</c>.</summary>
+    let withOnClickHit (handler: PickHit voption -> unit) (config: PlotViewConfig3D) : PlotViewConfig3D =
+        { config with OnClickHit = Some handler }
+
+    /// <summary>Enables or disables back-wall hover spike rendering on <c>config</c>.</summary>
+    let withHoverSpikes (enabled: bool) (config: PlotViewConfig3D) : PlotViewConfig3D =
+        { config with ShowHoverSpikes = enabled }
+
+    /// <summary>Sets the keyboard shortcut mode on <c>config</c>.</summary>
+    let withKeyMap (keyMap: PlotKeyMap3D) (config: PlotViewConfig3D) : PlotViewConfig3D =
+        { config with KeyMap = keyMap }
+
+    /// <summary>Enables or disables automatic focus acquisition on mount and pointer-down.</summary>
+    let withAutoFocus (enabled: bool) (config: PlotViewConfig3D) : PlotViewConfig3D =
+        { config with AutoFocus = enabled }
+
+module internal PlotView3DStats =
+    let mutable PickCalls = 0L
+    let mutable PanelDrawBeforeLines = false
 
 type private PlotViewProps3D =
     {
@@ -110,13 +185,18 @@ type private PlotViewInstance3D
         readScene: unit -> PlotPass3D
     ) =
     let containerRef: NodeRef<HTMLDivElement> = NodeRef.create ()
+    let canvasRef: NodeRef<HTMLCanvasElement> = NodeRef.create ()
     let emptyOverlay = Scene.create (float config.Width) (float config.Height) "PlotView3D" []
     let overlaySig = Api.createSignal emptyOverlay
+    let emptyExtraOverlay = Scene.create (float config.Width) (float config.Height) "PlotView3D.ExtraOverlay" []
+    let extraOverlaySig = Api.createSignal emptyExtraOverlay
 
     let boxMesh = context.UploadMesh (Primitives.unitBox ())
-    let panelBatch = context.CreateBatch (boxMesh, BlendMode.AlphaBlend, false)
+    let panelBatch = context.CreateBatch (boxMesh, BlendMode.AlphaBlend, false, drawBeforeLines = true)
+    do PlotView3DStats.PanelDrawBeforeLines <- panelBatch.DrawBeforeLines
     let axisLineBatch = context.CreateLineBatch ()
     let spikeLineBatch = context.CreateLineBatch ()
+    let hoverCoalescer = HoverPickCoalescer ()
 
     let mutable disposed = false
     let mutable dirty = true
@@ -127,6 +207,9 @@ type private PlotViewInstance3D
     let mutable latestFrame: AxisFrame3D option = None
     let mutable hasHoverSpikes = false
     let mutable lastHoverHit: PickHit voption = ValueNone
+    let mutable autoFocusedOnMount = false
+    let mutable lastCanvasW = config.Width
+    let mutable lastCanvasH = config.Height
 
     let mutable dragging = false
     let mutable dragMoved = false
@@ -149,6 +232,7 @@ type private PlotViewInstance3D
     let mutable cachedFrame = Unchecked.defaultof<AxisFrame3D>
     let mutable cachedBaseOverlay = Unchecked.defaultof<Scene>
     let mutable prevHadExtraMarks = false
+    let mutable prevExtraScene: Scene voption = ValueNone
 
     let buildScenePass (cam: Camera3D) (pass: PlotPass3D) (includeAxis: bool) =
         let basePass =
@@ -185,41 +269,6 @@ type private PlotViewInstance3D
                 WgpuSdlSurface.render surface scenePass |> ignore
             | _ -> ()
 
-    let rec scheduleFrame () =
-        if not disposed && dirty && rafId.IsNone && surfaceOpt.IsSome then
-            let id =
-                window.Host.RequestAnimationFrame (fun _ ->
-                    rafId <- None
-
-                    if not disposed && dirty then
-                        renderNow ())
-
-            rafId <- Some id
-
-    let cancelFrame () =
-        match rafId with
-        | Some id ->
-            rafId <- None
-            window.Host.CancelAnimationFrame id
-        | None -> ()
-
-    let updateSpikes (hit: PickHit voption) =
-        match hit, latestPass, latestFrame with
-        | ValueSome h, Some pass, Some frame when h.PickId <> 0u ->
-            let tc = pass.AxisSpec.Theme.TickColor
-            let spikeColor = RgbaColor (tc.R, tc.G, tc.B, 0.95f)
-            let spikes = Probe3D.hoverSpikes pass.AxisSpec.Scale frame spikeColor h.WorldPosition
-            spikeLineBatch.UpdateVertices spikes.Span
-            hasHoverSpikes <- true
-            dirty <- true
-            scheduleFrame ()
-        | _ ->
-            if hasHoverSpikes then
-                spikeLineBatch.Resize 0
-                hasHoverSpikes <- false
-                dirty <- true
-                scheduleFrame ()
-
     let viewportCssSize () =
         match containerRef.Current with
         | Some el ->
@@ -228,6 +277,119 @@ type private PlotViewInstance3D
             let h = if rect.height > 0.0 then rect.height else float config.Height
             struct (rect.x, rect.y, w, h)
         | None -> struct (0.0, 0.0, float config.Width, float config.Height)
+
+    let dprScale () : struct (float * float) =
+        let struct (winPxW, winPxH) = window.PixelSize
+        let docEl = window.Host.Document.documentElement
+
+        if not (isNull docEl) && docEl.clientWidth > 0 && docEl.clientHeight > 0 && winPxW > 0 && winPxH > 0 then
+            struct (float winPxW / float docEl.clientWidth, float winPxH / float docEl.clientHeight)
+        elif window.DeviceScale > 0.0 then
+            struct (window.DeviceScale, window.DeviceScale)
+        else
+            struct (1.0, 1.0)
+
+    let isInteractiveFormTarget (target: obj) =
+        match target with
+        | :? Element as el ->
+            let tag = el.tagName
+
+            if isNull tag then
+                false
+            else
+                match tag.ToUpperInvariant () with
+                | "INPUT" | "TEXTAREA" | "SELECT" | "BUTTON" -> true
+                | _ -> false
+        | _ -> false
+
+    let tryAutoFocusContainer (forceFromPointer: bool) =
+        if config.AutoFocus && not disposed then
+            match containerRef.Current with
+            | Some el ->
+                let doc = window.Host.Document
+                let active = if isNull doc then null else doc.activeElement
+
+                let canSteal =
+                    forceFromPointer
+                    || isNull active
+                    || (not (isNull doc.body) && Object.ReferenceEquals (active, doc.body))
+                    || (not (isNull doc.documentElement) && Object.ReferenceEquals (active, doc.documentElement))
+
+                if canSteal && not (Object.ReferenceEquals (active, el)) then
+                    try
+                        el.focus ()
+                    with _ ->
+                        ()
+            | None -> ()
+
+    let applyOverlayMarks (logicalW: int) (logicalH: int) (extraMarks: Mark list) =
+        let hasExtraMarks = not (List.isEmpty extraMarks)
+
+        let overlay =
+            if not hasExtraMarks then
+                cachedBaseOverlay
+            else
+                Scene.create
+                    (float logicalW)
+                    (float logicalH)
+                    (Scene.title cachedBaseOverlay)
+                    (Scene.marks cachedBaseOverlay @ extraMarks)
+
+        overlaySig.Value <- overlay
+        prevHadExtraMarks <- hasExtraMarks
+
+    let rebuildAxisFrame (axisSpec: Axis3DSpec) (logicalW: int) (logicalH: int) (gpuCam: Camera3D) (extraMarks: Mark list) =
+        let nextFrame = Axis3D.build axisSpec logicalW logicalH gpuCam
+        panelBatch.UpdateInstances ((Axis3D.panelInstances nextFrame).Span)
+        axisLineBatch.UpdateVertices ((Axis3D.lineVertices nextFrame).Span)
+        let nextBaseOverlay = Axis3D.overlayScene (float logicalW) (float logicalH) nextFrame
+        hasCachedAxis <- true
+        cachedAxisSpec <- axisSpec
+        cachedGpuCam <- gpuCam
+        cachedWidth <- logicalW
+        cachedHeight <- logicalH
+        cachedFrame <- nextFrame
+        cachedBaseOverlay <- nextBaseOverlay
+        latestFrame <- Some nextFrame
+        applyOverlayMarks logicalW logicalH extraMarks
+
+    let syncViewport () =
+        if not disposed && not context.IsDisposed then
+            let struct (_, _, cssW, cssH) = viewportCssSize ()
+            let struct (dprX, dprY) = dprScale ()
+            let logicalW = max 1 (int (Math.Round cssW))
+            let logicalH = max 1 (int (Math.Round cssH))
+            let targetDevW = max 1 (int (Math.Round (cssW * dprX)))
+            let targetDevH = max 1 (int (Math.Round (cssH * dprY)))
+
+            match surfaceOpt with
+            | Some surface when not surface.IsDisposed ->
+                if
+                    surface.Width <> targetDevW
+                    || surface.Height <> targetDevH
+                    || context.Width <> targetDevW
+                    || context.Height <> targetDevH
+                then
+                    surface.Resize (targetDevW, targetDevH)
+                    dirty <- true
+
+                if lastCanvasW <> targetDevW || lastCanvasH <> targetDevH then
+                    lastCanvasW <- targetDevW
+                    lastCanvasH <- targetDevH
+
+                    match canvasRef.Current with
+                    | Some canvasEl ->
+                        canvasEl.setAttribute ("width", string targetDevW)
+                        canvasEl.setAttribute ("height", string targetDevH)
+                    | None -> ()
+            | _ -> ()
+
+            if hasCachedAxis && (logicalW <> cachedWidth || logicalH <> cachedHeight) then
+                match latestPass with
+                | Some pass ->
+                    rebuildAxisFrame cachedAxisSpec logicalW logicalH cachedGpuCam pass.ExtraOverlayMarks
+                    dirty <- true
+                | None -> ()
 
     let pickAtClient (clientX: float) (clientY: float) : PickHit voption =
         if disposed || context.IsDisposed then
@@ -241,8 +403,68 @@ type private PlotViewInstance3D
                 let px = Math.Clamp (int (Math.Round (nx * float context.Width)), 0, max 0 (context.Width - 1))
                 let py = Math.Clamp (int (Math.Round (ny * float context.Height)), 0, max 0 (context.Height - 1))
                 let pickPass = buildScenePass cam pass false
+                PlotView3DStats.PickCalls <- PlotView3DStats.PickCalls + 1L
                 WgpuContext.pick px py context pickPass
             | _ -> ValueNone
+
+    let applyHoverSpikes (hit: PickHit voption) =
+        if config.ShowHoverSpikes then
+            match hit, latestPass, latestFrame with
+            | ValueSome h, Some pass, Some frame when h.PickId <> 0u ->
+                let tc = pass.AxisSpec.Theme.TickColor
+                let spikeColor = RgbaColor (tc.R, tc.G, tc.B, 0.95f)
+                let spikes = Probe3D.hoverSpikes pass.AxisSpec.Scale frame spikeColor h.WorldPosition
+                spikeLineBatch.UpdateVertices spikes.Span
+                hasHoverSpikes <- true
+                dirty <- true
+            | _ ->
+                if hasHoverSpikes then
+                    spikeLineBatch.Resize 0
+                    hasHoverSpikes <- false
+                    dirty <- true
+        elif hasHoverSpikes then
+            spikeLineBatch.Resize 0
+            hasHoverSpikes <- false
+            dirty <- true
+
+    let rec scheduleFrame () =
+        if not disposed && (dirty || hoverCoalescer.HasPendingFrameHover) && rafId.IsNone && surfaceOpt.IsSome then
+            let id =
+                window.Host.RequestAnimationFrame (fun _ ->
+                    rafId <- None
+
+                    if not disposed then
+                        syncViewport ()
+
+                        match hoverCoalescer.TakeFrameHover () with
+                        | ValueSome struct (hx, hy, pickEpoch) ->
+                            if not dragging && pickEpoch = hoverCoalescer.CurrentEpoch then
+                                let hit = pickAtClient hx hy
+
+                                if not disposed && pickEpoch = hoverCoalescer.CurrentEpoch then
+                                    if hit.IsSome || lastHoverHit.IsSome then
+                                        lastHoverHit <- hit
+                                        applyHoverSpikes hit
+                                        config.OnHoverHit |> Option.iter (fun cb -> cb hit)
+                        | ValueNone -> ()
+
+                        if not disposed && dirty then
+                            renderNow ())
+
+            rafId <- Some id
+
+    let cancelFrame () =
+        match rafId with
+        | Some id ->
+            rafId <- None
+            window.Host.CancelAnimationFrame id
+        | None -> ()
+
+    let updateSpikes (hit: PickHit voption) =
+        applyHoverSpikes hit
+
+        if dirty then
+            scheduleFrame ()
 
     let releaseCapture (pointerId: int) =
         match containerRef.Current with
@@ -255,6 +477,7 @@ type private PlotViewInstance3D
         if not disposed then
             disposed <- true
             dirty <- false
+            hoverCoalescer.AdvanceEpoch ()
             cancelFrame ()
             surfaceOpt <- None
             spikeLineBatch.Dispose ()
@@ -267,47 +490,49 @@ type private PlotViewInstance3D
 
         Api.createEffect (fun () ->
             if not disposed && not context.IsDisposed then
+                if config.AutoFocus && window.Focused.Value then
+                    tryAutoFocusContainer false
+
                 let plotCam = config.Camera.Value
                 let pass = readScene ()
                 let gpuCam = PlotCamera3D.toCamera3D pass.AxisSpec.Scale plotCam
+                let struct (_, _, cssW, cssH) = viewportCssSize ()
+                let logicalW = max 1 (int (Math.Round cssW))
+                let logicalH = max 1 (int (Math.Round cssH))
+
+                let axisSpecChanged =
+                    not hasCachedAxis
+                    || not (Object.ReferenceEquals (pass.AxisSpec, cachedAxisSpec))
+
+                if hasCachedAxis && axisSpecChanged then
+                    hoverCoalescer.AdvanceEpoch ()
 
                 let axisChanged =
-                    not (
-                        hasCachedAxis
-                        && Object.ReferenceEquals (pass.AxisSpec, cachedAxisSpec)
-                        && gpuCam = cachedGpuCam
-                        && config.Width = cachedWidth
-                        && config.Height = cachedHeight
-                    )
+                    axisSpecChanged
+                    || gpuCam <> cachedGpuCam
+                    || logicalW <> cachedWidth
+                    || logicalH <> cachedHeight
 
                 if axisChanged then
-                    let nextFrame = Axis3D.build pass.AxisSpec config.Width config.Height gpuCam
-                    panelBatch.UpdateInstances ((Axis3D.panelInstances nextFrame).Span)
-                    axisLineBatch.UpdateVertices ((Axis3D.lineVertices nextFrame).Span)
-                    let nextBaseOverlay = Axis3D.overlayScene (float config.Width) (float config.Height) nextFrame
-                    hasCachedAxis <- true
-                    cachedAxisSpec <- pass.AxisSpec
-                    cachedGpuCam <- gpuCam
-                    cachedWidth <- config.Width
-                    cachedHeight <- config.Height
-                    cachedFrame <- nextFrame
-                    cachedBaseOverlay <- nextBaseOverlay
+                    rebuildAxisFrame pass.AxisSpec logicalW logicalH gpuCam pass.ExtraOverlayMarks
+                else
+                    if prevHadExtraMarks || not (List.isEmpty pass.ExtraOverlayMarks) then
+                        applyOverlayMarks logicalW logicalH pass.ExtraOverlayMarks
 
-                let hasExtraMarks = not (List.isEmpty pass.ExtraOverlayMarks)
+                match pass.ExtraOverlay with
+                | ValueSome extraScene ->
+                    let unchanged =
+                        match prevExtraScene with
+                        | ValueSome prev -> Object.ReferenceEquals (box prev, box extraScene)
+                        | ValueNone -> false
 
-                if axisChanged || hasExtraMarks || prevHadExtraMarks then
-                    let overlay =
-                        if not hasExtraMarks then
-                            cachedBaseOverlay
-                        else
-                            Scene.create
-                                (float config.Width)
-                                (float config.Height)
-                                (Scene.title cachedBaseOverlay)
-                                (Scene.marks cachedBaseOverlay @ pass.ExtraOverlayMarks)
-
-                    overlaySig.Value <- overlay
-                    prevHadExtraMarks <- hasExtraMarks
+                    if not unchanged then
+                        extraOverlaySig.Value <- extraScene
+                        prevExtraScene <- ValueSome extraScene
+                | ValueNone ->
+                    if prevExtraScene.IsSome then
+                        extraOverlaySig.Value <- emptyExtraOverlay
+                        prevExtraScene <- ValueNone
 
                 latestCam <- Some gpuCam
                 latestPass <- Some pass
@@ -316,7 +541,9 @@ type private PlotViewInstance3D
                 scheduleFrame ())
 
     member _.ContainerRef = containerRef
+    member _.CanvasRef = canvasRef
     member _.ReadOverlay = fun () -> overlaySig.Value
+    member _.ReadExtraOverlay = fun () -> extraOverlaySig.Value
     member _.ContainerStyle =
         $"position:relative;width:{config.Width}px;height:{config.Height}px;overflow:hidden;outline:none;user-select:none;"
     member _.CanvasWidthAttr = string config.Width
@@ -330,6 +557,12 @@ type private PlotViewInstance3D
                 (fun surface ->
                     if not disposed then
                         surfaceOpt <- Some surface
+                        syncViewport ()
+
+                        if config.AutoFocus && not autoFocusedOnMount then
+                            autoFocusedOnMount <- true
+                            tryAutoFocusContainer false
+
                         dirty <- true
                         scheduleFrame ()
 
@@ -341,6 +574,11 @@ type private PlotViewInstance3D
 
     member _.OnPointerDown(ev: PointerEvent) =
         if not disposed && not dragging then
+            hoverCoalescer.AdvanceEpoch ()
+
+            if not (isInteractiveFormTarget ev.target) then
+                tryAutoFocusContainer true
+
             dragging <- true
             dragMoved <- false
             dragPan <- ev.button = 1s || ev.button = 2s || ev.shiftKey
@@ -383,12 +621,8 @@ type private PlotViewInstance3D
                     else
                         config.Camera.Value <- PlotCamera3D.orbitBy dx dy config.Camera.Value
             elif not dragging then
-                let hit = pickAtClient ev.clientX ev.clientY
-
-                if hit.IsSome || lastHoverHit.IsSome then
-                    lastHoverHit <- hit
-                    updateSpikes hit
-                    config.OnHoverHit |> Option.iter (fun cb -> cb hit)
+                hoverCoalescer.QueueFrameHover (ev.clientX, ev.clientY)
+                scheduleFrame ()
 
     member _.OnPointerUp(ev: PointerEvent) =
         if not disposed && dragging && ev.pointerId = activePointerId then
@@ -411,6 +645,7 @@ type private PlotViewInstance3D
             dragMoved <- false
             dragPan <- false
             activePointerId <- -1
+            hoverCoalescer.AdvanceEpoch ()
 
     member _.OnWheel(ev: WheelEvent) =
         if not disposed then
@@ -422,45 +657,61 @@ type private PlotViewInstance3D
                 config.Camera.Value <- PlotCamera3D.zoomBy factor config.Camera.Value
 
     member _.OnKeyDown(ev: KeyboardEvent) =
-        if not disposed then
-            let cam = config.Camera.Value
+        if
+            not disposed
+            && not ev.defaultPrevented
+            && not ev.ctrlKey
+            && not ev.metaKey
+            && not ev.altKey
+            && not (isInteractiveFormTarget ev.target)
+        then
+            match config.KeyMap with
+            | PlotKeyMap3D.Disabled -> ()
+            | PlotKeyMap3D.Custom handler ->
+                match handler ev config.Camera.Value with
+                | ValueSome nextCam ->
+                    ev.preventDefault ()
+                    config.Camera.Value <- nextCam
+                | ValueNone -> ()
+            | PlotKeyMap3D.Default ->
+                let cam = config.Camera.Value
 
-            match ev.key with
-            | "r" | "R" | "Home" ->
-                ev.preventDefault ()
-                config.Camera.Reset ()
-            | "p" | "P" ->
-                ev.preventDefault ()
-                let nextP = if cam.Perspectiveness > 0.5f then 0.0f else 1.0f
-                config.Camera.Value <- { cam with Perspectiveness = nextP }
-            | "m" | "M" ->
-                ev.preventDefault ()
+                match ev.key with
+                | "r" | "R" | "Home" ->
+                    ev.preventDefault ()
+                    config.Camera.Reset ()
+                | "p" | "P" ->
+                    ev.preventDefault ()
+                    let nextP = if cam.Perspectiveness > 0.5f then 0.0f else 1.0f
+                    config.Camera.Value <- { cam with Perspectiveness = nextP }
+                | "m" | "M" ->
+                    ev.preventDefault ()
 
-                let nextMode =
-                    match cam.Mode with
-                    | OrbitMode3D.Turntable -> OrbitMode3D.Arcball
-                    | OrbitMode3D.Arcball -> OrbitMode3D.Turntable
+                    let nextMode =
+                        match cam.Mode with
+                        | OrbitMode3D.Turntable -> OrbitMode3D.Arcball
+                        | OrbitMode3D.Arcball -> OrbitMode3D.Turntable
 
-                config.Camera.Value <- PlotCamera3D.withMode nextMode cam
-            | "ArrowLeft" ->
-                ev.preventDefault ()
-                config.Camera.Value <- PlotCamera3D.orbitBy -12.0f 0.0f cam
-            | "ArrowRight" ->
-                ev.preventDefault ()
-                config.Camera.Value <- PlotCamera3D.orbitBy 12.0f 0.0f cam
-            | "ArrowUp" ->
-                ev.preventDefault ()
-                config.Camera.Value <- PlotCamera3D.orbitBy 0.0f -12.0f cam
-            | "ArrowDown" ->
-                ev.preventDefault ()
-                config.Camera.Value <- PlotCamera3D.orbitBy 0.0f 12.0f cam
-            | "+" | "=" ->
-                ev.preventDefault ()
-                config.Camera.Value <- PlotCamera3D.zoomBy 1.15f cam
-            | "-" | "_" ->
-                ev.preventDefault ()
-                config.Camera.Value <- PlotCamera3D.zoomBy (1.0f / 1.15f) cam
-            | _ -> ()
+                    config.Camera.Value <- PlotCamera3D.withMode nextMode cam
+                | "ArrowLeft" ->
+                    ev.preventDefault ()
+                    config.Camera.Value <- PlotCamera3D.orbitBy -12.0f 0.0f cam
+                | "ArrowRight" ->
+                    ev.preventDefault ()
+                    config.Camera.Value <- PlotCamera3D.orbitBy 12.0f 0.0f cam
+                | "ArrowUp" ->
+                    ev.preventDefault ()
+                    config.Camera.Value <- PlotCamera3D.orbitBy 0.0f -12.0f cam
+                | "ArrowDown" ->
+                    ev.preventDefault ()
+                    config.Camera.Value <- PlotCamera3D.orbitBy 0.0f 12.0f cam
+                | "+" | "=" ->
+                    ev.preventDefault ()
+                    config.Camera.Value <- PlotCamera3D.zoomBy 1.15f cam
+                | "-" | "_" ->
+                    ev.preventDefault ()
+                    config.Camera.Value <- PlotCamera3D.zoomBy (1.0f / 1.15f) cam
+                | _ -> ()
 
 /// <summary>Declarative <c>Ranvier.View.Dsl</c> host binding a WebGPU 3D surface and pointer-transparent SVG axis overlay inside an SDL window.</summary>
 [<RequireQualifiedAccess>]
@@ -487,6 +738,7 @@ module PlotView3D =
                     canvas<PlotViewInstance3D>(
                         [|
                             canvas.style "position:absolute;inset:0;width:100%;height:100%;display:block;"
+                            canvas.ref (fun (inst: PlotViewInstance3D) -> inst.CanvasRef)
                             canvas.attribute ("width", (fun (inst: PlotViewInstance3D) -> Some inst.CanvasWidthAttr))
                             canvas.attribute ("height", (fun (inst: PlotViewInstance3D) -> Some inst.CanvasHeightAttr))
                             canvas.lend (fun (inst: PlotViewInstance3D) el -> inst.AttachCanvas el)
@@ -499,6 +751,12 @@ module PlotView3D =
                         |]
                     )
                         .Run [| view (fun (inst: PlotViewInstance3D) -> Component.render Renderer.passive inst.ReadOverlay) |]
+                    div<PlotViewInstance3D>(
+                        [|
+                            div.style "position:absolute;inset:0;pointer-events:none;"
+                        |]
+                    )
+                        .Run [| view (fun (inst: PlotViewInstance3D) -> Component.render Renderer.passive inst.ReadExtraOverlay) |]
                 |])
 
     /// <summary>

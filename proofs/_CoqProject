@@ -5,6 +5,7 @@ theories/Pure/Spatial.v
 theories/Pure/SamplingSelection.v
 theories/Pure/GeometryGeo.v
 theories/Pure/TransitionWorker.v
+theories/Pure/WgpuErgonomics.v
 theories/Extract.v
 theories/Conformance/Expected.v
 theories/Conformance/Check.v

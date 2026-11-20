@@ -53,17 +53,19 @@ module ColorShader =
     [<Literal>]
     let private WgslVertexEnd =
         """    out.d5Data = vec4<f32>(in.vertexColor.x, in.colorRoughness.rgb);
-    if (user.slots[0].w > 0.5) {
+    let d5LutActive = (user.slots[0].w > 0.5 && user.slots[0].w < 1.5) || (user.slots[0].w >= 1.5 && (in.pickFlags.y & 16u) != 0u);
+    if (d5LutActive) {
         let rampCol = d5_sample_ramp(in.vertexColor.x);
         out.opacityEmissive = vec2<f32>(rampCol.a * in.vertexColor.a * in.opacityEmissive.x, in.opacityEmissive.y);
     }"""
 
     [<Literal>]
     let private WgslFragmentLit =
-        """    if (user.slots[0].w > 0.5) {
+        """    let d5LutActive = (user.slots[0].w > 0.5 && user.slots[0].w < 1.5) || (user.slots[0].w >= 1.5 && (flags & 16u) != 0u);
+    if (d5LutActive) {
         let d5RampRgb = d5_sample_ramp(in.d5Data.x).rgb * in.d5Data.yzw;
         let d5Selected = (flags & 2u) != 0u;
-        if ((flags & 1u) != 0u) {
+        if ((flags & 9u) != 0u) {
             var d5Unlit = d5RampRgb * (1.0 + in.opacityEmissive.y);
             if (d5Selected) {
                 d5Unlit = mix(d5Unlit, vec3<f32>(0.45, 0.96, 1.0), 0.45) + vec3<f32>(0.15, 0.35, 0.45);
@@ -104,10 +106,9 @@ module ColorShader =
     }"""
 
     /// <summary>
-    /// Composes the custom WGSL scene shader sampling <c>user.slots[3..15]</c> whenever <c>user.slots[0].w &gt; 0.5</c>.
-    /// Note that <c>user.slots[0].w &gt; 0.5</c> remaps vertex colors across all <c>InstanceBatch</c>es rendered in that <c>WgpuContext</c> pass
-    /// (including <c>Axis3D</c> panels unless disabled with <c>ColorShader.disabledUniforms ()</c> or drawn in a separate context/uniform state).
-    /// Both <c>ShadingMode.Lit</c> and <c>ShadingMode.Unlit</c> evaluate <c>d5_sample_ramp</c> per-fragment across triangles.
+    /// Composes the custom WGSL scene shader sampling <c>user.slots[3..15]</c> globally when <c>user.slots[0].w</c> is in <c>(0.5, 1.5)</c>
+    /// or per-batch (only when <c>InstanceFlags.UseColorLut</c> is set) when <c>user.slots[0].w &gt;= 1.5</c>.
+    /// Both <c>ShadingMode.Lit</c> and <c>ShadingMode.Unlit</c> / <c>InstanceFlags.ExactColor</c> evaluate <c>d5_sample_ramp</c> per-fragment across triangles.
     /// </summary>
     let wgsl () : string =
         Shaders.composeScene
@@ -162,17 +163,19 @@ module ColorShader =
     [<Literal>]
     let private GlslVertexEnd =
         """    v_d5Data = vec4(a_vertexColor.x, a_colorRoughness.rgb);
-    if (user.slots[0].w > 0.5) {
+    bool d5LutActive = (user.slots[0].w > 0.5 && user.slots[0].w < 1.5) || (user.slots[0].w >= 1.5 && (a_pickFlags.y & 16u) != 0u);
+    if (d5LutActive) {
         vec4 rampCol = d5_sample_ramp(a_vertexColor.x);
         v_opacityEmissive = vec2(rampCol.a * a_vertexColor.a * a_opacityEmissive.x, a_opacityEmissive.y);
     }"""
 
     [<Literal>]
     let private GlslFragmentLit =
-        """    if (user.slots[0].w > 0.5) {
+        """    bool d5LutActive = (user.slots[0].w > 0.5 && user.slots[0].w < 1.5) || (user.slots[0].w >= 1.5 && (flags & 16u) != 0u);
+    if (d5LutActive) {
         vec3 d5RampRgb = d5_sample_ramp(v_d5Data.x).rgb * v_d5Data.yzw;
         bool d5Selected = (flags & 2u) != 0u;
-        if ((flags & 1u) != 0u) {
+        if ((flags & 9u) != 0u) {
             vec3 d5Unlit = d5RampRgb * (1.0 + v_opacityEmissive.y);
             if (d5Selected) {
                 d5Unlit = mix(d5Unlit, vec3(0.45, 0.96, 1.0), 0.45) + vec3(0.15, 0.35, 0.45);
@@ -214,9 +217,9 @@ module ColorShader =
 
     /// <summary>
     /// Composes the WebGL2 GLSL ES 3.00 scene shader matching <c>ColorShader.wgsl ()</c>.
-    /// Note that <c>user.slots[0].w &gt; 0.5</c> remaps vertex colors across all <c>InstanceBatch</c>es rendered in that <c>WgpuContext</c> pass
-    /// (including <c>Axis3D</c> panels unless disabled with <c>ColorShader.disabledUniforms ()</c> or drawn in a separate context/uniform state).
-    /// Both <c>ShadingMode.Lit</c> and <c>ShadingMode.Unlit</c> evaluate <c>d5_sample_ramp</c> per-fragment across triangles.
+    /// Samples <c>user.slots[3..15]</c> globally when <c>user.slots[0].w</c> is in <c>(0.5, 1.5)</c>
+    /// or per-batch (<c>InstanceFlags.UseColorLut</c>) when <c>user.slots[0].w &gt;= 1.5</c>.
+    /// Both <c>ShadingMode.Lit</c> and <c>ShadingMode.Unlit</c> / <c>InstanceFlags.ExactColor</c> evaluate <c>d5_sample_ramp</c> per-fragment across triangles.
     /// </summary>
     let glsl () : string =
         GlslShaders.composeScene
@@ -228,13 +231,7 @@ module ColorShader =
             ]
 #endif
 
-    /// <summary>
-    /// Packs <c>[cmin, cmax, 13, 1]</c>, clip colors, and <c>13</c> ramp stops into <c>16</c> <c>Vector4</c> user uniform slots.
-    /// Applying these uniforms enables vertex-color LUT remapping (<c>user.slots[0].w &gt; 0.5</c>) across all <c>InstanceBatch</c>es in that
-    /// <c>WgpuContext</c> pass (including <c>Axis3D</c> panels unless reset via <c>ColorShader.disabledUniforms ()</c> or drawn in a separate context/uniform state);
-    /// both <c>ShadingMode.Lit</c> and <c>ShadingMode.Unlit</c> evaluate the 13-stop LUT per-fragment.
-    /// </summary>
-    let packUniforms (cmin: float32) (cmax: float32) (ramp: ColorRamp) : ReadOnlyMemory<Vector4> =
+    let private packUniformsWithMode (modeFlag: float32) (cmin: float32) (cmax: float32) (ramp: ColorRamp) : ReadOnlyMemory<Vector4> =
         Check3D.finite32 (nameof cmin) cmin
         Check3D.finite32 (nameof cmax) cmax
 
@@ -242,7 +239,7 @@ module ColorShader =
             nullArg (nameof ramp)
 
         let slots = Array.zeroCreate<Vector4> Shaders.UserUniformSlots
-        slots[0] <- Vector4 (cmin, cmax, float32 MaxUniformStops, 1.0f)
+        slots[0] <- Vector4 (cmin, cmax, float32 MaxUniformStops, modeFlag)
 
         let lowColor =
             match ramp.ClipPolicy.LowClip with
@@ -264,6 +261,23 @@ module ColorShader =
             slots[3 + i] <- stopSpan[i].ToVector4 ()
 
         ReadOnlyMemory<Vector4>(slots)
+
+    /// <summary>
+    /// Packs <c>[cmin, cmax, 13, 1]</c>, clip colors, and <c>13</c> ramp stops into <c>16</c> <c>Vector4</c> user uniform slots.
+    /// Applying these uniforms enables vertex-color LUT remapping (<c>user.slots[0].w &gt; 0.5</c> in global mode) across all <c>InstanceBatch</c>es in that
+    /// <c>WgpuContext</c> pass (including <c>Axis3D</c> panels unless reset via <c>ColorShader.disabledUniforms ()</c> or drawn in a separate context/uniform state);
+    /// both <c>ShadingMode.Lit</c> and <c>ShadingMode.Unlit</c> evaluate the 13-stop LUT per-fragment.
+    /// </summary>
+    let packUniforms (cmin: float32) (cmax: float32) (ramp: ColorRamp) : ReadOnlyMemory<Vector4> =
+        packUniformsWithMode 1.0f cmin cmax ramp
+
+    /// <summary>
+    /// Packs <c>[cmin, cmax, 13, 2]</c>, clip colors, and <c>13</c> ramp stops into <c>16</c> <c>Vector4</c> user uniform slots for scoped LUT shading.
+    /// When <c>user.slots[0].w &gt;= 1.5</c>, only batches tagged with <c>InstanceFlags.UseColorLut</c> sample the uniform LUT, leaving non-LUT meshes
+    /// (such as <c>Axis3D</c> panels and glyphs) unaffected without disabling uniforms between draws.
+    /// </summary>
+    let packScopedUniforms (cmin: float32) (cmax: float32) (ramp: ColorRamp) : ReadOnlyMemory<Vector4> =
+        packUniformsWithMode 2.0f cmin cmax ramp
 
     /// <summary>Returns a <c>16</c>-element zeroed <c>ReadOnlyMemory&lt;Vector4&gt;</c> (<c>user.slots[0].w = 0.0</c>) disabling <c>ColorShader</c> LUT remapping.</summary>
     let disabledUniforms () : ReadOnlyMemory<Vector4> =

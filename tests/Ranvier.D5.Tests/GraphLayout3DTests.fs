@@ -191,4 +191,190 @@ let tests =
             Expect.throwsT<OperationCanceledException>
                 (fun () -> Force3D.layoutWithCancellation cts.Token (Force3DConfig.create cube) dg |> ignore)
                 "Force3D honours cancellation"
+
+        testCase "Issue #92 (Bug #23): H3, Walrus and PoincareBallLift scale node radii and box extents proportionally on unit balls" <| fun _ ->
+            let verifyUnitBall (label: string) (bRad: float) (layout: DiagramLayout3D) =
+                for nd in layout.Nodes do
+                    Expect.isTrue
+                        (nd.Radius > 0. && nd.Radius <= 0.15 * bRad)
+                        (sprintf "%s node %s radius %g must stay in (0, %g]" label nd.Id nd.Radius (0.15 * bRad))
+                    Expect.isTrue
+                        (Bounds3.sizeX nd.Bounds <= 0.30 * bRad
+                         && Bounds3.sizeY nd.Bounds <= 0.30 * bRad
+                         && Bounds3.sizeZ nd.Bounds <= 0.30 * bRad)
+                        (sprintf "%s node %s box (%g,%g,%g) must stay proportional to BallRadius=%g" label nd.Id (Bounds3.sizeX nd.Bounds) (Bounds3.sizeY nd.Bounds) (Bounds3.sizeZ nd.Bounds) bRad)
+                let limit = 1.15 * bRad
+                Expect.isTrue
+                    (abs (Bounds3.minX layout.Bounds) <= limit
+                     && abs (Bounds3.maxX layout.Bounds) <= limit
+                     && abs (Bounds3.minY layout.Bounds) <= limit
+                     && abs (Bounds3.maxY layout.Bounds) <= limit
+                     && abs (Bounds3.minZ layout.Bounds) <= limit
+                     && abs (Bounds3.maxZ layout.Bounds) <= limit)
+                    (sprintf "%s layout bounds %A must stay within [-%g, +%g]^3" label layout.Bounds limit limit)
+
+            for label, mkNode in
+                [ "sized-0.08", (fun id -> DiagramNode.sized id 0.08 0.08)
+                  "default-create", DiagramNode.create ] do
+                let nodes = [ for i in 0 .. 12 -> mkNode (sprintf "u%d" i) ]
+                let edges = [ for i in 1 .. 12 -> Association.create (sprintf "ue%d" i) (sprintf "u%d" ((i - 1) / 3)) (sprintf "u%d" i) ]
+                let dg = DiagramGraph.simple nodes edges |> ok
+
+                for model in [ HyperbolicModel.Klein; HyperbolicModel.Poincare ] do
+                    let h3Out = H3.layout { H3Config.defaultValue with Model = model; BallRadius = 1.0; RootId = Some "u0" } dg |> ok
+                    verifyUnitBall (sprintf "H3-%A-%s" model label) 1.0 h3Out
+
+                    let walrusOut = Walrus.layout { WalrusConfig.defaultValue with Model = model; SphereRadius = 1.0; RootId = Some "u0" } dg |> ok
+                    verifyUnitBall (sprintf "Walrus-%A-%s" model label) 1.0 walrusOut
+
+                for vpLabel, vp in [ "800x600", Bounds.create 0. 0. 800. 600.; "unit-vp", Bounds.create -1. -1. 2. 2. ] do
+                    let pdState = PoincareDisk.buildState (PoincareDiskConfig.create vp) dg |> ok
+                    let liftCfg = PoincareBallLiftConfig.create (Point3.create 0. 0. 0.) 1.0
+                    let liftOut = PoincareBallLift.morph 0.0 liftCfg pdState
+                    verifyUnitBall (sprintf "PoincareBallLift-0.0-%s-%s" label vpLabel) 1.0 liftOut
+                    let morphOut = PoincareBallLift.morph 0.5 liftCfg pdState
+                    verifyUnitBall (sprintf "PoincareBallLift-0.5-%s-%s" label vpLabel) 1.0 morphOut
+
+            // Verify legacy BallRadius = 300.0 preserves >= 1.2 radius and >= 2.4 box floors unchanged
+            let legacyNodes = [ for i in 0 .. 12 -> DiagramNode.create (sprintf "l%d" i) ]
+            let legacyEdges = [ for i in 1 .. 12 -> Association.create (sprintf "le%d" i) (sprintf "l%d" ((i - 1) / 3)) (sprintf "l%d" i) ]
+            let legacyDg = DiagramGraph.simple legacyNodes legacyEdges |> ok
+            let h3Legacy = H3.layout { H3Config.defaultValue with BallRadius = 300.0; RootId = Some "l0" } legacyDg |> ok
+            for nd in h3Legacy.Nodes do
+                Expect.isTrue (nd.Radius >= 1.2) "legacy BallRadius=300 preserves 1.2 radius floor"
+                Expect.isTrue (Bounds3.sizeX nd.Bounds >= 2.4 && Bounds3.sizeY nd.Bounds >= 2.4 && Bounds3.sizeZ nd.Bounds >= 2.4) "legacy BallRadius=300 preserves 2.4 box floor"
+
+            // Verify grouped unit-ball H3 stays bounded cleanly with DiagramGroup.create
+            let grpNodes =
+                [ for i in 0 .. 6 ->
+                    DiagramNode.create (sprintf "gn%d" i)
+                    |> DiagramNode.inGroup (if i < 4 then "ga" else "gb") ]
+            let grpEdges = [ for i in 1 .. 6 -> Association.create (sprintf "ge%d" i) "gn0" (sprintf "gn%d" i) ]
+            let grpDg = DiagramGraph.create grpNodes [ DiagramGroup.create "ga"; DiagramGroup.create "gb" ] grpEdges |> ok
+            let h3Grouped = H3.layout { H3Config.defaultValue with BallRadius = 1.0; RootId = Some "gn0" } grpDg |> ok
+            verifyUnitBall "H3-grouped-unit-ball" 1.0 h3Grouped
+
+        testCase "Issue #92 (Bug #22): Kernels3D.computeGroups3D scales unit-sphere groups and HierarchicalBundle3D synthesizes LCA centroids before GroupBounds" <| fun _ ->
+            let groups = [ for g in 0 .. 2 -> DiagramGroup.create (sprintf "ug%d" g) ]
+            let nodes =
+                [ for g in 0 .. 2 do
+                    for k in 0 .. 3 ->
+                        DiagramNode.sized (sprintf "un_%d_%d" g k) 0.08 0.08
+                        |> DiagramNode.inGroup (sprintf "ug%d" g) ]
+            let edges =
+                [ for g in 0 .. 2 do
+                    let nextG = (g + 1) % 3
+                    yield Association.create (sprintf "xe_%d" g) (sprintf "un_%d_0" g) (sprintf "un_%d_1" nextG)
+                    yield Association.create (sprintf "ie_%d" g) (sprintf "un_%d_0" g) (sprintf "un_%d_2" g) ]
+            let dg = DiagramGraph.create nodes groups edges |> ok
+            let sphCfg = { SphericalLayoutConfig.create (Point3.create 0. 0. 0.) 1.05 with Iterations = 35; ArcSegments = 10; Seed = 17UL }
+            let sphLayout = SphericalStress3D.layout sphCfg dg |> ok
+
+            Expect.equal sphLayout.Groups.Length 3 "unit-sphere layout retains all 3 groups"
+            for grp in sphLayout.Groups do
+                Expect.isTrue
+                    (Bounds3.sizeX grp.Bounds < 3.0 && Bounds3.sizeY grp.Bounds < 3.0 && Bounds3.sizeZ grp.Bounds < 3.0)
+                    (sprintf "unit-sphere group %s bounds (%g,%g,%g) must not stay at 96x56 pixel scale" grp.Id (Bounds3.sizeX grp.Bounds) (Bounds3.sizeY grp.Bounds) (Bounds3.sizeZ grp.Bounds))
+            Expect.isTrue
+                (abs (Bounds3.minX sphLayout.Bounds) < 2.5 && abs (Bounds3.maxX sphLayout.Bounds) < 2.5
+                 && abs (Bounds3.minY sphLayout.Bounds) < 2.5 && abs (Bounds3.maxY sphLayout.Bounds) < 2.5
+                 && abs (Bounds3.minZ sphLayout.Bounds) < 2.5 && abs (Bounds3.maxZ sphLayout.Bounds) < 2.5)
+                (sprintf "unit-sphere overall Bounds %A must not blow out via pixel-scale group MinSize" sphLayout.Bounds)
+
+            let hTree =
+                Hierarchy.node "root" 0.
+                    [ for g in 0 .. 2 ->
+                        Hierarchy.node (sprintf "ug%d" g) 0.
+                            [ for k in 0 .. 3 -> Hierarchy.node (sprintf "un_%d_%d" g k) 1. [] ] ]
+            let bundledWithGroups = HierarchicalBundle3D.bundle 0.8 12 hTree sphLayout |> ok
+            let bundledNoGroups = HierarchicalBundle3D.bundle 0.8 12 hTree { sphLayout with Groups = [] } |> ok
+            let skewedGroups =
+                sphLayout.Groups
+                |> List.map (fun g -> { g with Bounds = Bounds3.create 500. 500. 500. 10. 10. 10. })
+            let bundledSkewed = HierarchicalBundle3D.bundle 0.8 12 hTree { sphLayout with Groups = skewedGroups } |> ok
+
+            for aGrp, aNo, aSkew in List.zip3 bundledWithGroups.Associations bundledNoGroups.Associations bundledSkewed.Associations do
+                Expect.equal aGrp.Points.Length aNo.Points.Length "point chain lengths match"
+                for idx = 0 to aGrp.Points.Length - 1 do
+                    Expect.isTrue
+                        (Point3.distance (aGrp.Points[idx]) (aNo.Points[idx]) <= 1e-12)
+                        (sprintf "HierarchicalBundle3D with Groups matches centroid synthesis (diff=%g)" (Point3.distance (aGrp.Points[idx]) (aNo.Points[idx])))
+                    Expect.isTrue
+                        (Point3.distance (aSkew.Points[idx]) (aNo.Points[idx]) <= 1e-12)
+                        (sprintf "HierarchicalBundle3D ignores skewed group boxes when descendant nodes exist (diff=%g)" (Point3.distance (aSkew.Points[idx]) (aNo.Points[idx])))
+
+            // Empty hierarchy group (0 positioned descendant nodes) falls back cleanly to Bounds3.center g.Bounds
+            let emptyGroupBounds = Bounds3.create 10. 20. 30. 4. 6. 8. // center = (12, 23, 34)
+            let emptyGroupItem : PositionedGroup3D =
+                { Id = "emptyGrp"; ParentGroup = None; Bounds = emptyGroupBounds; InnerBounds = emptyGroupBounds; Depth = 0 }
+            let leafA = { sphLayout.Nodes[0] with Id = "leafA"; Center = Point3.create 0. 0. 0. }
+            let leafB = { sphLayout.Nodes[1] with Id = "leafB"; Center = Point3.create 2. 0. 0. }
+            let fallbackLayout : DiagramLayout3D =
+                { Bounds = Bounds3.create -1. -1. -1. 15. 30. 40.
+                  Nodes = [ leafA; leafB ]
+                  Groups = [ emptyGroupItem ]
+                  Associations =
+                    [ { Id = "fbEdge"
+                        Source = Endpoint.node "leafA"
+                        Target = Endpoint.node "leafB"
+                        Kind = AssociationKind.Directed
+                        IsBackbone = true
+                        Points = Point3Chain.ofList [ leafA.Center; leafB.Center ]
+                        Waypoints = [ leafA.Center; leafB.Center ] } ] }
+            let zeroDescLayout =
+                { fallbackLayout with
+                    Associations =
+                        [ { fallbackLayout.Associations[0] with
+                              Target = Endpoint.node "emptyGrp"
+                              Points = Point3Chain.ofList [ leafA.Center; Bounds3.center emptyGroupBounds ]
+                              Waypoints = [ leafA.Center; Bounds3.center emptyGroupBounds ] } ] }
+            let zeroDescTree =
+                Hierarchy.node "top" 0.
+                    [ Hierarchy.node "leafA" 1. []
+                      Hierarchy.node "emptyGrp" 0. [] ]
+            let bundledFallback = HierarchicalBundle3D.bundle 0.85 8 zeroDescTree zeroDescLayout |> ok
+            let fbPts = bundledFallback.Associations[0].Points
+            Expect.isTrue
+                (Point3.distance (fbPts[fbPts.Length - 1]) (Point3.create 12. 23. 34.) <= 1e-9)
+                "zero-descendant hierarchy group falls back to Bounds3.center g.Bounds"
+
+        testCase "VerticalDirection3D toggles ConeTree3D and Layered3D progression while preserving Increasing default" <| fun _ ->
+            let nodes =
+                [ DiagramNode.sized "ui1" 48. 32.
+                  DiagramNode.sized "api" 60. 36.
+                  DiagramNode.sized "db" 56. 40.
+                  DiagramNode.sized "leaf" 40. 28. ]
+            let assocs =
+                [ Association.create "e1" "ui1" "api"
+                  Association.create "e2" "api" "db"
+                  Association.create "e3" "api" "leaf" ]
+            let dg = DiagramGraph.simple nodes assocs |> ok
+
+            let ctInc = ConeTree3D.layout { ConeTree3DConfig.create cube with Mode = ConeTreeMode.VerticalCone; RootId = Some "ui1" } dg |> ok
+            let ctDec = ConeTree3D.layout { ConeTree3DConfig.create cube with Mode = ConeTreeMode.VerticalCone; RootId = Some "ui1"; Direction = VerticalDirection3D.Decreasing } dg |> ok
+            let ctIncMap = ctInc.Nodes |> List.map (fun n -> n.Id, n.Center) |> Map.ofList
+            let ctDecMap = ctDec.Nodes |> List.map (fun n -> n.Id, n.Center) |> Map.ofList
+            Expect.isTrue (ctIncMap["ui1"].Y < ctIncMap["api"].Y && ctIncMap["api"].Y < ctIncMap["db"].Y) "ConeTree3D VerticalCone Increasing progresses +Y"
+            Expect.isTrue (ctDecMap["ui1"].Y > ctDecMap["api"].Y && ctDecMap["api"].Y > ctDecMap["db"].Y) "ConeTree3D VerticalCone Decreasing progresses -Y from top"
+
+            let camInc = ConeTree3D.layout { ConeTree3DConfig.create cube with Mode = ConeTreeMode.HorizontalCam; RootId = Some "ui1" } dg |> ok
+            let camDec = ConeTree3D.layout { ConeTree3DConfig.create cube with Mode = ConeTreeMode.HorizontalCam; RootId = Some "ui1"; Direction = VerticalDirection3D.Decreasing } dg |> ok
+            let camIncMap = camInc.Nodes |> List.map (fun n -> n.Id, n.Center) |> Map.ofList
+            let camDecMap = camDec.Nodes |> List.map (fun n -> n.Id, n.Center) |> Map.ofList
+            Expect.isTrue (camIncMap["ui1"].X < camIncMap["api"].X && camIncMap["api"].X < camIncMap["db"].X) "ConeTree3D HorizontalCam Increasing progresses +X"
+            Expect.isTrue (camDecMap["ui1"].X > camDecMap["api"].X && camDecMap["api"].X > camDecMap["db"].X) "ConeTree3D HorizontalCam Decreasing progresses -X"
+
+            let lYInc = Layered3D.layout { Layered3DConfig.create cube with Axis = StratumAxis.Y } dg |> ok
+            let lYDec = Layered3D.layout { Layered3DConfig.create cube with Axis = StratumAxis.Y; Direction = VerticalDirection3D.Decreasing } dg |> ok
+            let lYIncMap = lYInc.Nodes |> List.map (fun n -> n.Id, n.Center) |> Map.ofList
+            let lYDecMap = lYDec.Nodes |> List.map (fun n -> n.Id, n.Center) |> Map.ofList
+            Expect.isTrue (lYIncMap["ui1"].Y < lYIncMap["api"].Y && lYIncMap["api"].Y < lYIncMap["db"].Y) "Layered3D Y Increasing progresses +Y"
+            Expect.isTrue (lYDecMap["ui1"].Y > lYDecMap["api"].Y && lYDecMap["api"].Y > lYDecMap["db"].Y) "Layered3D Y Decreasing progresses -Y"
+
+            let lZInc = Layered3D.layout { Layered3DConfig.create cube with Axis = StratumAxis.Z } dg |> ok
+            let lZDec = Layered3D.layout { Layered3DConfig.create cube with Axis = StratumAxis.Z; Direction = VerticalDirection3D.Decreasing } dg |> ok
+            let lZIncMap = lZInc.Nodes |> List.map (fun n -> n.Id, n.Center) |> Map.ofList
+            let lZDecMap = lZDec.Nodes |> List.map (fun n -> n.Id, n.Center) |> Map.ofList
+            Expect.isTrue (lZIncMap["ui1"].Z < lZIncMap["api"].Z && lZIncMap["api"].Z < lZIncMap["db"].Z) "Layered3D Z Increasing progresses +Z"
+            Expect.isTrue (lZDecMap["ui1"].Z > lZDecMap["api"].Z && lZDecMap["api"].Z > lZDecMap["db"].Z) "Layered3D Z Decreasing progresses -Z"
     ]

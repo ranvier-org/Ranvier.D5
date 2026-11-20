@@ -250,13 +250,21 @@ module PoincareBallLift =
                     | _ ->
                         NodeKind.Standard, None, min nc.BaseWidth nc.BaseHeight
 
+                let unitScale = max 1e-6 (bRad / 300.0)
                 let rawDiag = 0.5 * sqrt (nc.BaseWidth * nc.BaseWidth + nc.BaseHeight * nc.BaseHeight)
                 let baseRadWorld = max (0.045 * bRad) (min (0.14 * bRad) (rawDiag * worldScale * 0.55))
-                let effRad = max 1.2 (baseRadWorld * conformalAtten)
+                let effRad = max (1.2 * unitScale) (baseRadWorld * conformalAtten)
 
-                let sx = max 2.0 (nc.BaseWidth * worldScale * 0.55 * conformalAtten)
-                let sy = max 2.0 (nc.BaseHeight * worldScale * 0.55 * conformalAtten)
-                let sz = max 2.0 (depthBase * worldScale * 0.55 * conformalAtten)
+                let rawBoxScale = worldScale * 0.55
+                let maxRawBox = max nc.BaseWidth (max nc.BaseHeight depthBase) * rawBoxScale
+                let boxCapScale = if maxRawBox > 0.28 * bRad then (0.28 * bRad) / maxRawBox else 1.0
+                let minBox = 2.0 * unitScale
+                let inline clampBoxDim dim =
+                    let scaled = if boxCapScale = 1.0 then dim * rawBoxScale else dim * rawBoxScale * boxCapScale
+                    max minBox (scaled * conformalAtten)
+                let sx = clampBoxDim nc.BaseWidth
+                let sy = clampBoxDim nc.BaseHeight
+                let sz = clampBoxDim depthBase
                 let box = Kernels3D.nodeBox wPt sx sy sz
                 if hasGroups then
                     match eff.ReversedIdMap.TryGetValue nc.Id with

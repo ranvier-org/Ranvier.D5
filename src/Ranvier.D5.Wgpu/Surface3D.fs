@@ -429,11 +429,13 @@ module private SurfaceKernel =
         outIdx
 
     let buildInstance (spec: SurfaceSpec) : Instance3D =
+        let lutFlag = if spec.Color.IsScalarPassthrough then InstanceFlags.UseColorLut else InstanceFlags.None
+
         match spec.Shading with
         | ShadingMode.Unlit ->
-            Instance3D.fromMatrix Matrix4x4.Identity RgbaColor.white 0.5f spec.PickId InstanceFlags.Unlit 0.0f
+            Instance3D.fromMatrix Matrix4x4.Identity RgbaColor.white 0.5f spec.PickId (InstanceFlags.Unlit ||| lutFlag) 0.0f
         | ShadingMode.Lit (r, e) ->
-            Instance3D.fromMatrix Matrix4x4.Identity RgbaColor.white r spec.PickId InstanceFlags.None e
+            Instance3D.fromMatrix Matrix4x4.Identity RgbaColor.white r spec.PickId lutFlag e
 
 /// <summary>Validating constructors and dimension queries for <c>SurfaceGrid</c>.</summary>
 [<RequireQualifiedAccess>]
@@ -842,9 +844,13 @@ module Surface3D =
 [<Sealed>]
 type SurfaceBatch private
     (
+        context: WgpuContext,
         meshHandle: MeshHandle,
-        batch: InstanceBatch,
-        wireframeBatch: LineBatch option,
+        initOpaqueBatchOpt: InstanceBatch option,
+        initAlphaBatchOpt: InstanceBatch option,
+        initActiveBatch: InstanceBatch,
+        initActiveIsAlpha: bool,
+        initWireframeBatch: LineBatch option,
         initCols: int,
         initRows: int,
         initCurvilinear: bool,
@@ -865,9 +871,15 @@ type SurfaceBatch private
         initFlipWinding: bool,
         initShading: ShadingMode,
         initPickId: uint32,
+        initUseColorLut: bool,
         initHasWireframe: bool
     ) =
     let mutable disposed = false
+    let mutable opaqueBatchOpt = initOpaqueBatchOpt
+    let mutable alphaBatchOpt = initAlphaBatchOpt
+    let mutable activeBatch = initActiveBatch
+    let mutable activeIsAlpha = initActiveIsAlpha
+    let mutable wireframeBatch = initWireframeBatch
     let mutable cols = initCols
     let mutable rows = initRows
     let mutable vertexCount = initCols * initRows
@@ -892,6 +904,7 @@ type SurfaceBatch private
     let mutable flipWinding = initFlipWinding
     let mutable lastShading = initShading
     let mutable lastPickId = initPickId
+    let mutable lastUseColorLut = initUseColorLut
     let mutable lastHasWireframe = initHasWireframe
 
     let checkAlive () =
@@ -987,40 +1000,76 @@ type SurfaceBatch private
                     Indices = activeIndices
                 }
 
-        match wireframeBatch with
-        | None -> ()
-        | Some lb ->
-            match spec.Wireframe with
-            | ValueSome wireColor ->
-#if FABLE_COMPILER
-                if (maskChanged || not lastHasWireframe) && scratchLines.Length < maxLineVertices then
-                    scratchLines <- Array.zeroCreate<LineVertex3D> maxLineVertices
-#endif
-                let activeLineCount =
-                    SurfaceKernel.buildActiveWireframe cols rows wireColor scratchVertices currMask scratchLines
+        match spec.Wireframe with
+        | ValueSome wireColor ->
+            if scratchLines.Length < maxLineVertices then
+                scratchLines <- Array.zeroCreate<LineVertex3D> maxLineVertices
 
-                if activeLineCount = scratchLines.Length then
-                    lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(scratchLines))
-                elif activeLineCount = 0 then
-                    lb.Resize 0
-                else
+            let lb =
+                match wireframeBatch with
+                | Some existing -> existing
+                | None ->
+                    let created = context.CreateLineBatch ()
+                    wireframeBatch <- Some created
+                    created
+
+            let activeLineCount =
+                SurfaceKernel.buildActiveWireframe cols rows wireColor scratchVertices currMask scratchLines
+
+            if activeLineCount = scratchLines.Length then
+                lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(scratchLines))
+            elif activeLineCount = 0 then
+                lb.Resize 0
+            else
 #if FABLE_COMPILER
-                    scratchLines <- Array.sub scratchLines 0 activeLineCount
-                    lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(scratchLines))
+                scratchLines <- Array.sub scratchLines 0 activeLineCount
+                lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(scratchLines))
 #else
-                    lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(scratchLines, 0, activeLineCount))
+                lb.UpdateVertices (ReadOnlySpan<LineVertex3D>(scratchLines, 0, activeLineCount))
 #endif
 
-                lastHasWireframe <- true
-            | ValueNone ->
-                if lastHasWireframe then
-                    lb.Resize 0
-                    lastHasWireframe <- false
+            lastHasWireframe <- true
+        | ValueNone ->
+            match wireframeBatch with
+            | Some lb when lastHasWireframe ->
+                lb.Resize 0
+                lastHasWireframe <- false
+            | _ -> ()
 
-        if spec.Shading <> lastShading || spec.PickId <> lastPickId then
+        let wantsAlpha = spec.Opacity < 0.999f
+        let useColorLut = spec.Color.IsScalarPassthrough
+        let instanceChanged = spec.Shading <> lastShading || spec.PickId <> lastPickId || useColorLut <> lastUseColorLut
+
+        if wantsAlpha <> activeIsAlpha then
+            activeBatch.Resize 0
+
+            let nextBatch =
+                if wantsAlpha then
+                    match alphaBatchOpt with
+                    | Some b -> b
+                    | None ->
+                        let b = context.CreateBatch (meshHandle, BlendMode.AlphaBlend, true)
+                        alphaBatchOpt <- Some b
+                        b
+                else
+                    match opaqueBatchOpt with
+                    | Some b -> b
+                    | None ->
+                        let b = context.CreateBatch (meshHandle, BlendMode.Opaque, true)
+                        opaqueBatchOpt <- Some b
+                        b
+
             lastShading <- spec.Shading
             lastPickId <- spec.PickId
-            batch.SetSingle (SurfaceKernel.buildInstance spec)
+            lastUseColorLut <- useColorLut
+            nextBatch.SetSingle (SurfaceKernel.buildInstance spec)
+            activeBatch <- nextBatch
+            activeIsAlpha <- wantsAlpha
+        elif instanceChanged then
+            lastShading <- spec.Shading
+            lastPickId <- spec.PickId
+            lastUseColorLut <- useColorLut
+            activeBatch.SetSingle (SurfaceKernel.buildInstance spec)
 
     /// <summary>Uploads an initial <c>SurfaceGrid</c> and creates the GPU <c>InstanceBatch</c> and optional wireframe <c>LineBatch</c>.</summary>
     static member Create(context: WgpuContext, spec: SurfaceSpec, initialGrid: SurfaceGrid) : SurfaceBatch =
@@ -1117,14 +1166,18 @@ type SurfaceBatch private
                     Indices = initialIndices
                 }
 
+        let isAlpha = spec.Opacity < 0.999f
+
         let blendMode =
-            if spec.Opacity < 0.999f then
+            if isAlpha then
                 BlendMode.AlphaBlend
             else
                 BlendMode.Opaque
 
-        let batch = context.CreateBatch (meshHandle, blendMode, true)
-        batch.SetSingle (SurfaceKernel.buildInstance spec)
+        let initialBatch = context.CreateBatch (meshHandle, blendMode, true)
+        initialBatch.SetSingle (SurfaceKernel.buildInstance spec)
+        let opaqueOpt = if isAlpha then None else Some initialBatch
+        let alphaOpt = if isAlpha then Some initialBatch else None
 
         let wireframeBatch, hasWireframe =
             match spec.Wireframe with
@@ -1146,8 +1199,12 @@ type SurfaceBatch private
             | ValueNone -> None, false
 
         new SurfaceBatch (
+            context,
             meshHandle,
-            batch,
+            opaqueOpt,
+            alphaOpt,
+            initialBatch,
+            isAlpha,
             wireframeBatch,
             cols,
             rows,
@@ -1169,13 +1226,14 @@ type SurfaceBatch private
             flipWinding,
             spec.Shading,
             spec.PickId,
+            spec.Color.IsScalarPassthrough,
             hasWireframe
         )
 
     /// <summary>The underlying double-sided GPU <c>InstanceBatch</c> rendering the surface mesh.</summary>
-    member _.Batch: InstanceBatch = batch
+    member _.Batch: InstanceBatch = activeBatch
 
-    /// <summary>Optional <c>LineBatch</c> rendering surface grid wireframe segments when enabled at creation.</summary>
+    /// <summary>Optional <c>LineBatch</c> rendering surface grid wireframe segments when enabled at creation or via <c>Update</c>/<c>UpdateGrid</c>.</summary>
     member _.WireframeBatch: LineBatch option = wireframeBatch
 
     /// <summary>Updates heights and optional 4th-dimension scalars in place with zero heap allocations when the valid-vertex hole mask is unchanged.</summary>
@@ -1252,12 +1310,20 @@ type SurfaceBatch private
     member _.Dispose() =
         if not disposed then
             disposed <- true
-            batch.Dispose ()
-            meshHandle.Dispose ()
+
+            match opaqueBatchOpt with
+            | Some b -> b.Dispose ()
+            | None -> ()
+
+            match alphaBatchOpt with
+            | Some b -> b.Dispose ()
+            | None -> ()
 
             match wireframeBatch with
             | Some lb -> lb.Dispose ()
             | None -> ()
+
+            meshHandle.Dispose ()
 
     interface IDisposable with
         member this.Dispose() =

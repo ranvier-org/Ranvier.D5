@@ -963,3 +963,76 @@ module Probe3D =
             |]
 
         ReadOnlyMemory<LineVertex3D>(vertices)
+
+/// <summary>
+/// Single-flight hover-pick coalescer and epoch fence preventing overlapping GPU readbacks
+/// and rejecting stale pick completions after scene or pointer-state transitions.
+/// </summary>
+[<Sealed>]
+type HoverPickCoalescer() =
+    let mutable currentEpoch = 0
+    let mutable inFlightEpoch: int voption = ValueNone
+    let mutable pendingClientXY: struct (float * float) voption = ValueNone
+    let mutable framePending: struct (float * float) voption = ValueNone
+
+    /// <summary>Current epoch counter incremented whenever in-flight picks become stale.</summary>
+    member _.CurrentEpoch = currentEpoch
+
+    /// <summary>Epoch of the currently active single-flight hover pick, or <c>ValueNone</c> when idle.</summary>
+    member _.InFlightEpoch = inFlightEpoch
+
+    /// <summary>Latest pointer coordinates queued while an async hover pick is in flight.</summary>
+    member _.PendingClientXY = pendingClientXY
+
+    /// <summary>True when a synchronous end-of-frame hover pick is queued via <c>QueueFrameHover</c>.</summary>
+    member _.HasPendingFrameHover = framePending.IsSome
+
+    /// <summary>
+    /// Requests a single-flight hover pick at <c>(clientX, clientY)</c>,
+    /// returning <c>ValueSome CurrentEpoch</c> when idle or <c>ValueNone</c> when coalesced behind an active pick.
+    /// </summary>
+    member _.RequestHover(clientX: float, clientY: float) : int voption =
+        match inFlightEpoch with
+        | ValueNone ->
+            let ep = currentEpoch
+            inFlightEpoch <- ValueSome ep
+            pendingClientXY <- ValueNone
+            ValueSome ep
+        | ValueSome _ ->
+            pendingClientXY <- ValueSome struct (clientX, clientY)
+            ValueNone
+
+    /// <summary>Advances <c>CurrentEpoch</c> and clears any stale pending hover coordinates.</summary>
+    member _.AdvanceEpoch() : unit =
+        currentEpoch <- currentEpoch + 1
+        pendingClientXY <- ValueNone
+        framePending <- ValueNone
+
+    /// <summary>
+    /// Completes an in-flight pick dispatched at <c>dispatchEpoch</c>, returning <c>(isCurrent, followup)</c>
+    /// where <c>isCurrent</c> is true only for the active epoch and <c>followup</c> carries any queued coordinates.
+    /// </summary>
+    member _.CompletePick(dispatchEpoch: int) : struct (bool * struct (float * float * int) voption) =
+        let isCurrent = dispatchEpoch = currentEpoch
+
+        match pendingClientXY with
+        | ValueSome struct (nx, ny) ->
+            pendingClientXY <- ValueNone
+            let nextEp = currentEpoch
+            inFlightEpoch <- ValueSome nextEp
+            struct (isCurrent, ValueSome struct (nx, ny, nextEp))
+        | ValueNone ->
+            inFlightEpoch <- ValueNone
+            struct (isCurrent, ValueNone)
+
+    /// <summary>Queues pointer coordinates for synchronous once-per-frame hover picking.</summary>
+    member _.QueueFrameHover(clientX: float, clientY: float) : unit =
+        framePending <- ValueSome struct (clientX, clientY)
+
+    /// <summary>Consumes the latest queued frame hover coordinates together with <c>CurrentEpoch</c>, clearing the frame queue.</summary>
+    member _.TakeFrameHover() : struct (float * float * int) voption =
+        match framePending with
+        | ValueSome struct (x, y) ->
+            framePending <- ValueNone
+            ValueSome struct (x, y, currentEpoch)
+        | ValueNone -> ValueNone

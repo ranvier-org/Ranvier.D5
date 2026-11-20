@@ -328,10 +328,11 @@ module Walrus =
                                     w <- w + 1
                             va, vs, vd, vb
 
+                    let unitScale = max 1e-6 (config.SphereRadius / 300.0)
                     let baseRadii =
                         Array.init n (fun i ->
                             let importance = 1. + 0.35 * logSubtree[i]
-                            max 3.5 (min 18. (5.5 * importance)))
+                            max (3.5 * unitScale) (min (18. * unitScale) (5.5 * unitScale * importance)))
 
                     Ok
                         { Config = h3CompatConfig

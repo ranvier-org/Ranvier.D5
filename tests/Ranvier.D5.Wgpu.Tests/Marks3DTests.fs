@@ -692,4 +692,23 @@ let marks3DTests =
                 Expect.isTrue okBar "warmed tryPackBar succeeds"
                 Expect.isTrue okSeg "warmed tryPackSegment succeeds"
                 Expect.equal (allocAfter - allocBefore) 0L "1000 warmed tryPackBar and tryPackSegment calls allocate 0 bytes"
+
+            testCase "Glyph3D.unitArrowMesh honors segments = 3, 4, 5 without clamping to 6"
+            <| fun () ->
+                let a3 = Glyph3D.unitArrowMesh 3
+                let a4 = Glyph3D.unitArrowMesh 4
+                let a5 = Glyph3D.unitArrowMesh 5
+                let a6 = Glyph3D.unitArrowMesh 6
+
+                verifyOutwardWinding a3 "unitArrowMesh 3"
+                verifyOutwardWinding a4 "unitArrowMesh 4"
+                verifyOutwardWinding a5 "unitArrowMesh 5"
+                verifyOutwardWinding a6 "unitArrowMesh 6"
+
+                Expect.isLessThan a3.Vertices.Length a4.Vertices.Length "v3 < v4"
+                Expect.isLessThan a4.Vertices.Length a5.Vertices.Length "v4 < v5"
+                Expect.isLessThan a5.Vertices.Length a6.Vertices.Length "v5 < v6"
+                Expect.isLessThan a3.Indices.Length a4.Indices.Length "i3 < i4"
+                Expect.isLessThan a4.Indices.Length a5.Indices.Length "i4 < i5"
+                Expect.isLessThan a5.Indices.Length a6.Indices.Length "i5 < i6"
         ]

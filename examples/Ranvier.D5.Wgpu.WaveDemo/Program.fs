@@ -225,25 +225,17 @@ let private createDemo (hidden: bool) (width: int) (height: int) : DemoSession =
             |> Mark.withFill (Paint.rgb 226 232 240)
             |> Mark.withFontSize 12.0
 
-        {
-            AxisSpec = axisSpec
-            ClearColor = RgbaColor.darkBackdrop
-            Lighting = ValueSome LightingRig.studioDefault
+        { PlotPass3D.create axisSpec with
             SectionPlane = if sec.Enabled then ValueSome sec else ValueNone
             ExtraBatches = batchesMem
             ExtraLines = linesBuf
-            ExtraDiscs = ReadOnlyMemory.Empty
             ExtraOverlayMarks = [ hudMark ]
         }
 
     let plotConfig: PlotViewConfig3D =
-        {
-            Width = width
-            Height = height
-            Camera = camera
-            OnHoverHit = Some onHover
-            OnClickHit = Some onHover
-        }
+        PlotViewConfig3D.create width height camera
+        |> PlotViewConfig3D.withOnHoverHit onHover
+        |> PlotViewConfig3D.withOnClickHit onHover
 
     let shellComponent =
         Component.template
@@ -252,26 +244,29 @@ let private createDemo (hidden: bool) (width: int) (height: int) : DemoSession =
                 [|
                     div.style $"position:relative;width:{width}px;height:{height}px;outline:none;"
                     div.onKeydown (fun _ ev ->
-                        match ev.key with
-                        | "s" | "S" ->
-                            let cur = section.Value
+                        if not ev.ctrlKey && not ev.metaKey && not ev.altKey then
+                            match ev.key with
+                            | "s" | "S" ->
+                                let cur = section.Value
 
-                            if cur.Enabled then
-                                section.Value <- SectionPlane.disabled
-                            else
-                                section.Value <- SectionPlane.create (Vector3.Normalize (Vector3 (1.0f, 0.25f, 0.35f))) 0.0f
-                        | "[" ->
-                            let cur = section.Value
-                            let n = if cur.Enabled then cur.Normal else Vector3.Normalize (Vector3 (1.0f, 0.25f, 0.35f))
-                            section.Value <- SectionPlane.create n (Math.Clamp (cur.Offset - 0.1f, -1.2f, 1.2f))
-                        | "]" ->
-                            let cur = section.Value
-                            let n = if cur.Enabled then cur.Normal else Vector3.Normalize (Vector3 (1.0f, 0.25f, 0.35f))
-                            section.Value <- SectionPlane.create n (Math.Clamp (cur.Offset + 0.1f, -1.2f, 1.2f))
-                        | "r" | "R" | "Home" ->
-                            camera.Reset ()
-                            section.Reset ()
-                        | _ -> ())
+                                if cur.Enabled then
+                                    section.Value <- SectionPlane.disabled
+                                else
+                                    section.Value <- SectionPlane.create (Vector3.Normalize (Vector3 (1.0f, 0.25f, 0.35f))) 0.0f
+                            | "[" ->
+                                let cur = section.Value
+                                let n = if cur.Enabled then cur.Normal else Vector3.Normalize (Vector3 (1.0f, 0.25f, 0.35f))
+                                section.Value <- SectionPlane.create n (Math.Clamp (cur.Offset - 0.1f, -1.2f, 1.2f))
+                            | "]" ->
+                                let cur = section.Value
+                                let n = if cur.Enabled then cur.Normal else Vector3.Normalize (Vector3 (1.0f, 0.25f, 0.35f))
+                                section.Value <- SectionPlane.create n (Math.Clamp (cur.Offset + 0.1f, -1.2f, 1.2f))
+                            | "r" | "R" | "Home" ->
+                                if not ev.defaultPrevented then
+                                    camera.Reset ()
+
+                                section.Reset ()
+                            | _ -> ())
                 |]
             )
                 .Run [| view (fun () -> PlotView3D.create win wgpu plotConfig readScene) |])

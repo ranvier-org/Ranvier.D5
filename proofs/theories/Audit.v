@@ -1,4 +1,4 @@
-From RanvierD5.Pure Require Import DataScale Spatial SamplingSelection GeometryGeo TransitionWorker.
+From RanvierD5.Pure Require Import DataScale Spatial SamplingSelection GeometryGeo TransitionWorker WgpuErgonomics.
 
 (** * Assumption audit across all Ranvier.D5 proof modules *)
 
@@ -72,3 +72,18 @@ Print Assumptions naive_reactive_force_unversioned_clobbers_falsified.
 Print Assumptions svg_bounded_mark_path_excludes_outer_ancestors.
 Print Assumptions lasso_decimate_exact_count_and_head.
 Print Assumptions settled_keyed_transition_fast_path_eq.
+
+(* Pure.WgpuErgonomics *)
+Print Assumptions pick_encoding_nonzero.
+Print Assumptions pick_encoding_roundtrip.
+Print Assumptions pick_encoding_injective.
+Print Assumptions pick_registry_alloc_fresh.
+Print Assumptions pick_registry_two_allocs_distinct.
+Print Assumptions pick_registry_release_reusable.
+Print Assumptions pick_registry_reserve_explicit_fresh.
+Print Assumptions keyed_slot_tail_swap_preserves_nodup_and_membership.
+Print Assumptions hover_coalescer_stale_epoch_rejected.
+Print Assumptions hover_coalescer_latest_move_dispatched.
+Print Assumptions up_axis_map_invert_id.
+Print Assumptions h3_milli_floor_at_300_exact.
+Print Assumptions h3_milli_floor_strictly_inside_ball.
