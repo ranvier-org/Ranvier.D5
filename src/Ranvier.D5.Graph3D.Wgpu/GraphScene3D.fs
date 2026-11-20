@@ -530,12 +530,32 @@ module GraphScene3D =
                 if pts.Length >= 2 then
                     let rad = if assoc.IsBackbone then theme.BackboneTubeRadius else theme.SecondaryTubeRadius
                     let col = if assoc.IsBackbone then theme.BackboneEdgeColor else theme.SecondaryEdgeColor
-                    let arr = Array.zeroCreate<struct (Point3 * float32 * RgbaColor)> pts.Length
+                    let filtered = ResizeArray<struct (Point3 * float32 * RgbaColor)>(pts.Length)
+                    let mutable prevWorld: Vector3 voption = ValueNone
+                    let mutable totalLen = 0.0f
 
                     for i = 0 to pts.Length - 1 do
-                        arr[i] <- struct (pts[i], rad, col)
+                        let p = pts[i]
 
-                    chains.Add arr
+                        if isFinitePoint3 p then
+                            match Scale3D.tryMap scale p with
+                            | ValueSome w ->
+                                match prevWorld with
+                                | ValueNone ->
+                                    filtered.Add (struct (p, rad, col))
+                                    prevWorld <- ValueSome w
+                                | ValueSome prevW ->
+                                    let d = w - prevW
+                                    let distSq = d.LengthSquared ()
+
+                                    if distSq > 1e-10f then
+                                        filtered.Add (struct (p, rad, col))
+                                        totalLen <- totalLen + sqrt distSq
+                                        prevWorld <- ValueSome w
+                            | ValueNone -> ()
+
+                    if filtered.Count >= 2 && totalLen > 1e-5f then
+                        chains.Add (filtered.ToArray ())
 
             if chains.Count = 0 then
                 Ok MeshData.empty

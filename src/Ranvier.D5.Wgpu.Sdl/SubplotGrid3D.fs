@@ -239,7 +239,7 @@ type private SubplotCellRuntime
             ValueSome finalPass
         | _ -> ValueNone
 
-    member _.ApplyHoverHit(hit: PickHit voption) : bool =
+    member _.ApplyHoverSpikes(hit: PickHit voption) : bool =
         let mutable spikesDirty = false
 
         if cell.ShowHoverSpikes then
@@ -261,10 +261,14 @@ type private SubplotCellRuntime
             hasHoverSpikes <- false
             spikesDirty <- true
 
-        let hadDiff = hit.IsSome || lastHoverHit.IsSome
         lastHoverHit <- hit
+        spikesDirty
 
-        if hadDiff then
+    member this.ApplyHoverHit(hit: PickHit voption) : bool =
+        let prevWasSome = lastHoverHit.IsSome
+        let spikesDirty = this.ApplyHoverSpikes hit
+
+        if hit.IsSome || prevWasSome then
             cell.OnHoverHit |> Option.iter (fun cb -> cb hit)
 
         spikesDirty
@@ -674,7 +678,7 @@ type private SubplotGridInstance
                         if cs.Cell.ShowHoverSpikes || cs.Cell.OnClickHit.IsSome then
                             let hit = pickAtClient up.ClientX up.ClientY
 
-                            if cs.ApplyHoverHit hit then
+                            if cs.ApplyHoverSpikes hit then
                                 dirty <- true
                                 scheduleFrame ()
 

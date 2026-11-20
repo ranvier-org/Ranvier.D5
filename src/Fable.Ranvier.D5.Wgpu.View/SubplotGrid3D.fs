@@ -230,7 +230,7 @@ type private SubplotCellRuntime
             ValueSome finalPass
         | _ -> ValueNone
 
-    member _.ApplyHoverHit(hit: PickHit voption) : bool =
+    member _.ApplyHoverSpikes(hit: PickHit voption) : bool =
         let mutable spikesDirty = false
 
         if cell.ShowHoverSpikes then
@@ -252,10 +252,14 @@ type private SubplotCellRuntime
             hasHoverSpikes <- false
             spikesDirty <- true
 
-        let hadDiff = hit.IsSome || lastHoverHit.IsSome
         lastHoverHit <- hit
+        spikesDirty
 
-        if hadDiff then
+    member this.ApplyHoverHit(hit: PickHit voption) : bool =
+        let prevWasSome = lastHoverHit.IsSome
+        let spikesDirty = this.ApplyHoverSpikes hit
+
+        if hit.IsSome || prevWasSome then
             cell.OnHoverHit |> Option.iter (fun cb -> cb hit)
 
         spikesDirty
@@ -491,7 +495,7 @@ type private SubplotGridInstance
                         if not disposed && clickEpoch = hoverCoalescer.CurrentEpoch then
                             let cs = cellStates[idx]
 
-                            if cs.ApplyHoverHit hit then
+                            if cs.ApplyHoverSpikes hit then
                                 dirty <- true
                                 scheduleFrame ()
 
@@ -587,7 +591,10 @@ type private SubplotGridInstance
             | h -> canvas.setAttribute ("height", h)
 
             if not (isNull prevParent) then
-                prevParent.insertBefore (canvasNode, prevNext) |> ignore
+                if not (isNull prevNext) && obj.ReferenceEquals (prevNext.parentNode, prevParent) then
+                    prevParent.insertBefore (canvasNode, prevNext) |> ignore
+                else
+                    prevParent.appendChild canvasNode |> ignore
 
     member _.OnPointerDown(ev: PointerEvent) =
         if not disposed then

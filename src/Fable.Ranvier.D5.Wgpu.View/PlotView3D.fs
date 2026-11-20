@@ -587,7 +587,10 @@ type private PlotViewInstance3D
             | h -> canvas.setAttribute ("height", h)
 
             if not (isNull prevParent) then
-                prevParent.insertBefore (canvasNode, prevNext) |> ignore
+                if not (isNull prevNext) && obj.ReferenceEquals (prevNext.parentNode, prevParent) then
+                    prevParent.insertBefore (canvasNode, prevNext) |> ignore
+                else
+                    prevParent.appendChild canvasNode |> ignore
 
     member _.OnPointerDown(ev: PointerEvent) =
         if not disposed then

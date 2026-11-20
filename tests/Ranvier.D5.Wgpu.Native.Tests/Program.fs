@@ -961,23 +961,29 @@ let private runSubplotGridChecks () =
     Expect.equal cam0AfterCell1 cam0AfterCell0 "Cell 1 interaction leaves cam0 untouched"
     Expect.notEqual cam1AfterCell1 cam1AfterCell0 "Cell 1 orbit+wheel mutates cam1"
 
-    // Verify click pick routing exclusively to the clicked cell via PickPasses
+    // Verify click pick routing exclusively to the clicked cell via PickPasses WITHOUT firing OnHoverHit
     clickHits0.Clear ()
     clickHits1.Clear ()
+    hoverHits0.Clear ()
+    hoverHits1.Clear ()
     win.Host.Mouse (1, 117, 180, 0, 1, 0) |> ignore
     win.Host.Mouse (2, 117, 180, 0, 1, 0) |> ignore
     pumpFrames win 2
     let h0 = clickHits0 |> Seq.tryLast |> Option.bind (function ValueSome x -> Some x | _ -> None)
     Expect.equal (h0 |> Option.map (fun h -> h.PickId)) (Some 0x0A000001u) "Click in cell 0 hits cell 0 PickId"
     Expect.equal clickHits1.Count 0 "Click in cell 0 does not fire cell 1 OnClickHit"
+    Expect.equal hoverHits0.Count 0 "Click in cell 0 does not invoke OnHoverHit"
 
     clickHits0.Clear ()
+    hoverHits0.Clear ()
+    hoverHits1.Clear ()
     win.Host.Mouse (1, 362, 180, 0, 1, 0) |> ignore
     win.Host.Mouse (2, 362, 180, 0, 1, 0) |> ignore
     pumpFrames win 2
     let h1 = clickHits1 |> Seq.tryLast |> Option.bind (function ValueSome x -> Some x | _ -> None)
     Expect.equal (h1 |> Option.map (fun h -> h.PickId)) (Some 0x0B000002u) "Click in cell 1 hits cell 1 PickId"
     Expect.equal clickHits0.Count 0 "Click in cell 1 does not fire cell 0 OnClickHit"
+    Expect.equal hoverHits1.Count 0 "Click in cell 1 does not invoke OnHoverHit"
 
     mounted.Dispose ()
     mounted.Dispose ()

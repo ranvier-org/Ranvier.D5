@@ -120,7 +120,14 @@ module ReactiveGraph3D =
         match shading with
         | ShadingMode.Unlit -> struct (0.5f, 0.0f, InstanceFlags.Unlit)
         | ShadingMode.ExactUnlit -> struct (0.5f, 0.0f, InstanceFlags.Unlit ||| InstanceFlags.ExactColor)
-        | ShadingMode.Lit (r, e) -> struct (r, e, InstanceFlags.None)
+        | ShadingMode.Lit (r, e) ->
+            if not (Double.IsFinite (float r)) || r < 0.0f then
+                raise (ArgumentOutOfRangeException ("shading", "Shading roughness must be finite and non-negative."))
+
+            if not (Double.IsFinite (float e)) || e < 0.0f then
+                raise (ArgumentOutOfRangeException ("shading", "Shading emissive must be finite and non-negative."))
+
+            struct (r, e, InstanceFlags.None)
 
     /// <summary>
     /// Binds a reactive <c>DiagramLayout3D</c> into keyed node glyphs, translucent <c>DrawBeforeLines</c> group boxes,
@@ -140,6 +147,7 @@ module ReactiveGraph3D =
         if isNull (box scale) then nullArg (nameof scale)
         if isNull (box selectedIds) then nullArg (nameof selectedIds)
         if isNull (box layout) then nullArg (nameof layout)
+        let _ = tryShadingParams theme.NodeShading
 
         let nodeColl = Api.createKeyedCollection (fun struct (k: string, _: GlyphDatum3D) -> k)
         let groupColl = Api.createKeyedCollection (fun struct (k: string, _: BoxDatum3D) -> k)
@@ -400,7 +408,7 @@ module ReactiveGraph3D =
         (options: SinkOptions3D)
         (shrinkFactor: unit -> float)
         (colorOf: VoronoiTreemap3DCell<'Id> -> RgbaColor)
-        (wireframeColor: RgbaColor voption)
+        (wireframeColor: (VoronoiTreemap3DCell<'Id> -> RgbaColor) option)
         (shading: ShadingMode)
         (scale: unit -> Scale3D)
         (cells: unit -> IReadOnlyList<VoronoiTreemap3DCell<'Id>>)
@@ -411,6 +419,7 @@ module ReactiveGraph3D =
         if isNull (box colorOf) then nullArg (nameof colorOf)
         if isNull (box scale) then nullArg (nameof scale)
         if isNull (box cells) then nullArg (nameof cells)
+        let _ = tryShadingParams shading
 
         let meshHandle = context.UploadMesh MeshData.empty
         let meshBatch = context.CreateSingleBatch (meshHandle, options.BlendMode, options.DoubleSided, drawBeforeLines = options.DrawBeforeLines)
@@ -419,11 +428,11 @@ module ReactiveGraph3D =
 
         let wireBatchOpt =
             match wireframeColor with
-            | ValueSome _ ->
+            | Some _ ->
                 let lb = context.CreateLineBatch ()
                 tryRegisterOwnerCleanup lb.Dispose
                 ValueSome lb
-            | ValueNone -> ValueNone
+            | None -> ValueNone
 
         let mutable prevWireCount = 0
 
@@ -446,8 +455,8 @@ module ReactiveGraph3D =
                 meshBatch.Resize 0
 
             match wireBatchOpt, wireframeColor with
-            | ValueSome lb, ValueSome wCol ->
-                let wire = GraphScene3D.packVoronoiWireframe curScale curShrink (fun _ -> wCol) options.IgnoreSectionPlane curCells
+            | ValueSome lb, Some wCol ->
+                let wire = GraphScene3D.packVoronoiWireframe curScale curShrink wCol options.IgnoreSectionPlane curCells
 
                 if wire.Length > 0 then
                     lb.UpdateVertices wire.Span

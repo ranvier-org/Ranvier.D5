@@ -337,7 +337,7 @@ let graphScene3DTests =
                         let dBind = ReactiveGraph3D.bindDiagram ctx opts GraphTheme3D.darkDefault (fun () -> sc0) (fun () -> sSig.Value) (fun () -> lSig.Value)
                         let cBind = ReactiveGraph3D.bindCodeCity ctx opts (fun _ -> RgbaColor.white) ShadingMode.Unlit (fun () -> Set.empty) (fun () -> sc0) (fun () -> buildings0)
                         let tBind = ReactiveGraph3D.bindTreemap3D ctx opts (fun _ -> RgbaColor.white) ShadingMode.Unlit true None (fun () -> sc0) (fun () -> cuboids0)
-                        let vBind = ReactiveGraph3D.bindVoronoiTreemap3D ctx (opts |> SinkOptions3D.withPickId 0x05000001u) (fun () -> shSig.Value) (fun _ -> RgbaColor.white) (ValueSome RgbaColor.white) ShadingMode.Unlit (fun () -> sc0) (fun () -> vtCells0)
+                        let vBind = ReactiveGraph3D.bindVoronoiTreemap3D ctx (opts |> SinkOptions3D.withPickId 0x05000001u) (fun () -> shSig.Value) (fun _ -> RgbaColor.white) (Some (fun _ -> RgbaColor.white)) ShadingMode.Unlit (fun () -> sc0) (fun () -> vtCells0)
                         let clSink = ReactiveGraph3D.bindClusteredCloud ctx opts (fun _ -> 8.0f) (fun () -> Set.empty) (fun () -> sc0) (fun () -> clustered0)
                         lSig, sSig, shSig, dBind, cBind, tBind, vBind, clSink, sc0)
 
@@ -366,4 +366,101 @@ let graphScene3DTests =
                 let nodePick = { PickHit.PickId = (uint32 diagBind.NodeSink.LayerId <<< 24) ||| 1u; WorldPosition = Vector3.Zero }
                 let resolvedNode = regRef.TryResolveKeyed<string> (sc, nodePick)
                 Expect.isTrue resolvedNode.IsSome "diagram node pick resolves via PickRegistry3D"
+
+            testCase "buildAssociationTubes and ReactiveGraph3D.bindDiagram skip self-loop and out-of-domain associations without dropping valid edge tubes"
+            <| fun () ->
+                let pNode (id: string) (pos: Point3) : PositionedNode3D =
+                    {
+                        Id = id
+                        Kind = NodeKind.Standard
+                        Center = pos
+                        Bounds = Bounds3.create (pos.X - 0.5) (pos.Y - 0.5) (pos.Z - 0.5) 1.0 1.0 1.0
+                        Radius = 0.5
+                        ScaleFactor = 1.0
+                        ParentGroup = None
+                        Layer = None
+                    }
+
+                let mkAssoc (id: string) (s: string) (t: string) (backbone: bool) (pts: Point3 list) : RoutedAssociation3D =
+                    {
+                        Id = id
+                        Source = { NodeId = s; PortId = None }
+                        Target = { NodeId = t; PortId = None }
+                        Kind = AssociationKind.Transition
+                        IsBackbone = backbone
+                        Points = Point3Chain.ofList pts
+                        Waypoints = pts
+                    }
+
+                let posScale = Scale3D.create BoxAspect.Cube UpAxis.YUp (AxisScale3D.log 10.0 (1.0, 20.0)) (AxisScale3D.linear (-5.0, 5.0)) (AxisScale3D.linear (-5.0, 5.0))
+
+                let layoutWithNoise: DiagramLayout3D =
+                    {
+                        Nodes = [ pNode "a" (Point3.create 2.0 0.0 0.0); pNode "b" (Point3.create 10.0 1.0 0.0) ]
+                        Groups = []
+                        Associations =
+                            [
+                                mkAssoc "valid" "a" "b" true [ Point3.create 2.0 0.0 0.0; Point3.create 10.0 1.0 0.0 ]
+                                mkAssoc "self_loop" "a" "a" false [ Point3.create 2.0 0.0 0.0; Point3.create 2.0 0.0 0.0 ]
+                                mkAssoc "out_of_domain" "a" "b" false [ Point3.create -5.0 0.0 0.0; Point3.create 10.0 1.0 0.0 ]
+                            ]
+                        Bounds = Bounds3.create 1.0 -5.0 -5.0 19.0 10.0 10.0
+                    }
+
+                let mixedTubeMesh =
+                    GraphScene3D.buildAssociationTubes posScale 6 GraphTheme3D.darkDefault layoutWithNoise
+                    |> unwrapOk "mixed buildAssociationTubes"
+
+                Expect.isGreaterThan mixedTubeMesh.Vertices.Length 0 "valid edge still produces tube vertices alongside self-loop & omitted association"
+                Expect.isGreaterThan mixedTubeMesh.Indices.Length 0 "valid edge still produces tube indices"
+
+                let onlySelfLoopLayout: DiagramLayout3D =
+                    { layoutWithNoise with
+                        Associations = [ mkAssoc "self_loop" "a" "a" false [ Point3.create 2.0 0.0 0.0; Point3.create 2.0 0.0 0.0 ] ]
+                    }
+
+                let emptyTubeMesh =
+                    GraphScene3D.buildAssociationTubes posScale 6 GraphTheme3D.darkDefault onlySelfLoopLayout
+                    |> unwrapOk "self-loop-only buildAssociationTubes"
+
+                Expect.equal emptyTubeMesh.Vertices.Length 0 "degenerate-only edges produce empty MeshData"
+
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64)
+                use graph = new Graph ()
+                let tubeTheme = GraphTheme3D.darkDefault |> GraphTheme3D.withEdgeTubes true 6
+
+                let dBind =
+                    graph.Run (fun () ->
+                        ReactiveGraph3D.bindDiagram ctx SinkOptions3D.defaultValue tubeTheme (fun () -> posScale) (fun () -> Set.empty) (fun () -> layoutWithNoise))
+
+                Expect.isTrue dBind.EdgeTubeBatch.IsSome "EdgeTubeBatch created when UseEdgeTubes = true"
+                Expect.isGreaterThan dBind.EdgeTubeBatch.Value.Count 0 "bindDiagram uploads edge tubes even with self-loop & out-of-domain associations"
+
+                Expect.throwsT<ArgumentOutOfRangeException>
+                    (fun () ->
+                        graph.Run (fun () ->
+                            ReactiveGraph3D.bindVoronoiTreemap3D
+                                ctx
+                                SinkOptions3D.defaultValue
+                                (fun () -> 0.85)
+                                (fun _ -> RgbaColor.white)
+                                None
+                                (ShadingMode.Lit (-0.1f, 0.0f))
+                                (fun () -> posScale)
+                                (fun () -> []))
+                        |> ignore)
+                    "bindVoronoiTreemap3D rejects negative roughness in ShadingMode.Lit"
+
+                Expect.throwsT<ArgumentOutOfRangeException>
+                    (fun () ->
+                        graph.Run (fun () ->
+                            ReactiveGraph3D.bindDiagram
+                                ctx
+                                SinkOptions3D.defaultValue
+                                { GraphTheme3D.darkDefault with NodeShading = ShadingMode.Lit (0.2f, Single.NaN) }
+                                (fun () -> posScale)
+                                (fun () -> Set.empty)
+                                (fun () -> layoutWithNoise))
+                        |> ignore)
+                    "bindDiagram rejects non-finite emissive in ShadingMode.Lit"
         ]
