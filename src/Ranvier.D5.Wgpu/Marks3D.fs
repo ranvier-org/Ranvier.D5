@@ -634,6 +634,47 @@ module internal MarksKernel =
     let tryPackSegment (scale: Scale3D) (pair: struct (Point3 * Point3 * RgbaColor)) (out: LineVertex3D array) (vertexSlot: int) : bool =
         tryPackSegmentWithSection false scale pair out vertexSlot
 
+    let tryPackArrow (scale: Scale3D) (pickId: uint32) (d: ArrowDatum3D) (out: Instance3D array) (slot: int) : bool =
+        let struct (shadeOk, roughness, emissive, flags) = shadingParams d.Shading d.Selected
+
+        if
+            shadeOk
+            && isFinitePoint3 d.Origin
+            && isFinitePoint3 d.Vector
+            && Check3D.isFinite32 d.ShaftRadius
+            && Check3D.isFinite32 d.LengthScale
+            && d.ShaftRadius > 0.0f
+            && d.LengthScale > 0.0f
+            && isFiniteColor d.Color
+        then
+            let tipX = d.Origin.X + d.Vector.X
+            let tipY = d.Origin.Y + d.Vector.Y
+            let tipZ = d.Origin.Z + d.Vector.Z
+
+            if Check3D.isFinite tipX && Check3D.isFinite tipY && Check3D.isFinite tipZ then
+                let tipPt = Point3.create tipX tipY tipZ
+
+                match Scale3D.tryMap scale d.Origin with
+                | ValueSome worldOrigin ->
+                    match Scale3D.tryMap scale tipPt with
+                    | ValueSome worldTip ->
+                        let disp = (worldTip - worldOrigin) * d.LengthScale
+                        let lenSq = disp.LengthSquared ()
+
+                        if Check3D.isFinite32 lenSq && lenSq >= 1e-12f then
+                            let arrowLen = MathF.Sqrt lenSq
+                            let worldMat = Orientation3D.anisotropicMatrix worldOrigin disp d.ShaftRadius arrowLen
+                            out[slot] <- Instance3D.fromMatrix worldMat d.Color roughness pickId flags emissive
+                            true
+                        else
+                            false
+                    | ValueNone -> false
+                | ValueNone -> false
+            else
+                false
+        else
+            false
+
 /// <summary>Billboard scatter point packer emitting <c>DiscInstance3D</c> slices with optional translucent depth sorting.</summary>
 [<RequireQualifiedAccess>]
 module Scatter3D =
@@ -999,39 +1040,9 @@ module Glyph3D =
 
             for i = 0 to items.Length - 1 do
                 let d = items[i]
-                let struct (shadeOk, roughness, emissive, flags) = MarksKernel.shadingParams d.Shading d.Selected
 
-                if
-                    shadeOk
-                    && MarksKernel.isFinitePoint3 d.Origin
-                    && MarksKernel.isFinitePoint3 d.Vector
-                    && Check3D.isFinite32 d.ShaftRadius
-                    && Check3D.isFinite32 d.LengthScale
-                    && d.ShaftRadius > 0.0f
-                    && d.LengthScale > 0.0f
-                    && MarksKernel.isFiniteColor d.Color
-                then
-                    let tipX = d.Origin.X + d.Vector.X
-                    let tipY = d.Origin.Y + d.Vector.Y
-                    let tipZ = d.Origin.Z + d.Vector.Z
-
-                    if Check3D.isFinite tipX && Check3D.isFinite tipY && Check3D.isFinite tipZ then
-                        let tipPt = Point3.create tipX tipY tipZ
-
-                        match Scale3D.tryMap scale d.Origin with
-                        | ValueSome worldOrigin ->
-                            match Scale3D.tryMap scale tipPt with
-                            | ValueSome worldTip ->
-                                let disp = (worldTip - worldOrigin) * d.LengthScale
-                                let lenSq = disp.LengthSquared ()
-
-                                if Check3D.isFinite32 lenSq && lenSq >= 1e-12f then
-                                    let arrowLen = MathF.Sqrt lenSq
-                                    let worldMat = Orientation3D.anisotropicMatrix worldOrigin disp d.ShaftRadius arrowLen
-                                    out[count] <- Instance3D.fromMatrix worldMat d.Color roughness d.PickId flags emissive
-                                    count <- count + 1
-                            | ValueNone -> ()
-                        | ValueNone -> ()
+                if MarksKernel.tryPackArrow scale d.PickId d out count then
+                    count <- count + 1
 
             MarksKernel.trimMemory out count
 

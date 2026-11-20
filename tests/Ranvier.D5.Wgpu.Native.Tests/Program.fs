@@ -660,9 +660,143 @@ let private runSubRectDprAndKeyMapChecks () =
     wgpu.Dispose ()
     (win :> IDisposable).Dispose ()
 
+let private runLayersAndPolishChecks () =
+    let win = Window.Create ("D5WgpuLayersPolish", 480, 360, hidden = true)
+    let wgpu = WgpuSdlSurface.CreateContext win
+    let graph = new Graph ()
+
+    let scale = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+    let ramp = ColorRamp.viridis (-1.0, 1.0)
+
+    let clickHits = ResizeArray<PickHit voption>()
+    let surfGrid =
+        SurfaceGrid.fromFunction3D 16 16 (-0.8, 0.8) (-0.8, 0.8) (fun _ _ -> 0.5)
+        |> unwrapOk "layersPolishGrid"
+
+    let cam, surfBatch, axisSpecSig =
+        graph.Run (fun () ->
+            let reg = PickRegistry3D ()
+            let rev = Reactive3D.createRevision ()
+            let opts = SinkOptions3D.defaultValue |> SinkOptions3D.withRegistry reg |> SinkOptions3D.withRevision rev |> SinkOptions3D.withPickId 101u
+            let c = Reactive3D.editableCamera (fun () -> PlotCamera3D.defaultValue)
+            let specSig = Api.createSignal { SurfaceSpec.create scale ramp with PickId = 101u; Shading = ShadingMode.Unlit }
+            let gridSig = Api.createSignal surfGrid
+            let s = Reactive3D.bindSurfaceWith wgpu opts (fun () -> specSig.Value) (fun () -> gridSig.Value)
+            let aSig = Api.createSignal (Axis3D.defaultSpec scale)
+            c, s, aSig)
+
+    let cbSpec = ColorbarSpec3D.vertical (Bounds.create 420.0 40.0 16.0 180.0) "Z" (-1.0, 1.0) ramp
+    let container = win.Host.Document.createElement "div"
+    win.Host.Document.body.appendChild container |> ignore
+
+    // Part A: ShowHoverSpikes = false and OnHoverHit = None -> 0 hover GPU picks on mouse move; child <input> blocks drag/capture; click still picks
+    let clickOnlyConfig =
+        PlotViewConfig3D.create 480 360 cam
+        |> PlotViewConfig3D.withHoverSpikes false
+        |> PlotViewConfig3D.withOnClickHit clickHits.Add
+
+    let mounted1 =
+        Mounting.mount
+            graph
+            None
+            (fun errors -> raise (AggregateException errors))
+            container
+            None
+            (fun ctx ->
+                Program.run
+                    (PlotView3D.create win wgpu clickOnlyConfig (fun () ->
+                        PlotPass3D.ofLayers
+                            axisSpecSig.Value
+                            [
+                                Layer3D.surface surfBatch
+                                Layer3D.colorbar cbSpec
+                            ]))
+                    ctx.Backend)
+
+    pumpFrames win 2
+    Expect.isNotNull (container.querySelector "[data-d5-key='legend3d/colorbar/bar']") "PlotPass3D.ofLayers mounted colorbar SVG bar"
+
+    let picksBeforeHoverMove = PlotView3DStats.PickCalls
+    win.Host.Mouse (0, 240, 180, 0, 0, 0) |> ignore
+    win.Host.Mouse (0, 245, 182, 0, 0, 0) |> ignore
+    pumpFrames win 2
+    Expect.equal PlotView3DStats.PickCalls picksBeforeHoverMove "click-only PlotView3D (ShowHoverSpikes=false, OnHoverHit=None) issues 0 hover GPU picks"
+
+    // Child <input> pointerdown + move must NOT start dragging or orbit camera
+    let plotRoot = container.querySelector "[tabindex='0']"
+    let childInput = win.Host.Document.createElement "input"
+    childInput.setAttribute ("style", "position:absolute;left:10px;top:10px;width:120px;height:40px;")
+    plotRoot.appendChild childInput |> ignore
+    pumpFrames win 1
+    let camBeforeInputDrag = graph.Run (fun () -> cam.Value)
+    win.Host.Mouse (1, 40, 25, 0, 1, 0) |> ignore
+    win.Host.Mouse (0, 320, 210, 0, 0, 0) |> ignore
+    win.Host.Mouse (2, 320, 210, 0, 1, 0) |> ignore
+    pumpFrames win 1
+    Expect.equal (graph.Run (fun () -> cam.Value)) camBeforeInputDrag "pointerdown on child <input> does not start camera drag"
+    plotRoot.removeChild childInput |> ignore
+
+    // Primary click still fires OnClickHit and picks static PickId 101u from PlotPass3D.ofLayers
+    clickHits.Clear ()
+    win.Host.Mouse (1, 240, 180, 0, 1, 0) |> ignore
+    win.Host.Mouse (2, 240, 180, 0, 1, 0) |> ignore
+    pumpFrames win 2
+    let clickHit =
+        clickHits
+        |> Seq.tryLast
+        |> Option.bind (function ValueSome h -> Some h | ValueNone -> None)
+        |> Option.defaultWith (fun () -> failtest "Expected OnClickHit on PlotPass3D.ofLayers surface")
+    Expect.equal clickHit.PickId 101u "click-only plot still executes OnClickHit pick"
+
+    mounted1.Dispose ()
+    container.innerHTML <- ""
+
+    // Part B: Switching AxisSpec clears spikeLineBatch immediately so prior spikes do not persist across scene switch
+    let spikesConfig =
+        PlotViewConfig3D.create 480 360 cam
+        |> PlotViewConfig3D.withHoverSpikes true
+
+    let mounted2 =
+        Mounting.mount
+            graph
+            None
+            (fun errors -> raise (AggregateException errors))
+            container
+            None
+            (fun ctx ->
+                Program.run
+                    (PlotView3D.create win wgpu spikesConfig (fun () -> PlotPass3D.ofLayers axisSpecSig.Value [ Layer3D.surface surfBatch ]))
+                    ctx.Backend)
+
+    pumpFrames win 2
+    let centerPt = Scale3D.map scale (Point3.create 0.0 0.0 0.5)
+    let centerScr = Camera3D.projectToScreen wgpu.Width wgpu.Height (PlotCamera3D.toCamera3D scale PlotCamera3D.defaultValue) centerPt |> ValueOption.get
+    let struct (winPxW, winPxH) = win.PixelSize
+    let hoverCssX = int (MathF.Round (centerScr.X / float32 winPxW * 480.0f))
+    let hoverCssY = int (MathF.Round (centerScr.Y / float32 winPxH * 360.0f))
+
+    let pixelsBeforeSpikes, _, _ = readWindowPixels win
+    win.Host.Mouse (0, hoverCssX, hoverCssY, 0, 0, 0) |> ignore
+    pumpFrames win 2
+    let pixelsWithSpikes, _, _ = readWindowPixels win
+    Expect.isFalse (pixelsBeforeSpikes = pixelsWithSpikes) "hovering draws spikeLineBatch before AxisSpec switch"
+
+    // Switch AxisSpec to a fresh reference with identical framing -> stale spikeLineBatch must clear back to baseline pixels!
+    graph.Run (fun () -> axisSpecSig.Value <- Axis3D.defaultSpec scale)
+    pumpFrames win 2
+    let pixelsAfterSwitch, _, _ = readWindowPixels win
+    Expect.equal pixelsAfterSwitch pixelsBeforeSpikes "switching AxisSpec reference clears prior spikeLineBatch pixels"
+
+    mounted2.Dispose ()
+    win.Host.Cycle ()
+    graph.Dispose ()
+    wgpu.Dispose ()
+    (win :> IDisposable).Dispose ()
+
 [<EntryPoint>]
 let main _ =
     runNativeAcceptance ()
     runSubRectDprAndKeyMapChecks ()
-    printfn "Ranvier.D5.Wgpu.Native.Tests passed: PlotView3D live wave, DOM identity, 0 mark wheel listeners, idle RAF, hover coalescing, keyboard hygiene, ExtraOverlay, DPR resize, and safe idempotent disposal."
+    runLayersAndPolishChecks ()
+    printfn "Ranvier.D5.Wgpu.Native.Tests passed: PlotView3D live wave, DOM identity, 0 mark wheel listeners, idle RAF, hover coalescing, keyboard hygiene, ExtraOverlay, DPR resize, PlotPass3D.ofLayers, B0 polish, and safe idempotent disposal."
     0

@@ -18,6 +18,7 @@
     <Compile Include="Interaction3D.fs" />
     <Compile Include="Reactive3D.fs" />
     <Compile Include="Legend3D.fs" />
+    <Compile Include="Plot3D.fs" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Ranvier.D5.Wgpu.Tests" />

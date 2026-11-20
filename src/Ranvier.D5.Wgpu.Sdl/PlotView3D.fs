@@ -2,6 +2,7 @@ namespace Ranvier.D5.Wgpu.Sdl
 
 open System
 open System.Numerics
+open System.Threading
 open Ranvier
 open Ranvier.D5
 open Ranvier.D5.View
@@ -42,7 +43,7 @@ type PlotPass3D =
         ExtraOverlay: Scene voption
     }
 
-/// <summary>Constructors for <c>PlotPass3D</c>.</summary>
+/// <summary>Constructors and pipeable modifiers for <c>PlotPass3D</c>.</summary>
 [<RequireQualifiedAccess>]
 module PlotPass3D =
     /// <summary>Creates a <c>PlotPass3D</c> for <c>axisSpec</c> with dark backdrop, studio lighting, no section plane, and empty extra layers.</summary>
@@ -58,6 +59,35 @@ module PlotPass3D =
             ExtraOverlayMarks = []
             ExtraOverlay = ValueNone
         }
+
+    let private fromCompiled (axisSpec: Axis3DSpec) (compiled: CompiledPlotLayers3D) : PlotPass3D =
+        { create axisSpec with
+            ExtraBatches = compiled.Batches
+            ExtraLines = compiled.Lines
+            ExtraDiscs = compiled.Discs
+            ExtraOverlayMarks = compiled.OverlayMarks
+            ExtraOverlay = compiled.ExtraOverlay
+        }
+
+    /// <summary>Creates a <c>PlotPass3D</c> compiling composable <c>Layer3D</c> entries alongside <c>axisSpec</c>.</summary>
+    let ofLayers (axisSpec: Axis3DSpec) (layers: seq<Layer3D>) : PlotPass3D =
+        Plot3D.layers layers |> fromCompiled axisSpec
+
+    /// <summary>Creates a <c>PlotPass3D</c> compiling composable <c>Layer3D</c> entries using explicit viewport overlay bounds.</summary>
+    let ofLayersSized (viewportWidth: float) (viewportHeight: float) (axisSpec: Axis3DSpec) (layers: seq<Layer3D>) : PlotPass3D =
+        Plot3D.compile viewportWidth viewportHeight layers |> fromCompiled axisSpec
+
+    /// <summary>Sets the viewport clear color on <c>pass</c>.</summary>
+    let withClear (clearColor: RgbaColor) (pass: PlotPass3D) : PlotPass3D =
+        { pass with ClearColor = clearColor }
+
+    /// <summary>Sets or clears the directional studio lighting rig on <c>pass</c>.</summary>
+    let withLighting (lighting: LightingRig voption) (pass: PlotPass3D) : PlotPass3D =
+        { pass with Lighting = lighting }
+
+    /// <summary>Sets or clears the world-space section clipping plane on <c>pass</c>.</summary>
+    let withSection (sectionPlane: SectionPlane voption) (pass: PlotPass3D) : PlotPass3D =
+        { pass with SectionPlane = sectionPlane }
 
 /// <summary>Keyboard shortcut handling policy for <c>PlotView3D</c>.</summary>
 [<RequireQualifiedAccess>]
@@ -138,44 +168,6 @@ type private PlotViewProps3D =
         ReadScene: unit -> PlotPass3D
     }
 
-module private PlotView3DKernel =
-    let syncMergedPrefix<'T when 'T: not struct>
-        (prefix1: 'T)
-        (prefix2Opt: 'T voption)
-        (extra: ReadOnlyMemory<'T>)
-        (cachedExtra: byref<'T array>)
-        (merged: byref<'T array>)
-        =
-        let span = extra.Span
-        let mutable same = span.Length = cachedExtra.Length
-
-        if same then
-            let mutable i = 0
-
-            while same && i < span.Length do
-                if not (Object.ReferenceEquals (span[i], cachedExtra[i])) then
-                    same <- false
-
-                i <- i + 1
-
-        if not same then
-            let prefixCount = if prefix2Opt.IsSome then 2 else 1
-            let nextExtra = Array.zeroCreate<'T> span.Length
-            let nextMerged = Array.zeroCreate<'T> (prefixCount + span.Length)
-            nextMerged[0] <- prefix1
-
-            match prefix2Opt with
-            | ValueSome prefix2 -> nextMerged[1] <- prefix2
-            | ValueNone -> ()
-
-            for i = 0 to span.Length - 1 do
-                let item = span[i]
-                nextExtra[i] <- item
-                nextMerged[prefixCount + i] <- item
-
-            cachedExtra <- nextExtra
-            merged <- nextMerged
-
 [<Sealed>]
 type private PlotViewInstance3D
     (
@@ -196,7 +188,11 @@ type private PlotViewInstance3D
     do PlotView3DStats.PanelDrawBeforeLines <- panelBatch.DrawBeforeLines
     let axisLineBatch = context.CreateLineBatch ()
     let spikeLineBatch = context.CreateLineBatch ()
+    let axisMemo = Axis3DMemo (panelBatch, axisLineBatch)
+    let inputKernel = PlotInputKernel3D ()
     let hoverCoalescer = HoverPickCoalescer ()
+    let batchPrefixCache = ScenePrefixCache (panelBatch, ValueNone)
+    let linePrefixCache = ScenePrefixCache (axisLineBatch, ValueSome spikeLineBatch)
 
     let mutable disposed = false
     let mutable dirty = true
@@ -204,35 +200,15 @@ type private PlotViewInstance3D
     let mutable surfaceOpt: WgpuSdlSurface option = None
     let mutable latestCam: Camera3D option = None
     let mutable latestPass: PlotPass3D option = None
-    let mutable latestFrame: AxisFrame3D option = None
     let mutable hasHoverSpikes = false
     let mutable lastHoverHit: PickHit voption = ValueNone
     let mutable autoFocusedOnMount = false
     let mutable lastCanvasW = config.Width
     let mutable lastCanvasH = config.Height
-
-    let mutable dragging = false
-    let mutable dragMoved = false
-    let mutable dragPan = false
-    let mutable activePointerId = -1
-    let mutable lastClientX = 0.0
-    let mutable lastClientY = 0.0
-    let mutable downClientX = 0.0
-    let mutable downClientY = 0.0
-
-    let mutable cachedExtraBatches: InstanceBatch array = [||]
-    let mutable mergedBatches: InstanceBatch array = [| panelBatch |]
-    let mutable cachedExtraLines: LineBatch array = [||]
-    let mutable mergedLines: LineBatch array = [| axisLineBatch; spikeLineBatch |]
-    let mutable hasCachedAxis = false
-    let mutable cachedAxisSpec = Unchecked.defaultof<Axis3DSpec>
-    let mutable cachedGpuCam = Unchecked.defaultof<Camera3D>
-    let mutable cachedWidth = -1
-    let mutable cachedHeight = -1
-    let mutable cachedFrame = Unchecked.defaultof<AxisFrame3D>
-    let mutable cachedBaseOverlay = Unchecked.defaultof<Scene>
     let mutable prevHadExtraMarks = false
     let mutable prevExtraScene: Scene voption = ValueNone
+
+    let allowHoverPick = config.ShowHoverSpikes || config.OnHoverHit.IsSome
 
     let buildScenePass (cam: Camera3D) (pass: PlotPass3D) (includeAxis: bool) =
         let basePass =
@@ -251,19 +227,16 @@ type private PlotViewInstance3D
             | ValueNone -> withLight
 
         if includeAxis then
-            PlotView3DKernel.syncMergedPrefix panelBatch ValueNone pass.ExtraBatches &cachedExtraBatches &mergedBatches
-            PlotView3DKernel.syncMergedPrefix axisLineBatch (ValueSome spikeLineBatch) pass.ExtraLines &cachedExtraLines &mergedLines
-
             withSec
-            |> ScenePass.withBatches mergedBatches
-            |> ScenePass.withLines mergedLines
+            |> ScenePass.withBatchMemory (batchPrefixCache.Sync pass.ExtraBatches)
+            |> ScenePass.withLineMemory (linePrefixCache.Sync pass.ExtraLines)
         else
             withSec |> ScenePass.withBatchMemory pass.ExtraBatches
 
     let renderNow () =
         if not disposed then
-            match surfaceOpt, latestCam, latestPass, latestFrame with
-            | Some surface, Some cam, Some pass, Some _ when not surface.IsDisposed && not context.IsDisposed ->
+            match surfaceOpt, latestCam, latestPass, axisMemo.CurrentFrame with
+            | Some surface, Some cam, Some pass, ValueSome _ when not surface.IsDisposed && not context.IsDisposed ->
                 dirty <- false
                 let scenePass = buildScenePass cam pass true
                 WgpuSdlSurface.render surface scenePass |> ignore
@@ -322,36 +295,27 @@ type private PlotViewInstance3D
                         ()
             | None -> ()
 
-    let applyOverlayMarks (logicalW: int) (logicalH: int) (extraMarks: Mark list) =
+    let applyOverlayMarks (logicalW: int) (logicalH: int) (baseOverlay: Scene) (extraMarks: Mark list) =
         let hasExtraMarks = not (List.isEmpty extraMarks)
-
-        let overlay =
-            if not hasExtraMarks then
-                cachedBaseOverlay
-            else
-                Scene.create
-                    (float logicalW)
-                    (float logicalH)
-                    (Scene.title cachedBaseOverlay)
-                    (Scene.marks cachedBaseOverlay @ extraMarks)
-
-        overlaySig.Value <- overlay
+        overlaySig.Value <- Plot3D.composeOverlay logicalW logicalH baseOverlay extraMarks
         prevHadExtraMarks <- hasExtraMarks
 
-    let rebuildAxisFrame (axisSpec: Axis3DSpec) (logicalW: int) (logicalH: int) (gpuCam: Camera3D) (extraMarks: Mark list) =
-        let nextFrame = Axis3D.build axisSpec logicalW logicalH gpuCam
-        panelBatch.UpdateInstances ((Axis3D.panelInstances nextFrame).Span)
-        axisLineBatch.UpdateVertices ((Axis3D.lineVertices nextFrame).Span)
-        let nextBaseOverlay = Axis3D.overlayScene (float logicalW) (float logicalH) nextFrame
-        hasCachedAxis <- true
-        cachedAxisSpec <- axisSpec
-        cachedGpuCam <- gpuCam
-        cachedWidth <- logicalW
-        cachedHeight <- logicalH
-        cachedFrame <- nextFrame
-        cachedBaseOverlay <- nextBaseOverlay
-        latestFrame <- Some nextFrame
-        applyOverlayMarks logicalW logicalH extraMarks
+    let updateAxisState (axisSpec: Axis3DSpec) (logicalW: int) (logicalH: int) (gpuCam: Camera3D) (extraMarks: Mark list) =
+        let hadAxisBefore = axisMemo.HasCached
+        let update = axisMemo.Update (axisSpec, logicalW, logicalH, gpuCam)
+
+        if hadAxisBefore && update.AxisSpecChanged then
+            hoverCoalescer.AdvanceEpoch ()
+            lastHoverHit <- ValueNone
+
+            if hasHoverSpikes then
+                spikeLineBatch.Resize 0
+                hasHoverSpikes <- false
+
+        if update.Rebuilt || prevHadExtraMarks || not (List.isEmpty extraMarks) then
+            applyOverlayMarks logicalW logicalH update.BaseOverlay extraMarks
+
+        update.Rebuilt
 
     let syncViewport () =
         if not disposed && not context.IsDisposed then
@@ -374,22 +338,23 @@ type private PlotViewInstance3D
                     dirty <- true
 
                 if lastCanvasW <> targetDevW || lastCanvasH <> targetDevH then
-                    lastCanvasW <- targetDevW
-                    lastCanvasH <- targetDevH
-
                     match canvasRef.Current with
                     | Some canvasEl ->
+                        lastCanvasW <- targetDevW
+                        lastCanvasH <- targetDevH
                         canvasEl.setAttribute ("width", string targetDevW)
                         canvasEl.setAttribute ("height", string targetDevH)
                     | None -> ()
             | _ -> ()
 
-            if hasCachedAxis && (logicalW <> cachedWidth || logicalH <> cachedHeight) then
-                match latestPass with
-                | Some pass ->
-                    rebuildAxisFrame cachedAxisSpec logicalW logicalH cachedGpuCam pass.ExtraOverlayMarks
+            match axisMemo.CurrentSpec, latestCam, latestPass with
+            | ValueSome spec, Some gpuCam, Some pass ->
+                let update = axisMemo.Update (spec, logicalW, logicalH, gpuCam)
+
+                if update.Rebuilt then
+                    applyOverlayMarks logicalW logicalH update.BaseOverlay pass.ExtraOverlayMarks
                     dirty <- true
-                | None -> ()
+            | _ -> ()
 
     let pickAtClient (clientX: float) (clientY: float) : PickHit voption =
         if disposed || context.IsDisposed then
@@ -403,14 +368,14 @@ type private PlotViewInstance3D
                 let px = Math.Clamp (int (Math.Round (nx * float context.Width)), 0, max 0 (context.Width - 1))
                 let py = Math.Clamp (int (Math.Round (ny * float context.Height)), 0, max 0 (context.Height - 1))
                 let pickPass = buildScenePass cam pass false
-                PlotView3DStats.PickCalls <- PlotView3DStats.PickCalls + 1L
+                Interlocked.Increment (&PlotView3DStats.PickCalls) |> ignore
                 WgpuContext.pick px py context pickPass
             | _ -> ValueNone
 
     let applyHoverSpikes (hit: PickHit voption) =
         if config.ShowHoverSpikes then
-            match hit, latestPass, latestFrame with
-            | ValueSome h, Some pass, Some frame when h.PickId <> 0u ->
+            match hit, latestPass, axisMemo.CurrentFrame with
+            | ValueSome h, Some pass, ValueSome frame when h.PickId <> 0u ->
                 let tc = pass.AxisSpec.Theme.TickColor
                 let spikeColor = RgbaColor (tc.R, tc.G, tc.B, 0.95f)
                 let spikes = Probe3D.hoverSpikes pass.AxisSpec.Scale frame spikeColor h.WorldPosition
@@ -438,7 +403,7 @@ type private PlotViewInstance3D
 
                         match hoverCoalescer.TakeFrameHover () with
                         | ValueSome struct (hx, hy, pickEpoch) ->
-                            if not dragging && pickEpoch = hoverCoalescer.CurrentEpoch then
+                            if not inputKernel.IsDragging && pickEpoch = hoverCoalescer.CurrentEpoch then
                                 let hit = pickAtClient hx hy
 
                                 if not disposed && pickEpoch = hoverCoalescer.CurrentEpoch then
@@ -500,24 +465,7 @@ type private PlotViewInstance3D
                 let logicalW = max 1 (int (Math.Round cssW))
                 let logicalH = max 1 (int (Math.Round cssH))
 
-                let axisSpecChanged =
-                    not hasCachedAxis
-                    || not (Object.ReferenceEquals (pass.AxisSpec, cachedAxisSpec))
-
-                if hasCachedAxis && axisSpecChanged then
-                    hoverCoalescer.AdvanceEpoch ()
-
-                let axisChanged =
-                    axisSpecChanged
-                    || gpuCam <> cachedGpuCam
-                    || logicalW <> cachedWidth
-                    || logicalH <> cachedHeight
-
-                if axisChanged then
-                    rebuildAxisFrame pass.AxisSpec logicalW logicalH gpuCam pass.ExtraOverlayMarks
-                else
-                    if prevHadExtraMarks || not (List.isEmpty pass.ExtraOverlayMarks) then
-                        applyOverlayMarks logicalW logicalH pass.ExtraOverlayMarks
+                updateAxisState pass.AxisSpec logicalW logicalH gpuCam pass.ExtraOverlayMarks |> ignore
 
                 match pass.ExtraOverlay with
                 | ValueSome extraScene ->
@@ -536,7 +484,6 @@ type private PlotViewInstance3D
 
                 latestCam <- Some gpuCam
                 latestPass <- Some pass
-                latestFrame <- Some cachedFrame
                 dirty <- true
                 scheduleFrame ())
 
@@ -573,88 +520,74 @@ type private PlotViewInstance3D
         fun () -> lease.Dispose ()
 
     member _.OnPointerDown(ev: PointerEvent) =
-        if not disposed && not dragging then
-            hoverCoalescer.AdvanceEpoch ()
+        if not disposed then
+            let isInteractive = isInteractiveFormTarget ev.target
 
-            if not (isInteractiveFormTarget ev.target) then
+            if inputKernel.OnPointerDown (ev.pointerId, ev.button, ev.clientX, ev.clientY, ev.shiftKey, isInteractive) then
+                hoverCoalescer.AdvanceEpoch ()
                 tryAutoFocusContainer true
 
-            dragging <- true
-            dragMoved <- false
-            dragPan <- ev.button = 1s || ev.button = 2s || ev.shiftKey
-            activePointerId <- ev.pointerId
-            lastClientX <- ev.clientX
-            lastClientY <- ev.clientY
-            downClientX <- ev.clientX
-            downClientY <- ev.clientY
-
-            match containerRef.Current with
-            | Some el ->
-                try
-                    el.setPointerCapture ev.pointerId
-                with _ ->
-                    ()
-            | None -> ()
+                match containerRef.Current with
+                | Some el ->
+                    try
+                        el.setPointerCapture ev.pointerId
+                    with _ ->
+                        ()
+                | None -> ()
 
     member _.OnPointerMove(ev: PointerEvent) =
         if not disposed then
-            if dragging && ev.pointerId = activePointerId then
-                let dx = float32 (ev.clientX - lastClientX)
-                let dy = float32 (ev.clientY - lastClientY)
-                lastClientX <- ev.clientX
-                lastClientY <- ev.clientY
+            let struct (_, _, rw, rh) = viewportCssSize ()
 
-                if abs (ev.clientX - downClientX) > 2.0 || abs (ev.clientY - downClientY) > 2.0 then
-                    dragMoved <- true
+            let fitR =
+                match latestPass with
+                | Some p -> Scale3D.fitRadius p.AxisSpec.Scale
+                | None -> 1.0f
 
-                if dx <> 0.0f || dy <> 0.0f then
-                    if dragPan then
-                        let struct (_, _, rw, rh) = viewportCssSize ()
-                        let fitR =
-                            match latestPass with
-                            | Some p -> Scale3D.fitRadius p.AxisSpec.Scale
-                            | None -> 1.0f
-
-                        let ndx = dx / float32 (max 1.0 rw)
-                        let ndy = dy / float32 (max 1.0 rh)
-                        config.Camera.Value <- PlotCamera3D.panBy fitR AxisLock3D.Free ndx ndy config.Camera.Value
-                    else
-                        config.Camera.Value <- PlotCamera3D.orbitBy dx dy config.Camera.Value
-            elif not dragging then
+            match
+                inputKernel.OnPointerMove (
+                    ev.pointerId,
+                    ev.clientX,
+                    ev.clientY,
+                    rw,
+                    rh,
+                    fitR,
+                    config.Camera.Value,
+                    allowHoverPick
+                )
+            with
+            | PointerMoveResult3D.CameraUpdated nextCam ->
+                config.Camera.Value <- nextCam
+            | PointerMoveResult3D.HoverMoved ->
                 hoverCoalescer.QueueFrameHover (ev.clientX, ev.clientY)
                 scheduleFrame ()
+            | PointerMoveResult3D.NoOp -> ()
 
     member _.OnPointerUp(ev: PointerEvent) =
-        if not disposed && dragging && ev.pointerId = activePointerId then
-            releaseCapture ev.pointerId
-            let wasClick = not dragMoved && ev.button = 0s
-            dragging <- false
-            dragPan <- false
-            activePointerId <- -1
+        if not disposed then
+            let up = inputKernel.OnPointerUp (ev.pointerId, ev.button, ev.clientX, ev.clientY)
 
-            if wasClick then
-                let hit = pickAtClient ev.clientX ev.clientY
-                lastHoverHit <- hit
-                updateSpikes hit
-                config.OnClickHit |> Option.iter (fun cb -> cb hit)
+            if up.Handled then
+                releaseCapture ev.pointerId
+
+                if up.WasClick && (config.ShowHoverSpikes || config.OnClickHit.IsSome) then
+                    let hit = pickAtClient up.ClientX up.ClientY
+                    lastHoverHit <- hit
+                    updateSpikes hit
+                    config.OnClickHit |> Option.iter (fun cb -> cb hit)
 
     member _.OnPointerCancel(ev: PointerEvent) =
-        if not disposed && dragging && ev.pointerId = activePointerId then
+        if not disposed && inputKernel.OnPointerCancel ev.pointerId then
             releaseCapture ev.pointerId
-            dragging <- false
-            dragMoved <- false
-            dragPan <- false
-            activePointerId <- -1
             hoverCoalescer.AdvanceEpoch ()
 
     member _.OnWheel(ev: WheelEvent) =
         if not disposed then
             ev.preventDefault ()
 
-            if abs ev.deltaY > 1e-6 then
-                let rawFactor = MathF.Exp (-float32 ev.deltaY * 0.0015f)
-                let factor = Math.Clamp (rawFactor, 0.25f, 4.0f)
-                config.Camera.Value <- PlotCamera3D.zoomBy factor config.Camera.Value
+            match PlotInputKernel3D.ApplyWheel (ev.deltaY, config.Camera.Value) with
+            | ValueSome nextCam -> config.Camera.Value <- nextCam
+            | ValueNone -> ()
 
     member _.OnKeyDown(ev: KeyboardEvent) =
         if
@@ -674,44 +607,14 @@ type private PlotViewInstance3D
                     config.Camera.Value <- nextCam
                 | ValueNone -> ()
             | PlotKeyMap3D.Default ->
-                let cam = config.Camera.Value
-
-                match ev.key with
-                | "r" | "R" | "Home" ->
+                match PlotInputKernel3D.ApplyDefaultKey (ev.key, config.Camera.Value) with
+                | KeyCameraAction3D.Reset ->
                     ev.preventDefault ()
                     config.Camera.Reset ()
-                | "p" | "P" ->
+                | KeyCameraAction3D.SetCamera nextCam ->
                     ev.preventDefault ()
-                    let nextP = if cam.Perspectiveness > 0.5f then 0.0f else 1.0f
-                    config.Camera.Value <- { cam with Perspectiveness = nextP }
-                | "m" | "M" ->
-                    ev.preventDefault ()
-
-                    let nextMode =
-                        match cam.Mode with
-                        | OrbitMode3D.Turntable -> OrbitMode3D.Arcball
-                        | OrbitMode3D.Arcball -> OrbitMode3D.Turntable
-
-                    config.Camera.Value <- PlotCamera3D.withMode nextMode cam
-                | "ArrowLeft" ->
-                    ev.preventDefault ()
-                    config.Camera.Value <- PlotCamera3D.orbitBy -12.0f 0.0f cam
-                | "ArrowRight" ->
-                    ev.preventDefault ()
-                    config.Camera.Value <- PlotCamera3D.orbitBy 12.0f 0.0f cam
-                | "ArrowUp" ->
-                    ev.preventDefault ()
-                    config.Camera.Value <- PlotCamera3D.orbitBy 0.0f -12.0f cam
-                | "ArrowDown" ->
-                    ev.preventDefault ()
-                    config.Camera.Value <- PlotCamera3D.orbitBy 0.0f 12.0f cam
-                | "+" | "=" ->
-                    ev.preventDefault ()
-                    config.Camera.Value <- PlotCamera3D.zoomBy 1.15f cam
-                | "-" | "_" ->
-                    ev.preventDefault ()
-                    config.Camera.Value <- PlotCamera3D.zoomBy (1.0f / 1.15f) cam
-                | _ -> ()
+                    config.Camera.Value <- nextCam
+                | KeyCameraAction3D.Ignore -> ()
 
 /// <summary>Declarative <c>Ranvier.View.Dsl</c> host binding a WebGPU 3D surface and pointer-transparent SVG axis overlay inside an SDL window.</summary>
 [<RequireQualifiedAccess>]

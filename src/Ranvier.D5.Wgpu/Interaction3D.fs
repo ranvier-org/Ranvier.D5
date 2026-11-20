@@ -291,6 +291,21 @@ type IPickResolver =
     /// <summary>Resolves <c>pickId</c> to its boxed key when active, or <c>ValueNone</c> when foreign or retired.</summary>
     abstract TryResolveBoxedKey: pickId: uint32 -> obj voption
 
+/// <summary>Strongly typed GPU picking resolver implemented by keyed reactive sinks for zero-boxing resolution.</summary>
+type IKeyedPickResolver<'K when 'K: equality> =
+    inherit IPickResolver
+    /// <summary>Resolves <c>pickId</c> to its active strongly typed key, returning <c>ValueNone</c> when foreign or retired.</summary>
+    abstract TryResolvePick: pickId: uint32 -> 'K voption
+
+module internal OwnerCleanup =
+    let tryOnCleanup (cleanup: unit -> unit) =
+        match Graph.TryCurrent with
+        | ValueSome _ ->
+            match Api.tryGetOwner () with
+            | ValueSome _ -> Api.onCleanup cleanup
+            | ValueNone -> ()
+        | ValueNone -> ()
+
 module internal PickEncoding =
     [<Literal>]
     let MaxSlotsPerLayer = 0x00FFFFFE
@@ -841,10 +856,11 @@ type KeyedInstanceSink<'K when 'K: equality> internal (layerId: byte, batch: Ins
     member _.TryResolvePick(pickId: uint32) : 'K voption =
         sync.TryResolvePick pickId
 
-    interface IPickResolver with
+    interface IKeyedPickResolver<'K> with
         member _.LayerId = layerId
         member _.ActiveCount = sync.ActiveCount
         member _.ContainsPick(pickId: uint32) = (sync.TryResolvePick pickId).IsSome
+        member _.TryResolvePick(pickId: uint32) = sync.TryResolvePick pickId
 
         member _.TryResolveBoxedKey(pickId: uint32) =
             match sync.TryResolvePick pickId with
@@ -867,10 +883,11 @@ type KeyedDiscSink<'K when 'K: equality> internal (layerId: byte, batch: DiscBat
     member _.TryResolvePick(pickId: uint32) : 'K voption =
         sync.TryResolvePick pickId
 
-    interface IPickResolver with
+    interface IKeyedPickResolver<'K> with
         member _.LayerId = layerId
         member _.ActiveCount = sync.ActiveCount
         member _.ContainsPick(pickId: uint32) = (sync.TryResolvePick pickId).IsSome
+        member _.TryResolvePick(pickId: uint32) = sync.TryResolvePick pickId
 
         member _.TryResolveBoxedKey(pickId: uint32) =
             match sync.TryResolvePick pickId with
@@ -886,6 +903,16 @@ type KeyedSegmentSink<'K when 'K: equality> internal (batch: LineBatch, sync: IK
     member _.ActiveCount: int = sync.ActiveCount
     /// <summary>Diagnostic count of segment slots updated on the latest reactive pass.</summary>
     member _.LastUpdatedSlots: int = sync.LastUpdatedSlots
+
+/// <summary>Incremental keyed <c>LineBatch</c> sink synchronizing variable-length gap-aware 3D polylines across <c>ProjectionDelta</c> updates.</summary>
+[<Sealed>]
+type KeyedPolylineSink<'K when 'K: equality> internal (batch: LineBatch, readActiveCount: unit -> int) =
+    /// <summary>Underlying GPU <c>LineBatch</c> holding paired line-list vertices across all active polylines.</summary>
+    member _.Batch: LineBatch = batch
+    /// <summary>Number of currently tracked polyline keys in this sink.</summary>
+    member _.ActiveCount: int = readActiveCount ()
+    /// <summary>Number of currently active GPU line segments in <c>Batch</c>.</summary>
+    member _.SegmentCount: int = batch.SegmentCount
 
 /// <summary>Helpers resolving 3D GPU picking hits back to keyed marks, data coordinates, and axis back-wall hover spikes.</summary>
 [<RequireQualifiedAccess>]
@@ -1036,3 +1063,418 @@ type HoverPickCoalescer() =
             framePending <- ValueNone
             ValueSome struct (x, y, currentEpoch)
         | ValueNone -> ValueNone
+
+[<NoEquality; NoComparison>]
+type private RegisteredSinkEntry =
+    {
+        Resolver: IPickResolver
+        TryDescribe: Scale3D -> PickHit -> string voption
+        DispatchHover: Scale3D -> PickHit -> bool
+        DispatchClick: Scale3D -> PickHit -> bool
+    }
+
+[<NoEquality; NoComparison>]
+type private StaticPickEntry =
+    {
+        Label: string option
+        OnHover: (PickHit -> unit) option
+        OnClick: (PickHit -> unit) option
+    }
+
+/// <summary>
+/// Centralized layer allocator (<c>1uy .. 255uy</c>) and heterogeneous GPU pick registry supporting owner-scoped
+/// cleanup, typed and boxed pick resolution, hit description formatting, and hover/click callback dispatch.
+/// </summary>
+[<Sealed>]
+type PickRegistry3D() =
+    let usedLayers = Array.init 256 (fun i -> i = 0)
+    let layerGen = Array.zeroCreate<int> 256
+    let entryGen = Array.zeroCreate<int> 256
+    let entries = Array.zeroCreate<RegisteredSinkEntry voption> 256
+    let staticPicks = Dictionary<uint32, StaticPickEntry>()
+    let staticGen = Dictionary<uint32, int>()
+    let mutable activeLayerCount = 0
+
+    let markLayerUsed (layerId: byte) : int =
+        let idx = int layerId
+
+        if not usedLayers[idx] then
+            usedLayers[idx] <- true
+            activeLayerCount <- activeLayerCount + 1
+
+        let nextGen = layerGen[idx] + 1
+        layerGen[idx] <- nextGen
+        nextGen
+
+    let clearSinkEntry (idx: int) =
+        entryGen[idx] <- entryGen[idx] + 1
+        entries[idx] <- ValueNone
+
+    let releaseLayerCore (layerId: byte) =
+        let idx = int layerId
+        layerGen[idx] <- layerGen[idx] + 1
+
+        if usedLayers[idx] then
+            usedLayers[idx] <- false
+            activeLayerCount <- activeLayerCount - 1
+
+        clearSinkEntry idx
+
+    let releaseLayerIfGen (layerId: byte) (expectedGen: int) =
+        let idx = int layerId
+
+        if layerGen[idx] = expectedGen then
+            releaseLayerCore layerId
+
+    let unregisterSinkIfGen (layerId: byte) (expectedEntryGen: int) (releaseLayerGen: int voption) =
+        let idx = int layerId
+
+        if entryGen[idx] = expectedEntryGen then
+            clearSinkEntry idx
+
+        match releaseLayerGen with
+        | ValueSome lGen -> releaseLayerIfGen layerId lGen
+        | ValueNone -> ()
+
+    let registerResolverCore
+        (resolver: IPickResolver)
+        (tryDescribe: Scale3D -> PickHit -> string voption)
+        (dispatchHover: Scale3D -> PickHit -> bool)
+        (dispatchClick: Scale3D -> PickHit -> bool)
+        =
+        if isNull (box resolver) then
+            nullArg (nameof resolver)
+
+        let layerId = resolver.LayerId
+        PickEncoding.validateLayerId layerId
+        let idx = int layerId
+
+        match entries[idx] with
+        | ValueSome existing when not (Object.ReferenceEquals (existing.Resolver, resolver)) ->
+            raise (InvalidOperationException $"Pick layer {layerId} already has an active registered sink.")
+        | _ -> ()
+
+        let layerToken =
+            if not usedLayers[idx] then
+                ValueSome (markLayerUsed layerId)
+            else
+                ValueNone
+
+        let nextEntryGen = entryGen[idx] + 1
+        entryGen[idx] <- nextEntryGen
+
+        entries[idx] <-
+            ValueSome
+                {
+                    Resolver = resolver
+                    TryDescribe = tryDescribe
+                    DispatchHover = dispatchHover
+                    DispatchClick = dispatchClick
+                }
+
+        OwnerCleanup.tryOnCleanup (fun () -> unregisterSinkIfGen layerId nextEntryGen layerToken)
+
+    let tryActiveLayerEntry (pickId: uint32) : RegisteredSinkEntry voption =
+        if pickId = 0u then
+            ValueNone
+        else
+            let layerIdx = int (byte (pickId >>> 24))
+
+            if layerIdx <= 0 || layerIdx >= entries.Length then
+                ValueNone
+            else
+                match entries[layerIdx] with
+                | ValueSome entry when entry.Resolver.ContainsPick pickId -> ValueSome entry
+                | _ -> ValueNone
+
+    let tryStaticEntry (pickId: uint32) : StaticPickEntry voption =
+        if pickId = 0u then
+            ValueNone
+        else
+            match staticPicks.TryGetValue pickId with
+            | true, entry -> ValueSome entry
+            | _ -> ValueNone
+
+    let dispatchPick
+        (scale: Scale3D)
+        (hit: PickHit voption)
+        (dispatchEntry: RegisteredSinkEntry -> Scale3D -> PickHit -> bool)
+        (getStaticHandler: StaticPickEntry -> (PickHit -> unit) option)
+        : unit =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        match hit with
+        | ValueSome h when h.PickId <> 0u ->
+            match tryActiveLayerEntry h.PickId with
+            | ValueSome entry -> dispatchEntry entry scale h |> ignore
+            | ValueNone ->
+                match tryStaticEntry h.PickId with
+                | ValueSome st -> getStaticHandler st |> Option.iter (fun cb -> cb h)
+                | ValueNone -> ()
+        | _ -> ()
+
+    /// <summary>Count of currently reserved pick layers in <c>[1uy .. 255uy]</c>.</summary>
+    member _.ActiveLayerCount: int = activeLayerCount
+
+    /// <summary>True when <c>layerId</c> is currently allocated or is the reserved background layer <c>0uy</c>.</summary>
+    member _.IsLayerInUse(layerId: byte) : bool =
+        usedLayers[int layerId]
+
+    /// <summary>
+    /// Allocates the lowest unused layer in <c>[1uy .. 255uy]</c>, or reserves <c>preferredLayer</c> when supplied,
+    /// registering an owner-scope cleanup callback when an active Ranvier owner scope exists.
+    /// </summary>
+    member _.AllocateLayer(?preferredLayer: byte) : byte =
+        match preferredLayer with
+        | Some layerId ->
+            PickEncoding.validateLayerId layerId
+            let idx = int layerId
+
+            if usedLayers[idx] then
+                raise (InvalidOperationException $"Pick layer {layerId} is already allocated.")
+
+            let token = markLayerUsed layerId
+            OwnerCleanup.tryOnCleanup (fun () -> releaseLayerIfGen layerId token)
+            layerId
+        | None ->
+            let mutable allocated = 0
+            let mutable idx = 1
+
+            while allocated = 0 && idx <= 255 do
+                if not usedLayers[idx] then
+                    allocated <- idx
+                else
+                    idx <- idx + 1
+
+            if allocated = 0 then
+                raise (InvalidOperationException "All 255 GPU pick layers are currently allocated.")
+
+            let layerId = byte allocated
+            let token = markLayerUsed layerId
+            OwnerCleanup.tryOnCleanup (fun () -> releaseLayerIfGen layerId token)
+            layerId
+
+    /// <summary>Releases <c>layerId</c> and unregisters any sink attached to it.</summary>
+    member _.ReleaseLayer(layerId: byte) : unit =
+        PickEncoding.validateLayerId layerId
+        releaseLayerCore layerId
+
+    /// <summary>
+    /// Registers a strongly typed keyed GPU sink and optional label formatter and hover/click callbacks under its <c>LayerId</c>,
+    /// unregistering cleanly when the enclosing Ranvier owner scope disposes.
+    /// </summary>
+    member _.RegisterSink<'K when 'K: equality>
+        (
+            sink: IKeyedPickResolver<'K>,
+            ?describe: PickedMark<'K> -> string,
+            ?onHover: PickedMark<'K> -> unit,
+            ?onClick: PickedMark<'K> -> unit
+        ) : unit =
+        if isNull (box sink) then
+            nullArg (nameof sink)
+
+        let layerId = sink.LayerId
+
+        let makeMark (scale: Scale3D) (hit: PickHit) : PickedMark<'K> voption =
+            match sink.TryResolvePick hit.PickId with
+            | ValueSome key ->
+                ValueSome
+                    {
+                        LayerId = layerId
+                        Key = key
+                        WorldPosition = hit.WorldPosition
+                        DataPoint = Scale3D.invert scale hit.WorldPosition
+                    }
+            | ValueNone -> ValueNone
+
+        let tryDescribe (scale: Scale3D) (hit: PickHit) : string voption =
+            match describe with
+            | None -> ValueNone
+            | Some fmt ->
+                match makeMark scale hit with
+                | ValueSome mark -> ValueSome (fmt mark)
+                | ValueNone -> ValueNone
+
+        let dispatchHover (scale: Scale3D) (hit: PickHit) : bool =
+            match makeMark scale hit with
+            | ValueSome mark ->
+                onHover |> Option.iter (fun cb -> cb mark)
+                true
+            | ValueNone -> false
+
+        let dispatchClick (scale: Scale3D) (hit: PickHit) : bool =
+            match makeMark scale hit with
+            | ValueSome mark ->
+                onClick |> Option.iter (fun cb -> cb mark)
+                true
+            | ValueNone -> false
+
+        registerResolverCore (sink :> IPickResolver) tryDescribe dispatchHover dispatchClick
+
+    /// <summary>
+    /// Registers a non-generic <c>IPickResolver</c> and optional boxed handlers under its <c>LayerId</c>,
+    /// unregistering cleanly when the enclosing Ranvier owner scope disposes.
+    /// </summary>
+    member _.RegisterResolver
+        (
+            resolver: IPickResolver,
+            ?describe: byte * obj * Vector3 * Point3 -> string,
+            ?onHover: byte * obj * Vector3 * Point3 -> unit,
+            ?onClick: byte * obj * Vector3 * Point3 -> unit
+        ) : unit =
+        if isNull (box resolver) then
+            nullArg (nameof resolver)
+
+        let layerId = resolver.LayerId
+
+        let makeBoxed (scale: Scale3D) (hit: PickHit) =
+            match resolver.TryResolveBoxedKey hit.PickId with
+            | ValueSome k -> ValueSome (layerId, k, hit.WorldPosition, Scale3D.invert scale hit.WorldPosition)
+            | ValueNone -> ValueNone
+
+        let tryDescribe (scale: Scale3D) (hit: PickHit) : string voption =
+            match describe with
+            | None -> ValueNone
+            | Some fmt ->
+                match makeBoxed scale hit with
+                | ValueSome args -> ValueSome (fmt args)
+                | ValueNone -> ValueNone
+
+        let dispatchHover (scale: Scale3D) (hit: PickHit) : bool =
+            match makeBoxed scale hit with
+            | ValueSome args ->
+                onHover |> Option.iter (fun cb -> cb args)
+                true
+            | ValueNone -> false
+
+        let dispatchClick (scale: Scale3D) (hit: PickHit) : bool =
+            match makeBoxed scale hit with
+            | ValueSome args ->
+                onClick |> Option.iter (fun cb -> cb args)
+                true
+            | ValueNone -> false
+
+        registerResolverCore resolver tryDescribe dispatchHover dispatchClick
+
+    /// <summary>Unregisters the sink bound to <c>layerId</c> without releasing an explicit layer reservation.</summary>
+    member _.UnregisterSink(layerId: byte) : unit =
+        PickEncoding.validateLayerId layerId
+        clearSinkEntry (int layerId)
+
+    /// <summary>
+    /// Registers a static single-batch or surface <c>PickId</c> (such as <c>layerId = 0uy</c> or a custom non-zero <c>PickId</c>)
+    /// with optional label and hover/click handlers, cleaning up on Ranvier owner disposal.
+    /// </summary>
+    member this.RegisterStaticPick(pickId: uint32, ?label: string, ?onHover: PickHit -> unit, ?onClick: PickHit -> unit) : unit =
+        if pickId = 0u then
+            raise (ArgumentOutOfRangeException (nameof pickId, "Static pickId must be non-zero."))
+
+        let nextGen =
+            match staticGen.TryGetValue pickId with
+            | true, g -> g + 1
+            | _ -> 1
+
+        staticGen[pickId] <- nextGen
+
+        staticPicks[pickId] <-
+            {
+                Label = label
+                OnHover = onHover
+                OnClick = onClick
+            }
+
+        OwnerCleanup.tryOnCleanup (fun () ->
+            match staticGen.TryGetValue pickId with
+            | true, g when g = nextGen -> this.UnregisterStaticPick pickId
+            | _ -> ())
+
+    /// <summary>Removes a static <c>PickId</c> registration from the registry.</summary>
+    member _.UnregisterStaticPick(pickId: uint32) : unit =
+        if pickId <> 0u then
+            staticPicks.Remove pickId |> ignore
+            staticGen.Remove pickId |> ignore
+
+    /// <summary>Resolves <c>hit</c> to a strongly typed <c>PickedMark</c> when its layer owns an active matching sink.</summary>
+    member _.TryResolveKeyed<'K when 'K: equality>(scale: Scale3D, hit: PickHit) : PickedMark<'K> voption =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        match tryActiveLayerEntry hit.PickId with
+        | ValueNone -> ValueNone
+        | ValueSome entry ->
+            let layerId = entry.Resolver.LayerId
+#if !FABLE_COMPILER
+            match entry.Resolver with
+            | :? IKeyedPickResolver<'K> as keyed ->
+                match keyed.TryResolvePick hit.PickId with
+                | ValueSome k ->
+                    ValueSome
+                        {
+                            LayerId = layerId
+                            Key = k
+                            WorldPosition = hit.WorldPosition
+                            DataPoint = Scale3D.invert scale hit.WorldPosition
+                        }
+                | ValueNone -> ValueNone
+            | _ ->
+                match entry.Resolver.TryResolveBoxedKey hit.PickId with
+                | ValueSome (:? 'K as k) ->
+                    ValueSome
+                        {
+                            LayerId = layerId
+                            Key = k
+                            WorldPosition = hit.WorldPosition
+                            DataPoint = Scale3D.invert scale hit.WorldPosition
+                        }
+                | _ -> ValueNone
+#else
+            match entry.Resolver.TryResolveBoxedKey hit.PickId with
+            | ValueSome boxed ->
+                ValueSome
+                    {
+                        LayerId = layerId
+                        Key = unbox<'K> boxed
+                        WorldPosition = hit.WorldPosition
+                        DataPoint = Scale3D.invert scale hit.WorldPosition
+                    }
+            | ValueNone -> ValueNone
+#endif
+
+    /// <summary>Resolves <c>hit</c> to <c>struct (layerId, boxedKey, worldPosition, dataPoint)</c> across any registered keyed sink.</summary>
+    member _.TryResolveBoxed(scale: Scale3D, hit: PickHit) : struct (byte * obj * Vector3 * Point3) voption =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        match tryActiveLayerEntry hit.PickId with
+        | ValueNone -> ValueNone
+        | ValueSome entry ->
+            match entry.Resolver.TryResolveBoxedKey hit.PickId with
+            | ValueSome boxed -> ValueSome struct (entry.Resolver.LayerId, boxed, hit.WorldPosition, Scale3D.invert scale hit.WorldPosition)
+            | ValueNone -> ValueNone
+
+    /// <summary>Formats a human-readable hit description via the registered layer formatter or static label.</summary>
+    member _.DescribeHit(scale: Scale3D, hit: PickHit) : string voption =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if hit.PickId = 0u then
+            ValueNone
+        else
+            match tryActiveLayerEntry hit.PickId with
+            | ValueSome entry -> entry.TryDescribe scale hit
+            | ValueNone ->
+                match tryStaticEntry hit.PickId with
+                | ValueSome st ->
+                    match st.Label with
+                    | Some text -> ValueSome text
+                    | None -> ValueNone
+                | ValueNone -> ValueNone
+
+    /// <summary>Dispatches a hover <c>PickHit</c> to the registered layer sink or static pick callback.</summary>
+    member _.DispatchHover(scale: Scale3D, hit: PickHit voption) : unit =
+        dispatchPick scale hit (fun entry s h -> entry.DispatchHover s h) (fun st -> st.OnHover)
+
+    /// <summary>Dispatches a click <c>PickHit</c> to the registered layer sink or static pick callback.</summary>
+    member _.DispatchClick(scale: Scale3D, hit: PickHit voption) : unit =
+        dispatchPick scale hit (fun entry s h -> entry.DispatchClick s h) (fun st -> st.OnClick)

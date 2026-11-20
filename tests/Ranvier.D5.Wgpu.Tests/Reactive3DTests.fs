@@ -842,4 +842,587 @@ let reactive3DTests =
                 coalescer.AdvanceEpoch ()
                 Expect.isFalse coalescer.HasPendingFrameHover "AdvanceEpoch clears pending synchronous frame hover"
                 Expect.equal (coalescer.TakeFrameHover ()) ValueNone "cleared frame hover yields ValueNone"
+
+            testCase "PickRegistry3D allocates [1..255] layers, rejects duplicates, cleans up on owner disposal, and resolves/dispatches heterogeneous sinks and static picks"
+            <| fun () ->
+                let scale = Scale3D.cartesian (-2.0, 2.0) (-2.0, 2.0) (-2.0, 2.0)
+
+                // 1. Out-of-graph safety + allocator [1..255] + exhaustion + explicit reservation + release reuse
+                let reg = PickRegistry3D ()
+                Expect.isTrue (reg.IsLayerInUse 0uy) "layer 0uy is permanently reserved as background sentinel"
+                Expect.throwsT<ArgumentOutOfRangeException> (fun () -> reg.AllocateLayer (preferredLayer = 0uy) |> ignore) "preferredLayer = 0uy rejected"
+
+                let l1 = reg.AllocateLayer ()
+                let l10 = reg.AllocateLayer (preferredLayer = 10uy)
+                let l2 = reg.AllocateLayer ()
+                Expect.equal l1 1uy "first auto layer is 1uy"
+                Expect.equal l10 10uy "explicit layer 10uy granted"
+                Expect.equal l2 2uy "next auto layer is 2uy"
+                Expect.throwsT<InvalidOperationException> (fun () -> reg.AllocateLayer (preferredLayer = 10uy) |> ignore) "duplicate explicit reservation rejected"
+
+                // Exhaust remaining 252 layers -> total 255 active
+                let rest = [ for _ in 1 .. 252 -> reg.AllocateLayer () ]
+                Expect.equal rest.Length 252 "remaining 252 layers allocated"
+                Expect.isFalse (List.contains 10uy rest) "explicit layer 10uy skipped by auto-allocator"
+                Expect.equal reg.ActiveLayerCount 255 "all 255 layers active"
+                Expect.throwsT<InvalidOperationException> (fun () -> reg.AllocateLayer () |> ignore) "256th allocation throws InvalidOperationException"
+
+                reg.ReleaseLayer 10uy
+                Expect.isFalse (reg.IsLayerInUse 10uy) "released layer 10uy becomes free"
+                Expect.equal (reg.AllocateLayer ()) 10uy "lowest free layer 10uy reused after release"
+
+                for l in rest do
+                    reg.ReleaseLayer l
+                reg.ReleaseLayer l1
+                reg.ReleaseLayer l2
+                reg.ReleaseLayer 10uy
+                Expect.equal reg.ActiveLayerCount 0 "all layers released"
+
+                // 2. Ranvier nested owner scope cleanup + heterogeneous sinks + option None key + static picks + dispatch
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64)
+                use graph = new Graph ()
+
+                graph.Run (fun () ->
+                    use boxMesh = ctx.UploadMesh (Glyph3D.unitMesh GlyphShape3D.Box)
+                    let scopedReg = PickRegistry3D ()
+
+                    let barHoverCalls = ResizeArray<PickedMark<string>>()
+                    let barClickCalls = ResizeArray<PickedMark<string>>()
+                    let discHoverCalls = ResizeArray<PickedMark<int option>>()
+                    let staticClickCalls = ResizeArray<PickHit>()
+
+                    let barColl = Api.createKeyedCollection (fun struct (k: string, _: BarDatum3D) -> k)
+                    barColl.AddOrUpdate (struct ("b1", BarDatum3D.create 0.0 0.0 0.0 1.0 0.5 0.5 RgbaColor.white))
+                    barColl.AddOrUpdate (struct ("b2", BarDatum3D.create 1.0 0.0 0.0 1.0 0.5 0.5 RgbaColor.white))
+                    let barRows = barColl.Rows |> Projection.map (fun struct (_, b) -> b)
+
+                    let discColl = Api.createKeyedCollection (fun struct (k: int option, _: ScatterDatum3D) -> k)
+                    discColl.AddOrUpdate (struct (None, ScatterDatum3D.create (Point3.create -1.0 0.0 0.0) 6.0f RgbaColor.white))
+                    discColl.AddOrUpdate (struct (Some 42, ScatterDatum3D.create (Point3.create 1.0 0.0 0.0) 6.0f RgbaColor.white))
+                    let discRows = discColl.Rows |> Projection.map (fun struct (_, d) -> d)
+
+                    let mutable layerBar = 0uy
+                    let mutable layerDisc = 0uy
+                    let mutable staleLayer = 0uy
+
+                    let innerOwner =
+                        Api.createRoot (fun root ->
+                            layerBar <- scopedReg.AllocateLayer ()
+                            let barSink = Reactive3D.bindBars ctx layerBar (fun () -> scale) barRows
+                            scopedReg.RegisterSink(
+                                barSink,
+                                describe = (fun m -> $"Bar:{m.Key}"),
+                                onHover = barHoverCalls.Add,
+                                onClick = barClickCalls.Add
+                            )
+
+                            layerDisc <- scopedReg.AllocateLayer ()
+                            let discSink = Reactive3D.bindDiscs ctx layerDisc false (fun () -> scale) discRows
+                            scopedReg.RegisterSink(
+                                discSink,
+                                describe = (fun m -> match m.Key with Some v -> $"Disc:{v}" | None -> "Disc:None"),
+                                onHover = discHoverCalls.Add
+                            )
+
+                            // Duplicate sink on an occupied layer is rejected
+                            Expect.throwsT<InvalidOperationException>
+                                (fun () ->
+                                    let dupSink = Reactive3D.bindBars ctx layerBar (fun () -> scale) barRows
+                                    scopedReg.RegisterSink(dupSink))
+                                "collision on active sink layer rejected"
+
+                            // Static picks (layer 0uy and custom pickId)
+                            scopedReg.RegisterStaticPick(77u, label = "Surface:wave", onClick = staticClickCalls.Add)
+                            scopedReg.RegisterStaticPick(0xFE000001u, label = "IsoSurface:blob")
+
+                            // Stale cleanup token test: manually release staleLayer before innerOwner disposes
+                            staleLayer <- scopedReg.AllocateLayer ()
+                            scopedReg.ReleaseLayer staleLayer
+                            Expect.equal (scopedReg.IsLayerInUse staleLayer) false "manually released layer free"
+                            root)
+
+                    // Re-allocate staleLayer outside innerOwner before innerOwner disposes
+                    let heldOutside = scopedReg.AllocateLayer (preferredLayer = staleLayer)
+                    Expect.equal heldOutside staleLayer "re-allocated staleLayer outside inner scope"
+
+                    let barHit1 = { PickId = ((uint32 layerBar <<< 24) ||| 1u); WorldPosition = Scale3D.map scale (Point3.create 0.0 0.0 1.0) }
+                    let discHitNone = { PickId = ((uint32 layerDisc <<< 24) ||| 1u); WorldPosition = Vector3.Zero }
+                    let discHit42 = { PickId = ((uint32 layerDisc <<< 24) ||| 2u); WorldPosition = Vector3.Zero }
+                    let staticHit = { PickId = 77u; WorldPosition = Vector3 (0.25f, 0.0f, 0.0f) }
+
+                    Expect.equal (scopedReg.TryResolveKeyed<string>(scale, barHit1) |> ValueOption.map _.Key) (ValueSome "b1") "TryResolveKeyed resolves bar b1"
+                    Expect.equal (scopedReg.TryResolveKeyed<int>(scale, barHit1)) ValueNone "wrong generic key type returns ValueNone"
+                    Expect.equal (scopedReg.TryResolveKeyed<int option>(scale, discHitNone) |> ValueOption.map _.Key) (ValueSome None) "TryResolveKeyed preserves ValueSome None option key"
+                    Expect.equal (scopedReg.TryResolveKeyed<int option>(scale, discHit42) |> ValueOption.map _.Key) (ValueSome (Some 42)) "TryResolveKeyed resolves disc Some 42"
+
+                    match scopedReg.TryResolveBoxed(scale, barHit1) with
+                    | ValueSome struct (lid, boxed, worldPos, dataPt) ->
+                        Expect.equal lid layerBar "boxed layer matches"
+                        Expect.equal (unbox<string> boxed) "b1" "boxed key matches"
+                        expectVec3Close 1e-5f worldPos barHit1.WorldPosition "boxed world pos matches"
+                        Expect.floatClose { absolute = 1e-4; relative = 0.0 } dataPt.Z 1.0 "boxed data point inverted cleanly"
+                    | ValueNone -> failtest "Expected TryResolveBoxed hit for barHit1"
+
+                    Expect.equal (scopedReg.DescribeHit(scale, barHit1)) (ValueSome "Bar:b1") "DescribeHit formats bar"
+                    Expect.equal (scopedReg.DescribeHit(scale, discHitNone)) (ValueSome "Disc:None") "DescribeHit formats None key"
+                    Expect.equal (scopedReg.DescribeHit(scale, staticHit)) (ValueSome "Surface:wave") "DescribeHit formats static pick"
+                    Expect.equal (scopedReg.DescribeHit(scale, { PickId = 0xFE000001u; WorldPosition = Vector3.Zero })) (ValueSome "IsoSurface:blob") "DescribeHit formats custom PickId"
+                    Expect.equal (scopedReg.DescribeHit(scale, { PickId = 0u; WorldPosition = Vector3.Zero })) ValueNone "DescribeHit ignores PickId 0u"
+
+                    scopedReg.DispatchHover(scale, ValueSome barHit1)
+                    scopedReg.DispatchHover(scale, ValueSome discHitNone)
+                    scopedReg.DispatchHover(scale, ValueNone)
+                    scopedReg.DispatchClick(scale, ValueSome barHit1)
+                    scopedReg.DispatchClick(scale, ValueSome staticHit)
+                    Expect.equal barHoverCalls.Count 1 "hover dispatched once to bar sink"
+                    Expect.equal barHoverCalls[0].Key "b1" "hover passed PickedMark b1"
+                    Expect.equal discHoverCalls.Count 1 "hover dispatched once to disc sink"
+                    Expect.equal discHoverCalls[0].Key None "hover passed PickedMark None"
+                    Expect.equal barClickCalls.Count 1 "click dispatched once to bar sink"
+                    Expect.equal staticClickCalls.Count 1 "click dispatched once to static pick"
+                    Expect.equal staticClickCalls[0].PickId 77u "static click received PickHit"
+
+                    // Remove b1 -> retired pick ID ignored immediately
+                    Expect.isTrue (barColl.Remove "b1") "remove b1"
+                    Expect.equal (scopedReg.TryResolveKeyed<string>(scale, { PickId = ((uint32 layerBar <<< 24) ||| 2u); WorldPosition = Vector3.Zero })) ValueNone "retired slot 1 returns ValueNone"
+                    Expect.equal (scopedReg.DescribeHit(scale, { PickId = ((uint32 layerBar <<< 24) ||| 2u); WorldPosition = Vector3.Zero })) ValueNone "retired slot DescribeHit returns ValueNone"
+
+                    // Dispose innerOwner -> auto cleans layers & static picks, while keeping staleLayer owned by outer scope
+                    innerOwner.Dispose ()
+                    Expect.isFalse (scopedReg.IsLayerInUse layerBar) "layerBar freed on owner dispose"
+                    Expect.isFalse (scopedReg.IsLayerInUse layerDisc) "layerDisc freed on owner dispose"
+                    Expect.isTrue (scopedReg.IsLayerInUse staleLayer) "re-allocated staleLayer NOT clobbered by old owner cleanup"
+                    Expect.equal (scopedReg.TryResolveKeyed<string>(scale, barHit1)) ValueNone "disposed scope resolves ValueNone"
+                    Expect.equal (scopedReg.DescribeHit(scale, staticHit)) ValueNone "disposed static pick resolves ValueNone"
+                    Expect.equal (scopedReg.AllocateLayer ()) 1uy "freed layer 1uy reused after owner disposal"
+                )
+
+            testCase "PlotRevision3D, SinkOptions3D, tuple helpers, and translucent depth-sorted bindDiscsWith work seamlessly"
+            <| fun () ->
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64)
+                let scale = Scale3D.cartesian (-2.0, 2.0) (-2.0, 2.0) (-1.0, 1.0)
+                use graph = new Graph ()
+
+                graph.Run (fun () ->
+                    let reg = PickRegistry3D ()
+                    let rev = Reactive3D.createRevision ()
+                    let mutable revEvents = 0
+                    Api.createEffect (fun () ->
+                        let _ = rev.Revision
+                        revEvents <- revEvents + 1)
+
+                    Expect.equal rev.Revision 0 "initial PlotRevision3D is 0"
+                    Expect.equal revEvents 1 "initial revision observer fires once"
+
+                    let opts =
+                        SinkOptions3D.defaultValue
+                        |> SinkOptions3D.withRegistry reg
+                        |> SinkOptions3D.withRevision rev
+                        |> SinkOptions3D.withDrawBeforeLines true
+                        |> SinkOptions3D.withBlendMode BlendMode.AlphaBlend
+                        |> SinkOptions3D.withPreserveOrder true
+
+                    let mesh = ctx.UploadMesh (Glyph3D.unitMesh GlyphShape3D.Box)
+                    let optsOwn = opts |> SinkOptions3D.withOwnsMesh true
+
+                    let coll = Api.createKeyedCollection (fun struct (k: string, _: GlyphDatum3D) -> k)
+                    coll.AddOrUpdate (struct ("g1", { GlyphDatum3D.sphere (Point3.create 0.0 0.0 0.0) 0.4f (RgbaColor (0.2f, 0.7f, 1.0f, 0.5f)) with Shading = ShadingMode.Unlit }))
+
+                    let inner =
+                        Api.createRoot (fun root ->
+                            let sink = Reactive3D.bindInstancesWith ctx optsOwn mesh (fun () -> scale) (Reactive3D.collectionValues coll)
+                            Expect.equal sink.LayerId 1uy "SinkOptions3D auto-allocates layer 1uy from Registry"
+                            Expect.isTrue sink.Batch.DrawBeforeLines "DrawBeforeLines forwarded to Batch"
+                            Expect.equal sink.Batch.BlendMode BlendMode.AlphaBlend "BlendMode forwarded to Batch"
+                            Expect.isTrue (reg.IsLayerInUse 1uy) "auto-registered in PickRegistry3D"
+                            root)
+
+                    Expect.isGreaterThan rev.Revision 0 "initial sink creation bumped PlotRevision3D"
+                    let revAfterCreate = rev.Revision
+
+                    // Mutate g1 -> bumps revision
+                    coll.AddOrUpdate (struct ("g1", { GlyphDatum3D.sphere (Point3.create 0.5 0.0 0.0) 0.4f (RgbaColor (0.2f, 0.7f, 1.0f, 0.5f)) with Shading = ShadingMode.Unlit }))
+                    let revAfterEdit = rev.Revision
+                    Expect.isGreaterThan revAfterEdit revAfterCreate "row mutation bumps PlotRevision3D"
+
+                    // Remove last item -> Batch shrinks to 0 and MUST still bump PlotRevision3D!
+                    Expect.isTrue (coll.Remove "g1") "remove last item"
+                    Expect.isGreaterThan rev.Revision revAfterEdit "removing last item (Count -> 0) bumps PlotRevision3D"
+
+                    // Disposing inner scope frees registry layer and disposes owned mesh
+                    inner.Dispose ()
+                    Expect.isFalse (reg.IsLayerInUse 1uy) "disposing scope releases auto-allocated Registry layer"
+                    Expect.throwsT<ObjectDisposedException> (fun () -> mesh.UpdateMesh MeshData.empty) "OwnsMesh=true disposed caller-supplied mesh"
+
+                    // Translucent bindDiscsWith with CameraPosition back-to-front sorting & canonical PickId resolution
+                    let camPosSig = Api.createSignal (Vector3 (0.0f, 0.0f, 5.0f))
+                    let yUpScale = Scale3D.create BoxAspect.Cube UpAxis.YUp (AxisScale3D.linear (-1.0, 1.0)) (AxisScale3D.linear (-1.0, 1.0)) (AxisScale3D.linear (-1.0, 1.0))
+                    let discColl = Api.createKeyedCollection (fun struct (k: string, _: ScatterDatum3D) -> k)
+                    discColl.AddOrUpdate (struct ("back", ScatterDatum3D.create (Point3.create 0.0 0.0 -0.5) 20.0f (RgbaColor (1.0f, 0.0f, 0.0f, 0.55f))))
+                    discColl.AddOrUpdate (struct ("front", ScatterDatum3D.create (Point3.create 0.0 0.0 0.5) 20.0f (RgbaColor (0.0f, 0.0f, 1.0f, 0.55f))))
+
+                    let discOpts =
+                        SinkOptions3D.defaultValue
+                        |> SinkOptions3D.withRegistry reg
+                        |> SinkOptions3D.withRevision rev
+                        |> SinkOptions3D.withCameraPosition (fun () -> camPosSig.Value)
+
+                    let discSink = Reactive3D.bindDiscsWith ctx discOpts (fun () -> yUpScale) (Reactive3D.values discColl.Rows)
+                    let camFront = Camera3D.orthographic Vector3.Zero 0.0f 0.0f 1.2f 5.0f
+                    let discPassFront =
+                        ScenePass.create camFront
+                        |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                        |> ScenePass.withDiscs [| discSink.Batch |]
+
+                    discPassFront |> WgpuContext.render ctx |> ignore
+                    let struct (fr, _, fb, _) = pixelAt ctx 32 32
+                    Expect.isGreaterThan fb (fr + 30uy) "looking from +Z renders closer blue 'front' disc on top of red 'back' disc"
+                    let hitFront = discPassFront |> WgpuContext.pick 32 32 ctx |> ValueOption.get
+                    Expect.equal (reg.TryResolveKeyed<string>(yUpScale, hitFront) |> ValueOption.map _.Key) (ValueSome "front") "pick from +Z resolves 'front' even after depth sort"
+
+                    // Flip camera to -Z: now red 'back' at z=-0.5 is closer and must render on top!
+                    camPosSig.Value <- Vector3 (0.0f, 0.0f, -5.0f)
+                    let camOpposite = Camera3D.orthographic Vector3.Zero 180.0f 0.0f 1.2f 5.0f
+                    let discPassOpposite =
+                        ScenePass.create camOpposite
+                        |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                        |> ScenePass.withDiscs [| discSink.Batch |]
+
+                    discPassOpposite |> WgpuContext.render ctx |> ignore
+                    let struct (orr, _, obb, _) = pixelAt ctx 32 32
+                    Expect.isGreaterThan orr (obb + 30uy) "looking from -Z re-sorts translucent discs so closer red 'back' disc draws on top"
+                    let hitOpposite = discPassOpposite |> WgpuContext.pick 32 32 ctx |> ValueOption.get
+                    Expect.equal (reg.TryResolveKeyed<string>(yUpScale, hitOpposite) |> ValueOption.map _.Key) (ValueSome "back") "pick from -Z still resolves 'back' after re-sort"
+                )
+
+            testCase "Reactive3D bindGlyphs, bindBoxes, bindArrows, bindPolylines, bindKeyedPolylines, bindTubes, bindRibbons, bindIsoSurface, bindVolumeSlices, bindWallContours"
+            <| fun () ->
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64)
+                let scale = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+                let yUpScale = Scale3D.create BoxAspect.Cube UpAxis.YUp (AxisScale3D.linear (-1.0, 1.0)) (AxisScale3D.linear (-1.0, 1.0)) (AxisScale3D.linear (-1.0, 1.0))
+                let cam = Camera3D.orthographic Vector3.Zero 0.0f 0.0f 1.2f 5.0f
+
+                use graph = new Graph ()
+
+                graph.Run (fun () ->
+                    let reg = PickRegistry3D ()
+                    let rev = Reactive3D.createRevision ()
+                    let opts = SinkOptions3D.defaultValue |> SinkOptions3D.withRegistry reg |> SinkOptions3D.withRevision rev
+
+                    // 1. bindGlyphs (owns mesh)
+                    let gColl = Api.createKeyedCollection (fun struct (k: string, _: GlyphDatum3D) -> k)
+                    gColl.AddOrUpdate (struct ("s1", { GlyphDatum3D.sphere (Point3.create 0.0 0.0 0.0) 0.5f (RgbaColor (0.2f, 0.9f, 0.3f, 1.0f)) with Shading = ShadingMode.Unlit }))
+                    let gSink = Reactive3D.bindGlyphs ctx GlyphShape3D.Sphere opts (fun () -> scale) (Reactive3D.collectionValues gColl)
+                    Expect.equal gSink.ActiveCount 1 "bindGlyphs activeCount = 1"
+
+                    let gPass = ScenePass.create cam |> ScenePass.withClear RgbaColor.black |> ScenePass.withBatches [| gSink.Batch |]
+                    gPass |> WgpuContext.render ctx |> ignore
+                    let struct (_, gg, _, _) = pixelAt ctx 32 32
+                    Expect.isGreaterThan gg 150uy "bindGlyphs renders green sphere"
+                    let gHit = gPass |> WgpuContext.pick 32 32 ctx |> ValueOption.get
+                    Expect.equal (reg.TryResolveKeyed<string>(scale, gHit) |> ValueOption.map _.Key) (ValueSome "s1") "bindGlyphs picked via PickRegistry3D"
+
+                    // 2. bindBoxes (both YUp and translucent DrawBeforeLines)
+                    let boxOpts = opts |> SinkOptions3D.withBlendMode BlendMode.AlphaBlend |> SinkOptions3D.withDrawBeforeLines true
+                    let bColl = Api.createKeyedCollection (fun struct (k: string, _: BoxDatum3D) -> k)
+                    bColl.AddOrUpdate (struct ("bx1", { BoxDatum3D.create (Bounds3.create -0.4 -0.4 -0.4 0.8 0.8 0.8) (RgbaColor (0.9f, 0.2f, 0.2f, 0.6f)) with Shading = ShadingMode.Unlit }))
+                    let bSink = Reactive3D.bindBoxes ctx boxOpts (fun () -> yUpScale) (Reactive3D.values bColl.Rows)
+                    Expect.isTrue bSink.Batch.DrawBeforeLines "bindBoxes honors DrawBeforeLines"
+                    Expect.equal bSink.Batch.BlendMode BlendMode.AlphaBlend "bindBoxes honors AlphaBlend"
+                    let bHit = (ScenePass.create cam |> ScenePass.withBatches [| bSink.Batch |]) |> WgpuContext.pick 32 32 ctx |> ValueOption.get
+                    Expect.equal (reg.TryResolveKeyed<string>(yUpScale, bHit) |> ValueOption.map _.Key) (ValueSome "bx1") "bindBoxes picked"
+
+                    // 3. bindArrows (validates segments >= 3 and renders/picks)
+                    Expect.throwsT<ArgumentOutOfRangeException> (fun () ->
+                        let eColl = Api.createKeyedCollection (fun struct (k: string, _: ArrowDatum3D) -> k)
+                        Reactive3D.bindArrows ctx 2 opts (fun () -> scale) (Reactive3D.collectionValues eColl) |> ignore) "bindArrows rejects segments < 3"
+
+                    let aColl = Api.createKeyedCollection (fun struct (k: string, _: ArrowDatum3D) -> k)
+                    aColl.AddOrUpdate (struct ("a1", { ArrowDatum3D.create (Point3.create -0.5 0.0 0.0) (Point3.create 1.0 0.0 0.0) 0.1f (RgbaColor (1.0f, 1.0f, 0.0f, 1.0f)) with Shading = ShadingMode.Unlit }))
+                    let aSink = Reactive3D.bindArrows ctx 10 opts (fun () -> scale) (Reactive3D.collectionValues aColl)
+                    Expect.equal aSink.ActiveCount 1 "bindArrows activeCount = 1"
+                    let aPass = ScenePass.create cam |> ScenePass.withClear RgbaColor.black |> ScenePass.withBatches [| aSink.Batch |]
+                    aPass |> WgpuContext.render ctx |> ignore
+                    let aHit = aPass |> WgpuContext.pick 36 32 ctx |> ValueOption.get
+                    Expect.equal (reg.TryResolveKeyed<string>(scale, aHit) |> ValueOption.map _.Key) (ValueSome "a1") "bindArrows picked"
+
+                    // bindBarsWith, bindSegmentsWith, bindSurfaceWith
+                    let barWColl = Api.createKeyedCollection (fun struct (k: string, _: BarDatum3D) -> k)
+                    barWColl.AddOrUpdate (struct ("bw1", BarDatum3D.create 0.0 0.0 -0.5 0.5 0.4 0.4 RgbaColor.white))
+                    let barWSink = Reactive3D.bindBarsWith ctx opts (fun () -> scale) (Reactive3D.collectionValues barWColl)
+                    Expect.equal barWSink.ActiveCount 1 "bindBarsWith activeCount = 1"
+
+                    let segWColl = Api.createKeyedCollection (fun struct (k: string, _: struct (Point3 * Point3 * RgbaColor)) -> k)
+                    segWColl.AddOrUpdate (struct ("sw1", struct (Point3.create -0.5 0.0 0.0, Point3.create 0.5 0.0 0.0, RgbaColor.white)))
+                    let segWSink = Reactive3D.bindSegmentsWith ctx { opts with IgnoreSectionPlane = true } (fun () -> scale) (Reactive3D.collectionValues segWColl)
+                    Expect.equal segWSink.ActiveCount 1 "bindSegmentsWith activeCount = 1"
+
+                    let surfSpecSig = Api.createSignal (SurfaceSpec.create scale (ColorRamp.viridis (-1.0, 1.0)))
+                    let surfGridSig = Api.createSignal (SurfaceGrid.fromFunction3D 4 4 (-0.5, 0.5) (-0.5, 0.5) (fun x y -> x + y) |> unwrapOk "surfGrid")
+                    let revBeforeSurf = rev.Revision
+                    let surfWSink = Reactive3D.bindSurfaceWith ctx (opts |> SinkOptions3D.withPickId 89u) (fun () -> surfSpecSig.Value) (fun () -> surfGridSig.Value)
+                    Expect.isGreaterThan rev.Revision revBeforeSurf "bindSurfaceWith bumps revision on init"
+                    let revAfterSurfInit = rev.Revision
+                    surfGridSig.Value <- (SurfaceGrid.fromFunction3D 4 4 (-0.5, 0.5) (-0.5, 0.5) (fun _ _ -> 0.2) |> unwrapOk "surfGrid2")
+                    Expect.isGreaterThan rev.Revision revAfterSurfInit "bindSurfaceWith bumps revision on UpdateGrid"
+                    Expect.equal surfWSink.Batch.Count 1 "bindSurfaceWith active batch count = 1"
+
+                    // 4. bindPolylines, bindPolylinesWithGaps, and bindKeyedPolylines
+                    let cyan = RgbaColor (0.0f, 1.0f, 1.0f, 1.0f)
+                    let polySig = Api.createSignal [| [| struct (Point3.create -0.8 0.0 0.0, cyan); struct (Point3.create 0.8 0.0 0.0, cyan) |] |]
+                    let pBatch = Reactive3D.bindPolylines ctx { opts with IgnoreSectionPlane = true } (fun () -> scale) (fun () -> polySig.Value)
+                    Expect.equal pBatch.SegmentCount 1 "bindPolylines initial segment count = 1"
+                    polySig.Value <- [| [| struct (Point3.create -0.8 0.0 0.0, cyan); struct (Point3.create 0.0 0.0 0.0, cyan); struct (Point3.create 0.8 0.0 0.0, cyan) |] |]
+                    Expect.equal pBatch.SegmentCount 2 "bindPolylines updated segment count = 2"
+
+                    let gapSig =
+                        Api.createSignal
+                            [|
+                                [|
+                                    ValueSome struct (Point3.create -0.8 0.0 0.0, cyan)
+                                    ValueSome struct (Point3.create -0.2 0.0 0.0, cyan)
+                                    ValueNone
+                                    ValueSome struct (Point3.create 0.2 0.0 0.0, cyan)
+                                    ValueSome struct (Point3.create 0.8 0.0 0.0, cyan)
+                                |]
+                            |]
+                    let gLineBatch = Reactive3D.bindPolylinesWithGaps ctx opts (fun () -> scale) (fun () -> gapSig.Value)
+                    Expect.equal gLineBatch.SegmentCount 2 "bindPolylinesWithGaps splits across ValueNone into 2 segments"
+
+                    let kPolyColl = Api.createKeyedCollection (fun struct (k: string, _: struct (Point3 * RgbaColor) voption array) -> k)
+                    kPolyColl.AddOrUpdate (struct ("p1", [| ValueSome struct (Point3.create -0.5 0.0 0.0, cyan); ValueSome struct (Point3.create 0.5 0.0 0.0, cyan) |]))
+                    let kPolySink = Reactive3D.bindKeyedPolylines ctx opts (fun () -> scale) (Reactive3D.collectionValues kPolyColl)
+                    Expect.equal kPolySink.ActiveCount 1 "bindKeyedPolylines activeCount = 1"
+                    Expect.equal kPolySink.SegmentCount 1 "bindKeyedPolylines SegmentCount = 1"
+                    Expect.isTrue (kPolyColl.Remove "p1") "remove keyed polyline"
+                    Expect.equal kPolySink.ActiveCount 0 "bindKeyedPolylines shrinks to 0"
+                    Expect.equal kPolySink.Batch.SegmentCount 0 "bindKeyedPolylines LineBatch shrinks to 0"
+
+                    // 5. bindTubes and bindRibbons (ShadingMode change preserves mesh + empty recovery + pickId)
+                    let tubeOpts = opts |> SinkOptions3D.withPickId 91u
+                    let tubeShadeSig = Api.createSignal ShadingMode.Unlit
+                    let tubeInputSig =
+                        Api.createSignal
+                            [|
+                                [|
+                                    struct (Point3.create -0.7 0.0 0.0, 0.12f, RgbaColor (1.0f, 0.3f, 0.2f, 1.0f))
+                                    struct (Point3.create 0.7 0.0 0.0, 0.12f, RgbaColor (0.2f, 0.6f, 1.0f, 1.0f))
+                                |]
+                            |]
+
+                    Expect.throwsT<ArgumentOutOfRangeException> (fun () ->
+                        Reactive3D.bindTubes ctx tubeOpts 2 (fun () -> ShadingMode.Unlit) (fun () -> scale) (fun () -> tubeInputSig.Value) |> ignore) "bindTubes rejects sides < 3"
+
+                    let tubeBatch = Reactive3D.bindTubes ctx tubeOpts 8 (fun () -> tubeShadeSig.Value) (fun () -> scale) (fun () -> tubeInputSig.Value)
+                    let tubePass = ScenePass.create cam |> ScenePass.withClear RgbaColor.black |> ScenePass.withBatches [| tubeBatch |]
+                    tubePass |> WgpuContext.render ctx |> ignore
+                    let tubeHit = tubePass |> WgpuContext.pick 32 32 ctx |> ValueOption.get
+                    Expect.equal tubeHit.PickId 91u "bindTubes renders and returns PickId 91u"
+
+                    let revBeforeShade = rev.Revision
+                    tubeShadeSig.Value <- ShadingMode.ExactUnlit
+                    Expect.isGreaterThan rev.Revision revBeforeShade "ShadingMode change on bindTubes updates batch and bumps revision"
+                    tubeInputSig.Value <- [||]
+                    Expect.equal tubeBatch.Count 0 "empty tube list clears instance count"
+
+                    let ribOpts = opts |> SinkOptions3D.withPickId 92u
+                    let ribSig =
+                        Api.createSignal
+                            [|
+                                [|
+                                    struct (Point3.create -0.6 0.0 -0.4, Point3.create -0.6 0.0 0.4, cyan)
+                                    struct (Point3.create 0.6 0.0 -0.4, Point3.create 0.6 0.0 0.4, cyan)
+                                |]
+                            |]
+                    let ribBatch = Reactive3D.bindRibbons ctx ribOpts (fun () -> ShadingMode.Unlit) (fun () -> scale) (fun () -> ribSig.Value)
+                    let ribPass = ScenePass.create cam |> ScenePass.withClear RgbaColor.black |> ScenePass.withBatches [| ribBatch |]
+                    let ribHit = ribPass |> WgpuContext.pick 32 32 ctx |> ValueOption.get
+                    Expect.equal ribHit.PickId 92u "bindRibbons renders and returns PickId 92u"
+
+                    // 6. bindIsoSurface (async non-blocking settle + dynamic Opaque <-> AlphaBlend + PickId + revision bump)
+                    let volBounds = Bounds3.create -1.0 -1.0 -1.0 2.0 2.0 2.0
+                    let vol = VolumeGrid.fromFunction 16 16 16 volBounds (fun x y z -> 1.0f - float32 (x * x + y * y + z * z)) ValueNone |> unwrapOk "isoVol"
+                    let volRamp = ColorRamp.viridis (-1.0, 1.0)
+                    let isoThreshSig = Api.createSignal 0.3f
+                    let isoCfgMemo = Api.createMemo (fun _ -> IsoSurfaceConfig.create isoThreshSig.Value)
+                    let isoOpacitySig = Api.createSignal 1.0f
+                    let isoSink =
+                        Reactive3D.bindIsoSurface
+                            ctx
+                            (opts |> SinkOptions3D.withPickId 93u)
+                            (fun () -> ShadingMode.Unlit)
+                            (fun () -> isoOpacitySig.Value)
+                            (fun () -> scale)
+                            (fun () -> volRamp)
+                            (fun () -> isoCfgMemo.Value)
+                            (fun () -> vol)
+
+                    let swIso = Stopwatch.StartNew ()
+                    while isoSink.TriangleCount = 0 && swIso.ElapsedMilliseconds < 10000L do
+                        graph.Pump () |> ignore
+                        Thread.Sleep 5
+
+                    Expect.isGreaterThan isoSink.TriangleCount 0 "bindIsoSurface settled asynchronously without blocking"
+                    Expect.equal isoSink.Batch.BlendMode BlendMode.Opaque "isoSink starts Opaque at opacity 1.0f"
+                    let isoRevAtSettle = rev.Revision
+                    isoOpacitySig.Value <- 0.5f
+                    Expect.equal isoSink.Batch.BlendMode BlendMode.AlphaBlend "isoSink switches dynamically to AlphaBlend at opacity 0.5f"
+                    Expect.isGreaterThan rev.Revision isoRevAtSettle "opacity switch bumps PlotRevision3D"
+                    let isoHit = (ScenePass.create cam |> ScenePass.withBatches [| isoSink.Batch |]) |> WgpuContext.pick 32 32 ctx |> ValueOption.get
+                    Expect.equal isoHit.PickId 93u "isoSink picks at 93u"
+
+                    // 7. bindVolumeSlices (double-sided + dynamic Opaque <-> AlphaBlend)
+                    let sliceOpSig = Api.createSignal 1.0f
+                    let sliceIdxSig = Api.createSignal (SliceIndices3D.ofY 8)
+                    let sliceSink =
+                        Reactive3D.bindVolumeSlices
+                            ctx
+                            (opts |> SinkOptions3D.withPickId 94u)
+                            (fun () -> ShadingMode.Unlit)
+                            (fun () -> sliceOpSig.Value)
+                            (fun () -> scale)
+                            (fun () -> volRamp)
+                            (fun () -> sliceIdxSig.Value)
+                            (fun () -> vol)
+
+                    Expect.isGreaterThan sliceSink.TriangleCount 0 "bindVolumeSlices extracts Y-slice triangles"
+                    Expect.isTrue sliceSink.Batch.DoubleSided "bindVolumeSlices creates double-sided slice batch"
+                    Expect.equal sliceSink.Batch.BlendMode BlendMode.Opaque "bindVolumeSlices starts Opaque"
+                    sliceOpSig.Value <- 0.45f
+                    Expect.equal sliceSink.Batch.BlendMode BlendMode.AlphaBlend "bindVolumeSlices transitions to AlphaBlend"
+
+                    // 8. bindWallContours (section-exempt back-wall projection LineBatch)
+                    let axisFrame = Axis3D.build (Axis3D.defaultSpec scale) 64 64 cam
+                    let backWallsSig = Api.createSignal (Axis3D.backWallPlanes axisFrame)
+                    let densityGrid =
+                        Density.grid
+                            (DensityConfig.create (Bounds.create -1.0 -1.0 2.0 2.0) 8 8)
+                            [ { Id = "c"; Position = Point.create 0.0 0.0; Weight = 10.0 } ]
+                        |> unwrapOk "densityGrid"
+                    let contours = Contour.compute (ContourConfig.create [ 2.0 ]) densityGrid |> unwrapOk "contours"
+                    let contourBatch =
+                        Reactive3D.bindWallContours
+                            ctx
+                            opts
+                            (fun () -> scale)
+                            (fun () -> backWallsSig.Value)
+                            (fun () -> WallPlane.XY)
+                            (fun () -> RgbaColor.white)
+                            (fun () -> contours)
+
+                    Expect.isGreaterThan contourBatch.SegmentCount 0 "bindWallContours projects ContourPolygon segments"
+                    ScenePass.create cam
+                    |> ScenePass.withClear RgbaColor.black
+                    |> ScenePass.withSection (SectionPlane.create Vector3.UnitY -10.0f)
+                    |> ScenePass.withLines [| contourBatch |]
+                    |> WgpuContext.render ctx
+                    |> ignore
+                    let contourVisible = ctx.RgbaPixels |> Array.chunkBySize 4 |> Array.exists (fun px -> px[0] > 100uy)
+                    Expect.isTrue contourVisible "bindWallContours stays visible under full clipping SectionPlane"
+                )
+
+            testCase "Portable Plot3D: Axis3DMemo caches rebuilds, PlotInputKernel3D handles orbit/pan/hover-gate/interactive-guard/keys, and Layer3D/Plot3D.layers compose sinks"
+            <| fun () ->
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64)
+                let scale = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+                let mutable formatCalls = 0
+                let baseSpec = Axis3D.defaultSpec scale
+                let spec1 =
+                    { baseSpec with
+                        X = { baseSpec.X with FormatTick = Some (fun v -> formatCalls <- formatCalls + 1; $"{v:F1}") }
+                    }
+                let cam = PlotCamera3D.toCamera3D scale PlotCamera3D.defaultValue
+
+                // 1. Axis3DMemo uploads once and caches unchanged inputs
+                use boxMesh = ctx.UploadMesh (Primitives.unitBox ())
+                use panelBatch = ctx.CreateBatch (boxMesh, BlendMode.AlphaBlend, false, drawBeforeLines = true)
+                use axisLineBatch = ctx.CreateLineBatch ()
+                let memo = Axis3DMemo (panelBatch, axisLineBatch)
+
+                let u1 = memo.Update (spec1, 480, 360, cam)
+                Expect.isTrue u1.Rebuilt "first Axis3DMemo update builds"
+                let callsAfterFirst = formatCalls
+                Expect.isGreaterThan callsAfterFirst 0 "FormatTick called on initial Axis3DMemo build"
+
+                let u2 = memo.Update (spec1, 480, 360, cam)
+                Expect.isFalse u2.Rebuilt "unchanged inputs hit Axis3DMemo cache"
+                Expect.isFalse u2.AxisSpecChanged "unchanged spec ref reports AxisSpecChanged = false"
+                Expect.equal formatCalls callsAfterFirst "cache hit invokes 0 FormatTick calls"
+
+                let spec2 = Axis3D.withPlotTitle "Switched Scene" spec1
+                let u3 = memo.Update (spec2, 480, 360, cam)
+                Expect.isTrue u3.Rebuilt "changed AxisSpec rebuilds"
+                Expect.isTrue u3.AxisSpecChanged "changed AxisSpec reference reports AxisSpecChanged = true"
+
+                // 2. PlotInputKernel3D guards interactive target, gates hover on allowHover, orbits, clicks, wheels, keys
+                let kernel = PlotInputKernel3D ()
+                Expect.isFalse (kernel.OnPointerDown (1, 0s, 100.0, 100.0, false, true)) "interactive target pointerdown ignored"
+                Expect.isFalse kernel.IsDragging "interactive target never starts drag"
+                Expect.equal (kernel.OnPointerMove (1, 120.0, 120.0, 480.0, 360.0, 1.0f, PlotCamera3D.defaultValue, false)) PointerMoveResult3D.NoOp "hover gated off when allowHover = false"
+                Expect.equal (kernel.OnPointerMove (1, 120.0, 120.0, 480.0, 360.0, 1.0f, PlotCamera3D.defaultValue, true)) PointerMoveResult3D.HoverMoved "hover emits HoverMoved when allowHover = true"
+
+                Expect.isTrue (kernel.OnPointerDown (5, 0s, 100.0, 100.0, false, false)) "canvas pointerdown starts drag"
+                Expect.isTrue kernel.IsDragging "dragging active"
+                Expect.equal (kernel.OnPointerMove (99, 120.0, 120.0, 480.0, 360.0, 1.0f, PlotCamera3D.defaultValue, true)) PointerMoveResult3D.NoOp "foreign pointerId move ignored while dragging"
+
+                match kernel.OnPointerMove (5, 130.0, 110.0, 480.0, 360.0, 1.0f, PlotCamera3D.defaultValue, false) with
+                | PointerMoveResult3D.CameraUpdated cNext ->
+                    Expect.notEqual cNext.AzimuthRad PlotCamera3D.defaultValue.AzimuthRad "drag updates camera AzimuthRad"
+                | other -> failtestf "Expected CameraUpdated, got %A" other
+
+                let upDrag = kernel.OnPointerUp (5, 0s, 130.0, 110.0)
+                Expect.isTrue upDrag.Handled "pointerup handled for active pointer"
+                Expect.isFalse upDrag.WasClick "moved drag is not a click"
+
+                Expect.isTrue (kernel.OnPointerDown (6, 0s, 50.0, 50.0, false, false)) "second pointerdown"
+                let upClick = kernel.OnPointerUp (6, 0s, 50.5, 50.5)
+                Expect.isTrue upClick.Handled "click pointerup handled"
+                Expect.isTrue upClick.WasClick "unmoved primary pointerup is a click"
+
+                Expect.equal (PlotInputKernel3D.ApplyDefaultKey ("r", PlotCamera3D.defaultValue)) KeyCameraAction3D.Reset "'r' resets camera"
+                Expect.isTrue (match PlotInputKernel3D.ApplyWheel (-120.0, PlotCamera3D.defaultValue) with ValueSome c -> c.Zoom > 1.0f | ValueNone -> false) "negative wheel zooms in"
+
+                // 3. Layer3D and Plot3D.layers compile Surface+Wireframe, KeyedInstances, Discs, Polylines, Colorbar, and CategoricalLegend
+                use graph = new Graph ()
+
+                graph.Run (fun () ->
+                    let reg = PickRegistry3D ()
+                    let opts = SinkOptions3D.defaultValue |> SinkOptions3D.withRegistry reg
+                    let ramp = ColorRamp.viridis (-1.0, 1.0)
+                    let sGrid = SurfaceGrid.fromFunction3D 4 4 (-0.5, 0.5) (-0.5, 0.5) (fun x y -> x * y) |> unwrapOk "layerGrid"
+                    let sSpec = { SurfaceSpec.create scale ramp with Wireframe = ValueSome RgbaColor.white }
+                    let surf = Reactive3D.bindSurfaceWith ctx opts (fun () -> sSpec) (fun () -> sGrid)
+
+                    let barColl = Api.createKeyedCollection (fun struct (k: string, _: BarDatum3D) -> k)
+                    barColl.AddOrUpdate (struct ("b1", BarDatum3D.create 0.0 0.0 0.0 0.5 0.3 0.3 RgbaColor.white))
+                    let barSink = Reactive3D.bindBarsWith ctx opts (fun () -> scale) (Reactive3D.collectionValues barColl)
+
+                    let discColl = Api.createKeyedCollection (fun struct (k: string, _: ScatterDatum3D) -> k)
+                    discColl.AddOrUpdate (struct ("d1", ScatterDatum3D.create (Point3.create 0.0 0.0 0.5) 8.0f RgbaColor.white))
+                    let discSink = Reactive3D.bindDiscsWith ctx opts (fun () -> scale) (Reactive3D.collectionValues discColl)
+
+                    let cbSpec = ColorbarSpec3D.vertical (Bounds.create 720.0 80.0 18.0 240.0) "Height" (-1.0, 1.0) ramp
+                    let swatches = [ { Id = "s1"; Label = "Group A"; Color = RgbaColor.white; Visible = true } ]
+
+                    let compiled =
+                        Plot3D.layers
+                            [
+                                Layer3D.surface surf
+                                Layer3D.keyedInstances barSink
+                                Layer3D.keyedDiscs discSink
+                                Layer3D.colorbar cbSpec
+                                Layer3D.categorical (Point.create 20.0 20.0) (Some "Legend") swatches
+                                Layer3D.overlayMarks [ Mark.text "hud/layer" (Point.create 10.0 10.0) "OK" ]
+                            ]
+
+                    Expect.equal compiled.Batches.Length 2 "surface + barSink batches compiled"
+                    Expect.equal compiled.Lines.Length 1 "surface WireframeBatch automatically collected into Lines"
+                    Expect.equal compiled.Discs.Length 1 "discSink batch compiled"
+                    Expect.equal compiled.OverlayMarks.Length 1 "OverlayMarks collected"
+                    Expect.isTrue compiled.ExtraOverlay.IsSome "Colorbar + CategoricalLegend combined into ExtraOverlay"
+                    let combinedDefs = Scene.definitions compiled.ExtraOverlay.Value
+                    Expect.equal combinedDefs.Length 1 "colorbar LinearGradient preserved in combined overlay"
+                    let combinedMarks = Scene.marks compiled.ExtraOverlay.Value
+                    Expect.isTrue (combinedMarks |> List.exists (fun m -> Mark.key m = "legend3d/swatch/s1/box")) "categorical swatch preserved in combined overlay"
+                )
         ]
