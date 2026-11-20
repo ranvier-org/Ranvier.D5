@@ -504,6 +504,109 @@ module Glyph3D =
         | GlyphShape3D.Cone -> Primitives.unitCone 20
         | GlyphShape3D.Torus -> Primitives.unitTorus 24 12 0.3f
 
+    let private unitCylinderMesh (segments: int) : MeshData =
+        let verts = ResizeArray<Vertex3D>(segments * 4 + 2)
+        let inds = ResizeArray<uint32>(segments * 12)
+        let twoPi = MathF.PI * 2.0f
+
+        for i = 0 to segments - 1 do
+            let a = float32 i / float32 segments * twoPi
+            let nx = MathF.Cos a
+            let nz = MathF.Sin a
+            let n = Vector3 (nx, 0.0f, nz)
+            verts.Add (Vertex3D (Vector3 (nx * 0.5f, -0.5f, nz * 0.5f), n))
+            verts.Add (Vertex3D (Vector3 (nx * 0.5f, 0.5f, nz * 0.5f), n))
+
+        for i = 0 to segments - 1 do
+            let next = (i + 1) % segments
+            let b0 = uint32 (i * 2)
+            let t0 = b0 + 1u
+            let b1 = uint32 (next * 2)
+            let t1 = b1 + 1u
+            inds.Add b0
+            inds.Add t1
+            inds.Add b1
+            inds.Add b0
+            inds.Add t0
+            inds.Add t1
+
+        let topCenter = uint32 verts.Count
+        verts.Add (Vertex3D (Vector3 (0.0f, 0.5f, 0.0f), Vector3.UnitY))
+
+        for i = 0 to segments - 1 do
+            let a = float32 i / float32 segments * twoPi
+            verts.Add (Vertex3D (Vector3 (MathF.Cos a * 0.5f, 0.5f, MathF.Sin a * 0.5f), Vector3.UnitY))
+
+        for i = 0 to segments - 1 do
+            let c0 = topCenter + 1u + uint32 i
+            let c1 = topCenter + 1u + uint32 ((i + 1) % segments)
+            inds.Add topCenter
+            inds.Add c1
+            inds.Add c0
+
+        let botCenter = uint32 verts.Count
+        verts.Add (Vertex3D (Vector3 (0.0f, -0.5f, 0.0f), -Vector3.UnitY))
+
+        for i = 0 to segments - 1 do
+            let a = float32 i / float32 segments * twoPi
+            verts.Add (Vertex3D (Vector3 (MathF.Cos a * 0.5f, -0.5f, MathF.Sin a * 0.5f), -Vector3.UnitY))
+
+        for i = 0 to segments - 1 do
+            let c0 = botCenter + 1u + uint32 i
+            let c1 = botCenter + 1u + uint32 ((i + 1) % segments)
+            inds.Add botCenter
+            inds.Add c0
+            inds.Add c1
+
+        {
+            Vertices = verts.ToArray ()
+            Indices = inds.ToArray ()
+        }
+
+    let private unitConeMesh (segments: int) : MeshData =
+        let verts = ResizeArray<Vertex3D>(segments * 4 + 1)
+        let inds = ResizeArray<uint32>(segments * 6)
+        let twoPi = MathF.PI * 2.0f
+        let slopeY = 0.5f / MathF.Sqrt 1.25f
+        let slopeR = 1.0f / MathF.Sqrt 1.25f
+
+        for i = 0 to segments - 1 do
+            let a0 = float32 i / float32 segments * twoPi
+            let a1 = float32 (i + 1) / float32 segments * twoPi
+            let am = (a0 + a1) * 0.5f
+            let p0 = Vector3 (MathF.Cos a0 * 0.5f, -0.5f, MathF.Sin a0 * 0.5f)
+            let p1 = Vector3 (MathF.Cos a1 * 0.5f, -0.5f, MathF.Sin a1 * 0.5f)
+            let apex = Vector3 (0.0f, 0.5f, 0.0f)
+            let n0 = Vector3 (MathF.Cos a0 * slopeR, slopeY, MathF.Sin a0 * slopeR)
+            let n1 = Vector3 (MathF.Cos a1 * slopeR, slopeY, MathF.Sin a1 * slopeR)
+            let nm = Vector3 (MathF.Cos am * slopeR, slopeY, MathF.Sin am * slopeR)
+            let b = uint32 verts.Count
+            verts.Add (Vertex3D (p0, n0))
+            verts.Add (Vertex3D (apex, nm))
+            verts.Add (Vertex3D (p1, n1))
+            inds.Add b
+            inds.Add (b + 1u)
+            inds.Add (b + 2u)
+
+        let botCenter = uint32 verts.Count
+        verts.Add (Vertex3D (Vector3 (0.0f, -0.5f, 0.0f), -Vector3.UnitY))
+
+        for i = 0 to segments - 1 do
+            let a = float32 i / float32 segments * twoPi
+            verts.Add (Vertex3D (Vector3 (MathF.Cos a * 0.5f, -0.5f, MathF.Sin a * 0.5f), -Vector3.UnitY))
+
+        for i = 0 to segments - 1 do
+            let c0 = botCenter + 1u + uint32 i
+            let c1 = botCenter + 1u + uint32 ((i + 1) % segments)
+            inds.Add botCenter
+            inds.Add c0
+            inds.Add c1
+
+        {
+            Vertices = verts.ToArray ()
+            Indices = inds.ToArray ()
+        }
+
     /// <summary>
     /// Builds a unit-length arrow mesh along <c>+Y</c> anchored at <c>y = 0.0f</c> with cylindrical shaft <c>[0.0f..0.72f]</c> (radius <c>1.0f</c>)
     /// and conical arrowhead <c>[0.72f..1.0f]</c> (base radius <c>2.2f</c>); requires <c>segments &gt;= 3</c>.
@@ -512,7 +615,6 @@ module Glyph3D =
         if segments < 3 then
             raise (ArgumentOutOfRangeException (nameof segments, "Arrow mesh requires at least 3 radial segments."))
 
-        let segs = max 6 segments
         let builder = MeshBuilder ()
 
         let shaftMat =
@@ -523,8 +625,8 @@ module Glyph3D =
             Matrix4x4.CreateScale (4.4f, 0.28f, 4.4f)
             * Matrix4x4.CreateTranslation (0.0f, 0.86f, 0.0f)
 
-        builder.AddMesh (Primitives.unitCylinder segs, shaftMat, RgbaColor.white)
-        builder.AddMesh (Primitives.unitCone segs, headMat, RgbaColor.white)
+        builder.AddMesh (unitCylinderMesh segments, shaftMat, RgbaColor.white)
+        builder.AddMesh (unitConeMesh segments, headMat, RgbaColor.white)
         builder.ToMeshData ()
 
     /// <summary>Packs oriented 3D glyphs into <c>Instance3D</c> GPU payloads, omitting unmappable or non-finite entries.</summary>

@@ -136,15 +136,8 @@ let private runNativeAcceptance () =
                 }
 
             let pass: PlotPass3D =
-                {
-                    AxisSpec = axisSpec
-                    ClearColor = RgbaColor.darkBackdrop
-                    Lighting = ValueSome LightingRig.studioDefault
-                    SectionPlane = ValueNone
+                { PlotPass3D.create axisSpec with
                     ExtraBatches = batches
-                    ExtraLines = ReadOnlyMemory.Empty
-                    ExtraDiscs = ReadOnlyMemory.Empty
-                    ExtraOverlayMarks = []
                 }
 
             let passSig = Api.createSignal pass
@@ -155,13 +148,9 @@ let private runNativeAcceptance () =
     ignore batchesMem
 
     let config: PlotViewConfig3D =
-        {
-            Width = 480
-            Height = 360
-            Camera = camera
-            OnHoverHit = Some hoverHits.Add
-            OnClickHit = Some clickHits.Add
-        }
+        PlotViewConfig3D.create 480 360 camera
+        |> PlotViewConfig3D.withOnHoverHit hoverHits.Add
+        |> PlotViewConfig3D.withOnClickHit clickHits.Add
 
     let container = win.Host.Document.createElement "div"
     win.Host.Document.body.appendChild container |> ignore
@@ -176,6 +165,7 @@ let private runNativeAcceptance () =
             (fun ctx -> Program.run (PlotView3D.create win wgpu config (fun () -> ignore dataStepSig.Value; passSig.Value)) ctx.Backend)
 
     pumpFrames win 3
+    Expect.isTrue PlotView3DStats.PanelDrawBeforeLines "PlotView3D panelBatch enables drawBeforeLines = true so back walls draw behind axis lines"
 
     // Verify dirty-only RAF: idle turns trigger 0 extra WebGPU renders
     let renderCallsIdle0 = wgpu.RenderCalls
@@ -452,6 +442,100 @@ let private runNativeAcceptance () =
     Expect.isLessThan brightLinesFullClipped brightHalfClipped "full SectionPlane clips remaining bright wave + probe pixels"
     Expect.isGreaterThan brightLinesFullClipped 50 "section-exempt Axis3D cuboid spines/gridlines/ticks stay bright and visible"
 
+    // 8. Hover pick coalescing: 10 rapid hover moves before Frame issue at most 1 GPU pick and resolve final probe position
+    graph.Run (fun () ->
+        let cur = passSig.Value
+        passSig.Value <- { cur with SectionPlane = ValueNone })
+
+    win.Host.Mouse (0, 2, 2, 0, 0, 0) |> ignore
+    pumpFrames win 2
+
+    let coalescedGpuCam = PlotCamera3D.toCamera3D scale (graph.Run (fun () -> camera.Value))
+    let coalescedScrPx = Camera3D.projectToScreen wgpu.Width wgpu.Height coalescedGpuCam (Scale3D.map scale (Point3.create 0.0 0.0 0.9)) |> ValueOption.get
+    let finalCssX = int (MathF.Round (coalescedScrPx.X / float32 pw * 480.0f))
+    let finalCssY = int (MathF.Round (coalescedScrPx.Y / float32 ph * 360.0f))
+
+    hoverHits.Clear ()
+    let pickCallsBeforeCoalesce = PlotView3DStats.PickCalls
+
+    for i = 0 to 8 do
+        win.Host.Mouse (0, 200 + i * 3, 160 + i * 2, 0, 0, 0) |> ignore
+
+    win.Host.Mouse (0, finalCssX, finalCssY, 0, 0, 0) |> ignore
+    pumpFrames win 1
+
+    let pickCallsDelta = PlotView3DStats.PickCalls - pickCallsBeforeCoalesce
+    Expect.isLessThanOrEqual pickCallsDelta 1L "10 rapid hover moves before Frame issue at most 1 GPU pick"
+    Expect.isLessThanOrEqual hoverHits.Count 1 "10 rapid hover moves invoke OnHoverHit at most once"
+
+    let coalescedHit =
+        hoverHits
+        |> Seq.tryLast
+        |> Option.bind (function ValueSome h -> Some (Probe3D.resolveKeyed scale probeSink h) | ValueNone -> None)
+        |> Option.defaultWith (fun () -> failtest "Expected coalesced final hover hit on probe sphere")
+
+    Expect.equal (coalescedHit |> ValueOption.map _.Key) (ValueSome "center") "coalesced hover pick resolves final 'center' probe"
+
+    // 9. Keyboard hygiene: Ctrl+R and child <input> keydown never reset or orbit PlotCamera3D
+    graph.Run (fun () ->
+        let c = camera.Value
+        camera.Value <- PlotCamera3D.orbitBy 25.0f 15.0f c)
+
+    pumpFrames win 1
+    let camBeforeKeyHygiene = graph.Run (fun () -> camera.Value)
+    (plotRoot :?> HTMLElement).focus ()
+    win.Host.Key (0, "r", "KeyR", null, 2, false) |> ignore
+    win.Host.Key (1, "r", "KeyR", null, 2, false) |> ignore
+    pumpFrames win 1
+    Expect.equal (graph.Run (fun () -> camera.Value)) camBeforeKeyHygiene "Ctrl+R does not reset PlotCamera3D"
+
+    let childInput = win.Host.Document.createElement "input"
+    plotRoot.appendChild childInput |> ignore
+    (childInput :?> HTMLElement).focus ()
+    win.Host.Key (0, "r", "KeyR", null, 0, false) |> ignore
+    win.Host.Key (1, "r", "KeyR", null, 0, false) |> ignore
+    win.Host.Key (0, "ArrowLeft", "ArrowLeft", null, 0, false) |> ignore
+    win.Host.Key (1, "ArrowLeft", "ArrowLeft", null, 0, false) |> ignore
+    pumpFrames win 1
+    Expect.equal (graph.Run (fun () -> camera.Value)) camBeforeKeyHygiene "keydown originating on child <input> does not reset or orbit PlotCamera3D"
+    plotRoot.removeChild childInput |> ignore
+    (plotRoot :?> HTMLElement).focus ()
+
+    // 10. PlotPass3D.ExtraOverlay renders full Scene + <linearGradient> defs in sibling passive container without rebuilding Axis3D
+    let gradStops =
+        [
+            { Offset = 0.0; Color = Paint.rgb 255 0 0; Opacity = 1.0 }
+            { Offset = 1.0; Color = Paint.rgb 0 0 255; Opacity = 1.0 }
+        ]
+
+    let extraScene =
+        Scene.compose
+            { Width = 480.0; Height = 360.0 }
+            "ExtraOverlay"
+            [ LinearGradient ("d2-grad", Point.create 0.0 0.0, Point.create 100.0 0.0, gradStops) ]
+            [ Leaf (Shape.rectangle (Bounds.create 12.0 12.0 80.0 16.0) |> Mark.path "extra/gradient-box" |> Mark.withFillDefinition "d2-grad") ]
+
+    let tickFormatCallsBeforeExtra = tickFormatCalls
+
+    graph.Run (fun () ->
+        let cur = passSig.Value
+        passSig.Value <- { cur with ExtraOverlay = ValueSome extraScene })
+
+    pumpFrames win 1
+    Expect.isNotNull (container.querySelector "[data-d5-key='extra/gradient-box']") "ExtraOverlay mounts gradient rectangle mark"
+    Expect.isNotNull (container.querySelector "defs linearGradient") "ExtraOverlay mounts <linearGradient> inside <defs>"
+    Expect.equal tickFormatCalls tickFormatCallsBeforeExtra "adding ExtraOverlay reuses cached Axis3D.build without re-invoking FormatTick"
+    Expect.isTrue (Object.ReferenceEquals (titleGroupBeforeStep, container.querySelector "[data-d5-key='axis/x/title']")) "ExtraOverlay leaves axis/x/title DOM node untouched"
+
+    graph.Run (fun () ->
+        let cur = passSig.Value
+        passSig.Value <- { cur with ExtraOverlay = ValueNone })
+
+    pumpFrames win 1
+    Expect.isNull (container.querySelector "[data-d5-key='extra/gradient-box']") "clearing ExtraOverlay removes extra mark"
+    Expect.equal tickFormatCalls tickFormatCallsBeforeExtra "clearing ExtraOverlay preserves cached Axis3D.build without re-invoking FormatTick"
+    Expect.isTrue (Object.ReferenceEquals (titleGroupBeforeStep, container.querySelector "[data-d5-key='axis/x/title']")) "clearing ExtraOverlay preserves axis/x/title DOM node identity"
+
     // Review Focus #5: idempotent double mounted.Dispose(), then graph.Dispose(), wgpu.Dispose(), win.Dispose()
     mounted.Dispose ()
     mounted.Dispose ()
@@ -460,8 +544,125 @@ let private runNativeAcceptance () =
     wgpu.Dispose ()
     (win :> IDisposable).Dispose ()
 
+let private runSubRectDprAndKeyMapChecks () =
+    // Sub-window PlotView3D (480x300 inside 480x360 window) + OnHoverHit = None hover spikes + Disabled/Custom PlotKeyMap3D + AutoFocus
+    let win = Window.Create ("D5WgpuSubRect", 480, 360, hidden = true)
+    let wgpu = WgpuSdlSurface.CreateContext win
+    let graph = new Graph ()
+
+    let scale = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+    let ramp = ColorRamp.viridis (-1.0, 1.0)
+
+    let boxGrid =
+        SurfaceGrid.fromFunction 12 12 (-0.8, 0.8) (-0.8, 0.8) (fun x y -> 0.4 * cos (x * 2.0) * cos (y * 2.0)) ValueNone
+        |> unwrapOk "subRectGrid"
+
+    let spec: SurfaceSpec =
+        {
+            Scale = scale
+            Color = ramp
+            Shading = ShadingMode.Unlit
+            Opacity = 1.0f
+            Wireframe = ValueNone
+            PickId = 0x01000001u
+        }
+
+    let cam, surf =
+        graph.Run (fun () ->
+            let c = Reactive3D.editableCamera (fun () -> PlotCamera3D.defaultValue)
+            let s = SurfaceBatch.Create (wgpu, spec, boxGrid)
+            Api.onCleanup (fun () -> s.Dispose ())
+            c, s)
+
+    let pass =
+        { PlotPass3D.create (Axis3D.defaultSpec scale) with
+            ExtraBatches = ReadOnlyMemory<InstanceBatch> [| surf.Batch |]
+        }
+
+    let config =
+        PlotViewConfig3D.create 480 300 cam
+        |> PlotViewConfig3D.withKeyMap PlotKeyMap3D.Disabled
+        |> PlotViewConfig3D.withAutoFocus true
+
+    let container = win.Host.Document.createElement "div"
+    win.Host.Document.body.appendChild container |> ignore
+
+    let mounted =
+        Mounting.mount
+            graph
+            None
+            (fun errors -> raise (AggregateException errors))
+            container
+            None
+            (fun ctx -> Program.run (PlotView3D.create win wgpu config (fun () -> pass)) ctx.Backend)
+
+    pumpFrames win 2
+
+    // 1. Live GPU surface & canvas attributes match 480x300 (scaled by window DPR), NOT initial 480x360
+    let docEl = win.Host.Document.documentElement
+    let struct (winPxW, winPxH) = win.PixelSize
+    let dprX = if docEl.clientWidth > 0 then float winPxW / float docEl.clientWidth else 1.0
+    let dprY = if docEl.clientHeight > 0 then float winPxH / float docEl.clientHeight else 1.0
+    Expect.equal wgpu.Width (max 1 (int (Math.Round (480.0 * dprX)))) "wgpu.Width matches 480 * dprX"
+    Expect.equal wgpu.Height (max 1 (int (Math.Round (300.0 * dprY)))) "wgpu.Height resizes from 360 to 300 * dprY"
+
+    let canvasEl = container.querySelector "canvas"
+    Expect.isNotNull canvasEl "canvas mounted"
+    Expect.equal (canvasEl.getAttribute "height") (string wgpu.Height) "canvas height attribute synced to device pixels"
+
+    // 2. ShowHoverSpikes = true draws spikes even when OnHoverHit = None
+    let pixelsNoHover, _, _ = readWindowPixels win
+    let centerPt = Scale3D.map scale (Point3.create 0.0 0.0 0.4)
+    let centerPx = Camera3D.projectToScreen wgpu.Width wgpu.Height (PlotCamera3D.toCamera3D scale PlotCamera3D.defaultValue) centerPt |> ValueOption.get
+    win.Host.Mouse (0, int (MathF.Round (float32 centerPx.X / float32 wgpu.Width * 480.0f)), int (MathF.Round (float32 centerPx.Y / float32 wgpu.Height * 300.0f)), 0, 0, 0) |> ignore
+    pumpFrames win 2
+    let pixelsWithHover, _, _ = readWindowPixels win
+    Expect.isFalse (pixelsNoHover = pixelsWithHover) "OnHoverHit = None with ShowHoverSpikes = true still renders hover spikes"
+
+    // 3. AutoFocus + PlotKeyMap3D.Disabled ignores built-in shortcuts without requiring manual .focus()
+    let plotRoot = container.querySelector "[tabindex='0']"
+    Expect.isTrue (Object.ReferenceEquals (win.Host.Document.activeElement, plotRoot)) "AutoFocus focuses container on mount"
+    win.Host.SetFocused true
+    let camBeforeDisabled = graph.Run (fun () -> cam.Value)
+    win.Host.Key (0, "m", "KeyM", null, 0, false) |> ignore
+    win.Host.Key (0, "ArrowLeft", "ArrowLeft", null, 0, false) |> ignore
+    pumpFrames win 1
+    Expect.equal (graph.Run (fun () -> cam.Value)) camBeforeDisabled "PlotKeyMap3D.Disabled ignores 'm' and 'ArrowLeft'"
+
+    // 4. Custom PlotKeyMap3D handles custom shortcut and ignores unhandled keys
+    mounted.Dispose ()
+    let customContainer = win.Host.Document.createElement "div"
+    win.Host.Document.body.appendChild customContainer |> ignore
+
+    let customConfig =
+        PlotViewConfig3D.create 480 300 cam
+        |> PlotViewConfig3D.withKeyMap
+            (PlotKeyMap3D.Custom (fun ev c ->
+                if ev.key = "x" then ValueSome { c with Zoom = 2.0f } else ValueNone))
+
+    let customMounted =
+        Mounting.mount
+            graph
+            None
+            (fun errors -> raise (AggregateException errors))
+            customContainer
+            None
+            (fun ctx -> Program.run (PlotView3D.create win wgpu customConfig (fun () -> pass)) ctx.Backend)
+
+    pumpFrames win 1
+    win.Host.Key (0, "x", "KeyX", null, 0, false) |> ignore
+    pumpFrames win 1
+    Expect.floatClose { absolute = 1e-5; relative = 0.0 } (float (graph.Run (fun () -> cam.Value.Zoom))) 2.0 "PlotKeyMap3D.Custom updates camera on mapped key"
+
+    customMounted.Dispose ()
+    win.Host.Cycle ()
+    graph.Dispose ()
+    wgpu.Dispose ()
+    (win :> IDisposable).Dispose ()
+
 [<EntryPoint>]
 let main _ =
     runNativeAcceptance ()
-    printfn "Ranvier.D5.Wgpu.Native.Tests passed: PlotView3D live wave, DOM identity, 0 mark wheel listeners, idle RAF, hover/click Probe3D, and safe idempotent disposal."
+    runSubRectDprAndKeyMapChecks ()
+    printfn "Ranvier.D5.Wgpu.Native.Tests passed: PlotView3D live wave, DOM identity, 0 mark wheel listeners, idle RAF, hover coalescing, keyboard hygiene, ExtraOverlay, DPR resize, and safe idempotent disposal."
     0

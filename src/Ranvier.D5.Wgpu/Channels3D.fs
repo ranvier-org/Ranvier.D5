@@ -117,18 +117,20 @@ type ShadingMode =
     /// <summary>Applies studio hemisphere and key/rim lighting with explicit surface roughness and emissive boost.</summary>
     | Lit of roughness: float32 * emissive: float32
 
-/// <summary>Immutable 256-entry GPU colormap lookup table paired with a continuous scale and clipping policy.</summary>
+/// <summary>Immutable 256-entry GPU colormap lookup table (or scalar passthrough sentinel) paired with a continuous scale and clipping policy.</summary>
 type ColorRamp =
     private
         {
             Transform: RampTransform
             Clip: ColorClipPolicy
             Lut: RgbaColor array
+            ScalarPassthrough: bool
         }
 
     member internal this.ClipPolicy = this.Clip
     member internal this.LowStop = this.Lut[0]
     member internal this.HighStop = this.Lut[this.Lut.Length - 1]
+    member internal this.IsScalarPassthrough = this.ScalarPassthrough
 
 /// <summary>Constructors, built-in perceptually uniform palettes, and zero-allocation lookups for <c>ColorRamp</c>.</summary>
 [<RequireQualifiedAccess>]
@@ -196,24 +198,28 @@ module ColorRamp =
         lut
 
     let private sampleNormalizedLut (lut: RgbaColor array) (t: float) : RgbaColor =
-        let scaled = t * 255.0
-
-        if scaled <= 0.0 then
+        if lut.Length <= 1 then
             lut[0]
-        elif scaled >= 255.0 then
-            lut[255]
         else
-            let i = int scaled
-            let frac = float32 (scaled - float i)
-            let c0 = lut[i]
-            let c1 = lut[i + 1]
+            let maxIdx = lut.Length - 1
+            let scaled = t * float maxIdx
 
-            RgbaColor (
-                c0.R + (c1.R - c0.R) * frac,
-                c0.G + (c1.G - c0.G) * frac,
-                c0.B + (c1.B - c0.B) * frac,
-                c0.A + (c1.A - c0.A) * frac
-            )
+            if scaled <= 0.0 then
+                lut[0]
+            elif scaled >= float maxIdx then
+                lut[maxIdx]
+            else
+                let i = int scaled
+                let frac = float32 (scaled - float i)
+                let c0 = lut[i]
+                let c1 = lut[i + 1]
+
+                RgbaColor (
+                    c0.R + (c1.R - c0.R) * frac,
+                    c0.G + (c1.G - c0.G) * frac,
+                    c0.B + (c1.B - c0.B) * frac,
+                    c0.A + (c1.A - c0.A) * frac
+                )
 
     let private buildRamp (scale: Continuous) (eval: float -> Rgba) (clip: ColorClipPolicy) : ColorRamp =
         if isNull (box scale) then
@@ -223,6 +229,7 @@ module ColorRamp =
             Transform = RampTransform.classify scale
             Clip = clip
             Lut = samplePaletteLut eval
+            ScalarPassthrough = false
         }
 
     /// <summary>Builds a 256-entry sequential CIE Lab colormap ramp over <c>scale</c>, <c>palette</c>, and <c>clip</c>.</summary>
@@ -253,6 +260,24 @@ module ColorRamp =
     let coolWarm (domain: float * float) : ColorRamp =
         diverging (Scale.linear domain (0.0, 1.0)) coolWarmPalette ColorClipPolicy.clampAndOmit
 
+    /// <summary>
+    /// Creates a scalar-passthrough <c>ColorRamp</c> encoding finite raw <c>float32</c> scalars directly into the vertex red channel (<c>RgbaColor (float32 v, 1.0f, 1.0f, 1.0f)</c>)
+    /// while applying <c>missing</c> for non-finite values, for use with <c>ColorShader.packScopedUniforms</c> and <c>InstanceFlags.UseColorLut</c>.
+    /// </summary>
+    let scalarPassthroughWithMissing (missing: MissingColorPolicy) : ColorRamp =
+        {
+            Transform = RampTransform.classify (Scale.linear (0.0, 1.0) (0.0, 1.0))
+            Clip = { ColorClipPolicy.clampAndOmit with Missing = missing }
+            Lut = [| RgbaColor.white |]
+            ScalarPassthrough = true
+        }
+
+    /// <summary>
+    /// Scalar-passthrough <c>ColorRamp</c> omitting non-finite values (<c>MissingColorPolicy.Omit</c>) and preserving unclamped raw scalars in vertex <c>R</c>
+    /// for scoped <c>ColorShader.packScopedUniforms</c> GPU LUT shading.
+    /// </summary>
+    let scalarPassthrough: ColorRamp = scalarPassthroughWithMissing MissingColorPolicy.Omit
+
     let private missingColor (missing: MissingColorPolicy) : RgbaColor voption =
         match missing with
         | MissingColorPolicy.Omit -> ValueNone
@@ -268,20 +293,31 @@ module ColorRamp =
         elif t > 1.0 then
             match ramp.Clip.HighClip with
             | ValueSome c -> ValueSome c
-            | ValueNone -> ValueSome ramp.Lut[255]
+            | ValueNone -> ValueSome ramp.Lut[ramp.Lut.Length - 1]
         else
             ValueSome (sampleNormalizedLut ramp.Lut t)
 
-    /// <summary>Maps a scalar <c>value</c> into an <c>RgbaColor</c> in <c>O(1)</c> with zero heap allocations on linear, logarithmic, and constant scales.</summary>
+    /// <summary>Maps a scalar <c>value</c> into an <c>RgbaColor</c> in <c>O(1)</c> with zero heap allocations on linear, logarithmic, constant, and scalar-passthrough ramps.</summary>
     let tryMap (ramp: ColorRamp) (value: float) : RgbaColor voption =
         if isNull (box ramp) then
             nullArg (nameof ramp)
 
-        let t = RampTransform.eval ramp.Transform value
-        if Check3D.isFinite t then
-            mapNormalized ramp t
+        if ramp.ScalarPassthrough then
+            if Check3D.isFinite value then
+                let s = float32 value
+
+                if Check3D.isFinite32 s then
+                    ValueSome (RgbaColor (s, 1.0f, 1.0f, 1.0f))
+                else
+                    missingColor ramp.Clip.Missing
+            else
+                missingColor ramp.Clip.Missing
         else
-            missingColor ramp.Clip.Missing
+            let t = RampTransform.eval ramp.Transform value
+            if Check3D.isFinite t then
+                mapNormalized ramp t
+            else
+                missingColor ramp.Clip.Missing
 
     /// <summary>Maps a scalar <c>value</c> through <c>ramp</c>, returning <c>fallback</c> when <c>tryMap</c> yields <c>ValueNone</c>.</summary>
     let mapOrFallback (ramp: ColorRamp) (value: float) (fallback: RgbaColor) : RgbaColor =
@@ -475,7 +511,10 @@ module WallProjection3D =
                 | UpAxis.YUp -> ValueSome (Vector3 (bx, wy, wz))
             | ValueNone -> ValueNone
 
-    /// <summary>Projects 2D <c>ContourPolygon</c> rings and holes onto the active <c>plane</c> back wall as paired <c>LineList</c> vertices.</summary>
+    /// <summary>
+    /// Projects 2D <c>ContourPolygon</c> rings and holes onto the active <c>plane</c> back wall as paired <c>LineList</c> vertices
+    /// with <c>ignoreSectionPlane = true</c> (<c>Pad = 1.0f</c>) so back-wall contours remain visible under active <c>SectionPlane</c> cuts.
+    /// </summary>
     let projectContours
         (scale: Scale3D)
         (activeBackWalls: struct (float32 * float32 * float32))
@@ -502,8 +541,8 @@ module WallProjection3D =
 
                 match prev, mapped with
                 | ValueSome a, ValueSome b ->
-                    vertices.Add (LineVertex3D (a, color))
-                    vertices.Add (LineVertex3D (b, color))
+                    vertices.Add (LineVertex3D (a, color, true))
+                    vertices.Add (LineVertex3D (b, color, true))
                 | _ -> ()
 
                 prev <- mapped

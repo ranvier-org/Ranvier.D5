@@ -643,4 +643,184 @@ let channelTests =
                 Expect.floatClose { absolute = 1e-9; relative = 0.0 } (RampTransform.eval subLogNeg -1e-200) 0.5 "negative sub-1e-162 log midpoint"
                 Expect.isTrue (Double.IsNaN (RampTransform.eval subLogPos 0.0)) "positive sub-1e-162 log rejects zero"
                 Expect.isTrue (Double.IsNaN (RampTransform.eval subLogNeg 1e-200)) "negative sub-1e-162 log rejects positive"
+
+            testCase "WallProjection3D.projectContours emits Pad = 1.0f and stays visible under clipping SectionPlane"
+            <| fun () ->
+                let scale = Scale3D.cartesian (0.0, 10.0) (0.0, 10.0) (0.0, 10.0)
+                let cam = Camera3D.orthographic Vector3.Zero 0.0f 85.0f 1.5f 6.0f
+                let frame = Axis3D.build (Axis3D.defaultSpec scale) 64 64 cam
+                let walls = Axis3D.backWallPlanes frame
+
+                let values =
+                    [ for r in 0..4 do
+                        for c in 0..4 ->
+                            Some (if r >= 1 && r <= 3 && c >= 1 && c <= 3 && not (r = 2 && c = 2) then 2.0 else 0.0) ]
+
+                let grid =
+                    match DensityGrid.create (Bounds.create 0.0 0.0 10.0 10.0) 5 5 values with
+                    | Ok g -> g
+                    | Error e -> failtestf "grid failed: %A" e
+
+                let contours =
+                    match Contour.compute (ContourConfig.create [ 1.0 ]) grid with
+                    | Ok c -> c
+                    | Error e -> failtestf "contour failed: %A" e
+
+                let segs = WallProjection3D.projectContours scale walls WallPlane.XY RgbaColor.white contours
+                Expect.isGreaterThan segs.Length 0 "XY contours emit segments"
+
+                for i = 0 to segs.Length - 1 do
+                    Expect.equal segs.Span[i].Pad 1.0f $"projectContours vertex[{i}] sets Pad = 1.0f (ignoreSectionPlane)"
+
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64)
+                use lineBatch = ctx.CreateLineBatch ()
+                lineBatch.UpdateVertices segs.Span
+                let clipAllPlane = SectionPlane.create Vector3.UnitY -10.0f
+
+                ScenePass.create cam
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withSection clipAllPlane
+                |> ScenePass.withLines [| lineBatch |]
+                |> WgpuContext.render ctx
+                |> ignore
+
+                let visible =
+                    ctx.RgbaPixels
+                    |> Array.chunkBySize 4
+                    |> Array.exists (fun px -> px[0] > 100uy && px[1] > 100uy && px[2] > 100uy)
+
+                Expect.isTrue visible "section-exempt projected contours stay visible under clipping SectionPlane"
+
+            testCase "ColorShader.packScopedUniforms + ColorRamp.scalarPassthrough scope LUT to UseColorLut batches without altering Axis3D/non-LUT pixels"
+            <| fun () ->
+                let wgsl = ColorShader.wgsl ()
+                Expect.equal (WgpuContext.ValidateWgsl wgsl) (Ok ()) "scoped ColorShader.wgsl passes WgpuContext.ValidateWgsl"
+
+                // 1. ColorRamp.scalarPassthrough encodes raw finite float32 scalars in R with neutral 1.0f G/B/A and omits non-finite / float32-overflow
+                let passRamp = ColorRamp.scalarPassthrough
+                let negMapped = ColorRamp.tryMap passRamp -2.8 |> ValueOption.get
+                let posMapped = ColorRamp.tryMap passRamp 2.8 |> ValueOption.get
+                expectRgbaClose 1e-6f negMapped (RgbaColor (-2.8f, 1.0f, 1.0f, 1.0f)) "scalarPassthrough preserves negative float32 scalar"
+                expectRgbaClose 1e-6f posMapped (RgbaColor (2.8f, 1.0f, 1.0f, 1.0f)) "scalarPassthrough preserves >1 float32 scalar"
+                Expect.equal (ColorRamp.tryMap passRamp Double.NaN) ValueNone "scalarPassthrough omits NaN"
+                Expect.equal (ColorRamp.tryMap passRamp Double.PositiveInfinity) ValueNone "scalarPassthrough omits +Inf"
+                Expect.equal (ColorRamp.tryMap passRamp 1e40) ValueNone "scalarPassthrough omits float32 overflow"
+
+                let fb = RgbaColor (0.25f, 0.5f, 0.75f, 1.0f)
+                let fallbackRamp = ColorRamp.scalarPassthroughWithMissing (MissingColorPolicy.Fallback fb)
+                Expect.equal (ColorRamp.tryMap fallbackRamp Double.NaN) (ValueSome fb) "scalarPassthroughWithMissing uses fallback on NaN"
+                Expect.equal (ColorRamp.stops 5 passRamp).Length 5 "ColorRamp.stops safely handles 1-element scalarPassthrough LUT"
+
+                let coolWarm = ColorRamp.coolWarm (0.0, 1.0)
+                let uDefaultScoped = ColorShader.packScopedUniforms -2.0f 2.0f coolWarm
+                Expect.equal uDefaultScoped.Length 16 "packScopedUniforms emits 16 Vector4 slots"
+                Expect.equal uDefaultScoped.Span[0] (Vector4 (-2.0f, 2.0f, 13.0f, 2.0f)) "slot 0 packs [cmin, cmax, stopCount, 2.0f]"
+
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64, customWgsl = wgsl)
+                let scale = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+                let cam = Camera3D.orthographic Vector3.Zero 0.0f 85.0f 1.5f 6.0f
+
+                // Left surface (world X in [-0.95, -0.05]) uses ColorRamp.scalarPassthrough; 4th-dim scalar varies linearly in [-2.0, +2.0] with Y
+                let surfSpec: SurfaceSpec =
+                    {
+                        Scale = scale
+                        Color = passRamp
+                        Shading = ShadingMode.Unlit
+                        Opacity = 1.0f
+                        Wireframe = ValueNone
+                        PickId = 1u
+                    }
+
+                let surfGrid =
+                    SurfaceGrid.fromFunction 5 5 (-0.95, -0.05) (-0.8, 0.8) (fun _ _ -> 0.0) (ValueSome (fun _ y -> y * 2.5))
+                    |> Result.defaultWith (fun errs -> failtestf "surfGrid failed: %A" errs)
+
+                use surfBatch = SurfaceBatch.Create (ctx, surfSpec, surfGrid)
+
+                // Right non-LUT panel box (world X in [+0.2, +0.9]) without UseColorLut
+                use boxMesh = ctx.UploadMesh (Primitives.unitBox ())
+                use panelBatch = ctx.CreateBatch (boxMesh, BlendMode.Opaque, false)
+                let panelMat = Matrix4x4.CreateScale (0.7f, 0.2f, 1.2f) * Matrix4x4.CreateTranslation (0.55f, 0.0f, 0.0f)
+                let panelColor = RgbaColor (0.2f, 0.85f, 0.35f, 1.0f)
+                panelBatch.SetSingle (Instance3D.fromMatrix panelMat panelColor 0.5f 0u (InstanceFlags.Unlit ||| InstanceFlags.IgnoreSectionPlane) 0.0f)
+
+                let surfScr = Camera3D.projectToScreen 64 64 cam (Scale3D.map scale (Point3.create -0.5 0.0 0.0)) |> ValueOption.get
+                let panelScr = Camera3D.projectToScreen 64 64 cam (Vector3 (0.55f, 0.1f, 0.0f)) |> ValueOption.get
+                let sx, sy = int (MathF.Round surfScr.X), int (MathF.Round surfScr.Y)
+                let px, py = int (MathF.Round panelScr.X), int (MathF.Round panelScr.Y)
+
+                let panelPassOnly =
+                    ScenePass.create cam
+                    |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                    |> ScenePass.withBatches [| panelBatch |]
+
+                ctx.SetUserUniforms ((ColorShader.disabledUniforms ()).Span)
+                panelPassOnly |> WgpuContext.render ctx |> ignore
+                let expectedPanel = pixelAt ctx px py
+
+                let combinedPass =
+                    ScenePass.create cam
+                    |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                    |> ScenePass.withBatches [| panelBatch; surfBatch.Batch |]
+
+                // Scrub 1: [-2.0, +2.0] -> scalar 0.0 at surfScr sits near neutral cool-warm midpoint
+                ctx.SetUserUniforms (uDefaultScoped.Span)
+                combinedPass |> WgpuContext.render ctx |> ignore
+                let struct (mr, mg, mb, _) = pixelAt ctx sx sy
+                Expect.equal (pixelAt ctx px py) expectedPanel "non-LUT panel pixel stays 100% invariant under packScopedUniforms [-2, 2]"
+                Expect.isGreaterThan mr 150uy "scoped surface center (scalar=0 in [-2,2]) renders bright neutral"
+                Expect.isLessThan (abs (int mr - int mb)) 20 "scoped surface center balanced R/B"
+                Expect.isLessThan (abs (int mr - int mg)) 20 "scoped surface center balanced R/G"
+
+                // Scrub 2: [0.0, 2.0] -> scalar 0.0 shifts to cool blue while non-LUT panel pixel remains identical
+                ctx.SetUserUniforms ((ColorShader.packScopedUniforms 0.0f 2.0f coolWarm).Span)
+                combinedPass |> WgpuContext.render ctx |> ignore
+                let struct (cr, _, cb, _) = pixelAt ctx sx sy
+                Expect.equal (pixelAt ctx px py) expectedPanel "non-LUT panel pixel stays 100% invariant when cmin=0.0f"
+                Expect.isGreaterThan cb (cr + 40uy) "cmin=0.0f shifts scalar=0.0 surface pixel to cool blue"
+
+                // Scrub 3: [-2.0, 0.0] -> scalar 0.0 shifts to warm red while non-LUT panel pixel remains identical
+                ctx.SetUserUniforms ((ColorShader.packScopedUniforms -2.0f 0.0f coolWarm).Span)
+                combinedPass |> WgpuContext.render ctx |> ignore
+                let struct (wr, _, wb, _) = pixelAt ctx sx sy
+                Expect.equal (pixelAt ctx px py) expectedPanel "non-LUT panel pixel stays 100% invariant when cmax=0.0f"
+                Expect.isGreaterThan wr (wb + 40uy) "cmax=0.0f shifts scalar=0.0 surface pixel to warm red"
+
+                // ExactColor ||| UseColorLut renders exact unlit LUT color without tone-mapping compression
+                let exactRedRamp = ColorRamp.sequential (Scale.linear (0.0, 1.0) (0.0, 1.0)) [ Ranvier.Anime.ColorSpace.rgba 1.0 0.0 0.0 1.0; Ranvier.Anime.ColorSpace.rgba 1.0 0.0 0.0 1.0 ] ColorClipPolicy.clampAndOmit
+                use exactMesh =
+                    ctx.UploadMesh
+                        {
+                            Vertices =
+                                [|
+                                    Vertex3D (Vector3 (-1.0f, -1.0f, 0.0f), Vector3.UnitZ, Vector4 (0.5f, 0.0f, 0.0f, 1.0f))
+                                    Vertex3D (Vector3 (1.0f, -1.0f, 0.0f), Vector3.UnitZ, Vector4 (0.5f, 0.0f, 0.0f, 1.0f))
+                                    Vertex3D (Vector3 (1.0f, 1.0f, 0.0f), Vector3.UnitZ, Vector4 (0.5f, 0.0f, 0.0f, 1.0f))
+                                    Vertex3D (Vector3 (-1.0f, 1.0f, 0.0f), Vector3.UnitZ, Vector4 (0.5f, 0.0f, 0.0f, 1.0f))
+                                |]
+                            Indices = [| 0u; 1u; 2u; 0u; 2u; 3u |]
+                        }
+                use exactBatch = ctx.CreateBatch (exactMesh, BlendMode.Opaque, true)
+                exactBatch.SetSingle (Instance3D.identity RgbaColor.white 0.5f 1u (InstanceFlags.ExactColor ||| InstanceFlags.UseColorLut))
+                ctx.SetUserUniforms ((ColorShader.packScopedUniforms 0.0f 1.0f exactRedRamp).Span)
+                ScenePass.create (Camera3D.orthographic Vector3.Zero 0.0f 0.0f 1.5f 4.0f)
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withBatches [| exactBatch |]
+                |> WgpuContext.render ctx
+                |> ignore
+                let struct (er, eg, eb, _) = pixelAt ctx 32 32
+                Expect.equal er 255uy "ExactColor ||| UseColorLut renders exact saturated red R=255"
+                Expect.equal eg 0uy "ExactColor ||| UseColorLut renders G=0"
+                Expect.equal eb 0uy "ExactColor ||| UseColorLut renders B=0"
+
+                // Switching SurfaceBatch.Update from scalarPassthrough -> CPU-baked ColorRamp clears UseColorLut flag on the single instance
+                let heights = Array.create 25 0.0
+                let scalars = [| for r in 0..4 do let y = -0.8 + 0.4 * float r in for _ in 0..4 -> y * 2.5 |]
+                let flatCpuRamp = ColorRamp.sequential (Scale.linear (-2.0, 2.0) (0.0, 1.0)) [ Ranvier.Anime.ColorSpace.rgba 0.0 1.0 0.0 1.0; Ranvier.Anime.ColorSpace.rgba 0.0 1.0 0.0 1.0 ] ColorClipPolicy.clampAndOmit
+                surfBatch.Update ({ surfSpec with Color = flatCpuRamp }, ReadOnlySpan<float>(heights), ReadOnlySpan<float>(scalars))
+                ctx.SetUserUniforms ((ColorShader.packScopedUniforms -2.0f 0.0f coolWarm).Span)
+                combinedPass |> WgpuContext.render ctx |> ignore
+                let struct (srAfter, sgAfter, sbAfter, _) = pixelAt ctx sx sy
+                Expect.isGreaterThan sgAfter (srAfter + 80uy) "switching back to CPU ColorRamp disables UseColorLut and renders pure green despite active packScopedUniforms"
+                Expect.isGreaterThan sgAfter (sbAfter + 80uy) "switching back to CPU ColorRamp omits scoped LUT blue shift"
         ]

@@ -55,8 +55,10 @@ type AxisConfig3D =
         ShowGrid: bool
         /// <summary>When true, emits the background panel quad on the perpendicular back wall.</summary>
         ShowPanel: bool
-        /// <summary>Optional custom tick label formatter; defaults to culture-invariant numeric or UTC time formatting.</summary>
+        /// <summary>Optional custom numeric/time tick label formatter; defaults to culture-invariant numeric or UTC time formatting (used as normalized-position fallback for categorical axes when <c>FormatCategoryTick</c> is <c>None</c>).</summary>
         FormatTick: (float -> string) option
+        /// <summary>Optional custom categorical tick label formatter receiving the raw category label string; defaults to verbatim category names when <c>None</c>.</summary>
+        FormatCategoryTick: (string -> string) option
     }
 
 /// <summary>Colors and typography sizes shared across 3D gridlines, spines, panels, and SVG overlay labels.</summary>
@@ -144,6 +146,7 @@ module Axis3D =
             ShowGrid = true
             ShowPanel = true
             FormatTick = None
+            FormatCategoryTick = None
         }
 
     let private defaultTheme: AxisTheme3D =
@@ -544,9 +547,12 @@ module Axis3D =
                     let vt = catTicks |> List.map (fun (_, tNorm) -> tNorm, Math.Clamp (tNorm, 0.0, 1.0))
 
                     let ft =
-                        match cfg.FormatTick with
-                        | Some fmt -> catTicks |> List.map (snd >> fmt)
-                        | None -> catTicks |> List.map fst
+                        match cfg.FormatCategoryTick with
+                        | Some fmtCat -> catTicks |> List.map (fst >> fmtCat)
+                        | None ->
+                            match cfg.FormatTick with
+                            | Some fmt -> catTicks |> List.map (snd >> fmt)
+                            | None -> catTicks |> List.map fst
 
                     vt, ft
                 | _ ->

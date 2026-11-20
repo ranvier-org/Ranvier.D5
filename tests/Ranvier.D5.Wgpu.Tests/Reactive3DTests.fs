@@ -782,4 +782,64 @@ let reactive3DTests =
                     Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 2u)) (ValueSome "k1") "slot 1 = k1 after batched recovery"
                     Expect.equal (nanSink.TryResolvePick ((4u <<< 24) ||| 3u)) (ValueSome "k2") "slot 2 = k2 after batched recovery"
                 )
+
+            testCase "HoverPickCoalescer enforces single-flight coalescing, epoch fencing, follow-up dispatch, and synchronous frame coalescing"
+            <| fun () ->
+                let coalescer = HoverPickCoalescer ()
+                Expect.equal coalescer.CurrentEpoch 0 "starts at epoch 0"
+                Expect.equal coalescer.InFlightEpoch ValueNone "starts idle"
+                Expect.equal coalescer.PendingClientXY ValueNone "starts with no pending coords"
+
+                // First move dispatches immediately in epoch 0; next 9 overwrite PendingClientXY without launching picks
+                Expect.equal (coalescer.RequestHover (10.0, 20.0)) (ValueSome 0) "first move starts single-flight pick at epoch 0"
+                Expect.equal coalescer.InFlightEpoch (ValueSome 0) "in-flight epoch tracks 0"
+
+                for i = 1 to 9 do
+                    Expect.equal (coalescer.RequestHover (100.0 + float i, 200.0 + float i)) ValueNone $"move {i} coalesces while in flight"
+
+                Expect.equal coalescer.PendingClientXY (ValueSome struct (109.0, 209.0)) "latest coalesced coordinates preserved"
+
+                // Completing current epoch dispatches queued follow-up coordinates at epoch 0
+                let struct (isCur1, follow1) = coalescer.CompletePick 0
+                Expect.isTrue isCur1 "matching epoch completion is current"
+                Expect.equal follow1 (ValueSome struct (109.0, 209.0, 0)) "completing current pick emits last pending coords at epoch 0"
+                Expect.equal coalescer.PendingClientXY ValueNone "pending cleared once follow-up starts"
+                Expect.equal coalescer.InFlightEpoch (ValueSome 0) "follow-up keeps single-flight in-flight"
+
+                // Queue another move, then switch epoch (scene switch / drag) -> pending cleared and stale completion rejected
+                Expect.equal (coalescer.RequestHover (50.0, 60.0)) ValueNone "queues behind follow-up pick"
+                coalescer.AdvanceEpoch ()
+                Expect.equal coalescer.CurrentEpoch 1 "AdvanceEpoch increments epoch"
+                Expect.equal coalescer.PendingClientXY ValueNone "AdvanceEpoch drops pre-switch pending coords"
+
+                let struct (isCurStale, followStale) = coalescer.CompletePick 0
+                Expect.isFalse isCurStale "stale epoch 0 completion rejected after AdvanceEpoch"
+                Expect.equal followStale ValueNone "no follow-up when no move occurred after AdvanceEpoch"
+                Expect.equal coalescer.InFlightEpoch ValueNone "in-flight returns idle"
+
+                // Post-switch move while a pick is in flight still dispatches fresh coordinates when stale readback completes
+                Expect.equal (coalescer.RequestHover (1.0, 2.0)) (ValueSome 1) "dispatches in epoch 1"
+                coalescer.AdvanceEpoch ()
+                Expect.equal coalescer.CurrentEpoch 2 "epoch advances to 2"
+                Expect.equal (coalescer.RequestHover (300.0, 400.0)) ValueNone "post-switch move queues while epoch 1 still in flight"
+                let struct (isCurStale2, followFresh) = coalescer.CompletePick 1
+                Expect.isFalse isCurStale2 "stale epoch 1 response rejected"
+                Expect.equal followFresh (ValueSome struct (300.0, 400.0, 2)) "post-switch move dispatches under epoch 2"
+                let struct (isCurFinal, followDone) = coalescer.CompletePick 2
+                Expect.isTrue isCurFinal "epoch 2 completion accepted"
+                Expect.equal followDone ValueNone "becomes idle after final completion"
+
+                // Synchronous frame coalescing for SDL RAF
+                for i = 1 to 10 do
+                    coalescer.QueueFrameHover (float (i * 10), float (i * 5))
+
+                Expect.isTrue coalescer.HasPendingFrameHover "frame hover queued"
+                Expect.equal (coalescer.TakeFrameHover ()) (ValueSome struct (100.0, 50.0, 2)) "TakeFrameHover returns only latest coordinates with CurrentEpoch"
+                Expect.isFalse coalescer.HasPendingFrameHover "TakeFrameHover drains queue"
+                Expect.equal (coalescer.TakeFrameHover ()) ValueNone "empty frame queue returns ValueNone"
+
+                coalescer.QueueFrameHover (12.0, 34.0)
+                coalescer.AdvanceEpoch ()
+                Expect.isFalse coalescer.HasPendingFrameHover "AdvanceEpoch clears pending synchronous frame hover"
+                Expect.equal (coalescer.TakeFrameHover ()) ValueNone "cleared frame hover yields ValueNone"
         ]

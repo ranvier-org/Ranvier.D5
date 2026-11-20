@@ -122,8 +122,6 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
                 readoutSig.Value <- ""
                 frameTick.Value <- frameTick.Value + 1e-4))
 
-        focusPlot ()
-
     let toggleSection () =
         graph.Run (fun () ->
             let cur = section.Value
@@ -133,15 +131,11 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
             else
                 section.Value <- SectionPlane.create (Vector3.Normalize (Vector3 (1.0f, 0.2f, 0.35f))) 0.0f)
 
-        focusPlot ()
-
     let togglePerspective () =
         graph.Run (fun () ->
             let cam = camera.Value
             let nextP = if cam.Perspectiveness > 0.5f then 0.0f else 1.0f
             camera.Value <- { cam with Perspectiveness = nextP })
-
-        focusPlot ()
 
     let toggleOrbitMode () =
         graph.Run (fun () ->
@@ -154,8 +148,6 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
 
             camera.Value <- PlotCamera3D.withMode nextM cam)
 
-        focusPlot ()
-
     let scrub (delta: float) =
         graph.Run (fun () ->
             Api.batch (fun () ->
@@ -163,22 +155,19 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
                 readoutSig.Value <- msg
                 frameTick.Value <- frameTick.Value + 1e-4))
 
-        focusPlot ()
-
     let togglePause () =
         graph.Run (fun () -> paused.Value <- not paused.Value)
-        focusPlot ()
 
-    let resetAll () =
+    let resetAll (resetCamera: bool) =
         graph.Run (fun () ->
             Api.batch (fun () ->
-                camera.Reset ()
+                if resetCamera then
+                    camera.Reset ()
+
                 section.Reset ()
                 stage.ResetScene activeScene.Value
                 readoutSig.Value <- "Reset camera, section & layout parameters"
                 frameTick.Value <- frameTick.Value + 1e-4))
-
-        focusPlot ()
 
     let onHover (hit: PickHit voption) =
         match hit with
@@ -226,10 +215,7 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
             |> Mark.withFill (Paint.rgb 125 211 252)
             |> Mark.withFontSize 11.0
 
-        {
-            AxisSpec = pass.AxisSpec
-            ClearColor = RgbaColor.darkBackdrop
-            Lighting = ValueSome LightingRig.studioDefault
+        { PlotPass3D.create pass.AxisSpec with
             SectionPlane = pass.Section
             ExtraBatches = pass.Batches
             ExtraLines = pass.Lines
@@ -241,13 +227,9 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
     let plotHeight = max 240 (height - toolbarHeight)
 
     let plotConfig: PlotViewConfig3D =
-        {
-            Width = width
-            Height = plotHeight
-            Camera = camera
-            OnHoverHit = Some onHover
-            OnClickHit = Some onClick
-        }
+        PlotViewConfig3D.create width plotHeight camera
+        |> PlotViewConfig3D.withOnHoverHit onHover
+        |> PlotViewConfig3D.withOnClickHit onClick
 
     let btnStyle (isActive: bool) =
         let bg = if isActive then "rgba(14,116,144,0.92)" else "rgba(15,23,42,0.90)"
@@ -258,7 +240,9 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
         button<unit>(
             [|
                 button.style (fun () -> btnStyle (isActive ()))
-                button.onClick (fun () _ -> onPress ())
+                button.onClick (fun () _ ->
+                    onPress ()
+                    focusPlot ())
             |]
         )
             .Run [| text (fun () -> label ()) |]
@@ -270,25 +254,26 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
                 [|
                     div.style $"position:relative;width:{width}px;height:{height}px;display:flex;flex-direction:column;overflow:hidden;outline:none;background:#04060b;"
                     div.onKeydown (fun () ev ->
-                        match ev.key with
-                        | "1" -> switchScene LayoutSceneId.PoincareH3
-                        | "2" -> switchScene LayoutSceneId.CodeCityTreemap3D
-                        | "3" -> switchScene LayoutSceneId.SphericalBundling3D
-                        | "4" -> switchScene LayoutSceneId.ManifoldClusterBvh3D
-                        | " " ->
-                            ev.preventDefault ()
-                            togglePause ()
-                        | "s" | "S" -> toggleSection ()
-                        | "[" -> scrub -1.0
-                        | "]" -> scrub 1.0
-                        | "r" | "R" | "Home" -> resetAll ()
-                        | "p" | "P" when not ev.defaultPrevented ->
-                            ev.preventDefault ()
-                            togglePerspective ()
-                        | "m" | "M" when not ev.defaultPrevented ->
-                            ev.preventDefault ()
-                            toggleOrbitMode ()
-                        | _ -> ())
+                        if not ev.ctrlKey && not ev.metaKey && not ev.altKey then
+                            match ev.key with
+                            | "1" -> switchScene LayoutSceneId.PoincareH3
+                            | "2" -> switchScene LayoutSceneId.CodeCityTreemap3D
+                            | "3" -> switchScene LayoutSceneId.SphericalBundling3D
+                            | "4" -> switchScene LayoutSceneId.ManifoldClusterBvh3D
+                            | " " ->
+                                ev.preventDefault ()
+                                togglePause ()
+                            | "s" | "S" -> toggleSection ()
+                            | "[" -> scrub -1.0
+                            | "]" -> scrub 1.0
+                            | "r" | "R" | "Home" -> resetAll (not ev.defaultPrevented)
+                            | "p" | "P" when not ev.defaultPrevented ->
+                                ev.preventDefault ()
+                                togglePerspective ()
+                            | "m" | "M" when not ev.defaultPrevented ->
+                                ev.preventDefault ()
+                                toggleOrbitMode ()
+                            | _ -> ())
                 |]
             )
                 .Run
@@ -329,7 +314,7 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
 
                             toolbarButton (fun () -> "− ([)") (fun () -> false) (fun () -> scrub -1.0)
                             toolbarButton (fun () -> "+ (])") (fun () -> false) (fun () -> scrub 1.0)
-                            toolbarButton (fun () -> "Reset (R)") (fun () -> false) resetAll
+                            toolbarButton (fun () -> "Reset (R)") (fun () -> false) (fun () -> resetAll true)
                         |]
                 |])
 
@@ -344,8 +329,6 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
 
     if not hidden then
         win.Host.SetFocused true
-
-    focusPlot ()
 
     {
         Mounted = mounted

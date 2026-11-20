@@ -10,6 +10,9 @@
     <Compile Include="PlotView3D.fs" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Ranvier.D5.Wgpu.Native.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../Ranvier.D5.Wgpu/Ranvier.D5.Wgpu.fsproj" />
     <ProjectReference Include="../Ranvier.D5.View/Ranvier.D5.View.fsproj" />
     <PackageReference Include="Ranvier.Wgpu.Sdl$(RanvierPackageSuffix)" Version="$(RanvierWgpuSdlVersion)" />

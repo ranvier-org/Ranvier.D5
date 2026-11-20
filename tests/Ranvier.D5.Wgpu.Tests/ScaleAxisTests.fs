@@ -823,4 +823,54 @@ let scaleAxisTests =
                     |> Array.exists (fun px -> px[0] > 100uy)
 
                 Expect.isTrue exemptVisible "section-exempt Axis3D lines stay visible in clipped half-space on GPU"
+
+            testCase "AxisConfig3D.FormatCategoryTick receives exact category strings rather than normalized floats"
+            <| fun () ->
+                let catScale =
+                    Scale3D.create
+                        BoxAspect.ChartDefault
+                        UpAxis.ZUp
+                        (AxisScale3D.band [ "Alpha"; "Beta"; "Gamma" ] 0.2 0.1)
+                        (AxisScale3D.point [ "North"; "South" ] 0.5)
+                        (AxisScale3D.linear (0.0, 10.0))
+
+                let cam = Camera3D.orthographic Vector3.Zero 35.0f 25.0f 1.5f 8.0f
+                let baseSpec = Axis3D.defaultSpec catScale
+
+                let catSpec =
+                    { baseSpec with
+                        X =
+                            { baseSpec.X with
+                                FormatTick = Some (fun v -> $"num={v:F2}")
+                                FormatCategoryTick = Some (fun s -> s.ToUpperInvariant ())
+                            }
+                        Y = { baseSpec.Y with FormatCategoryTick = Some (fun s -> $"[{s}]") }
+                        Z = { baseSpec.Z with FormatTick = Some (fun v -> $"z={int v}") }
+                    }
+
+                let frame = Axis3D.build catSpec 640 480 cam
+
+                let xTicks =
+                    Axis3D.labels frame
+                    |> Seq.filter (fun l -> l.Axis = AxisId3D.X && not l.IsTitle)
+                    |> Seq.map _.Text
+                    |> Seq.toList
+
+                let yTicks =
+                    Axis3D.labels frame
+                    |> Seq.filter (fun l -> l.Axis = AxisId3D.Y && not l.IsTitle)
+                    |> Seq.map _.Text
+                    |> Seq.toList
+
+                Expect.equal xTicks [ "ALPHA"; "BETA"; "GAMMA" ] "Band axis applies FormatCategoryTick to category strings (precedence over FormatTick)"
+                Expect.equal yTicks [ "[North]"; "[South]" ] "Point axis applies FormatCategoryTick to category strings"
+
+                let fallbackSpec = { baseSpec with X = { baseSpec.X with FormatTick = Some (fun v -> $"t={v:F1}") } }
+                let fallbackFrame = Axis3D.build fallbackSpec 640 480 cam
+                let fallbackTicks =
+                    Axis3D.labels fallbackFrame
+                    |> Seq.filter (fun l -> l.Axis = AxisId3D.X && not l.IsTitle)
+                    |> Seq.map _.Text
+                    |> Seq.toList
+                Expect.isTrue (fallbackTicks |> List.forall (fun s -> s.StartsWith "t=")) "FormatTick normalized fallback preserved when FormatCategoryTick is None"
         ]

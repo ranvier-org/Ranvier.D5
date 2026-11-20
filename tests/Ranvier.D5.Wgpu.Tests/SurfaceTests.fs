@@ -538,4 +538,107 @@ let surfaceTests =
                 match SurfaceGrid.fromFunction 20000 20000 (0.0, 1.0) (0.0, 1.0) (fun x _ -> x) ValueNone with
                 | Error [ LayoutError.BudgetExceeded _ ] -> ()
                 | other -> failtestf "Expected BudgetExceeded for oversized 20000x20000 grid indices, got %A" other
+
+            testCase "SurfaceBatch Update and UpdateGrid dynamically transition BlendMode and lazily allocate WireframeBatch with zero steady-state allocations"
+            <| fun () ->
+                let scale = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (0.0, 2.0)
+                let blueCol = Ranvier.Anime.ColorSpace.rgba 0.0 0.1 0.95 1.0
+                let ramp = ColorRamp.sequential (Scale.linear (0.0, 2.0) (0.0, 1.0)) [ blueCol; blueCol ] ColorClipPolicy.clampAndOmit
+
+                // Opaque blue surface at z = 1.0 (height -> worldY = 0.0f); Wireframe = ValueNone, Opacity = 1.0f
+                let opaqueSpec: SurfaceSpec =
+                    {
+                        Scale = scale
+                        Color = ramp
+                        Shading = ShadingMode.Unlit
+                        Opacity = 1.0f
+                        Wireframe = ValueNone
+                        PickId = 55u
+                    }
+
+                let cols, rows = 5, 5
+                let heights = Array.create (cols * rows) 1.0
+                let scalars = Array.create (cols * rows) 0.0
+
+                let grid =
+                    SurfaceGrid.uniform cols rows (-1.0, 1.0) (-1.0, 1.0) (ReadOnlySpan<float>(heights)) (ReadOnlySpan<float>(scalars))
+                    |> unwrapOk "dynGrid"
+
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64)
+                use surfBatch = SurfaceBatch.Create (ctx, opaqueSpec, grid)
+                Expect.equal surfBatch.Batch.BlendMode BlendMode.Opaque "starts Opaque when Opacity = 1.0f"
+                Expect.isTrue surfBatch.WireframeBatch.IsNone "starts with WireframeBatch = None"
+                let firstOpaqueBatch = surfBatch.Batch
+
+                // Bright red quad placed behind the z=1.0 surface (under ZUp, z=0 maps to lower worldY = -1.0f)
+                use bgMesh =
+                    ctx.UploadMesh
+                        {
+                            Vertices =
+                                [|
+                                    Vertex3D (Vector3 (-0.9f, -1.0f, -0.9f), Vector3.UnitY, Vector4.One)
+                                    Vertex3D (Vector3 (0.9f, -1.0f, -0.9f), Vector3.UnitY, Vector4.One)
+                                    Vertex3D (Vector3 (0.9f, -1.0f, 0.9f), Vector3.UnitY, Vector4.One)
+                                    Vertex3D (Vector3 (-0.9f, -1.0f, 0.9f), Vector3.UnitY, Vector4.One)
+                                |]
+                            Indices = [| 0u; 2u; 1u; 0u; 3u; 2u |]
+                        }
+
+                use bgBatch = ctx.CreateBatch (bgMesh, BlendMode.Opaque, true)
+                bgBatch.SetSingle (Instance3D.identity (RgbaColor (1.0f, 0.0f, 0.0f, 1.0f)) 0.5f 0u InstanceFlags.Unlit)
+
+                let cam = Camera3D.orthographic Vector3.Zero 0.0f 85.0f 1.5f 6.0f
+
+                ScenePass.create cam
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withBatches [| bgBatch; surfBatch.Batch |]
+                |> WgpuContext.render ctx
+                |> ignore
+
+                let struct (rOpaque, _, _, _) = pixelAt ctx 32 32
+                Expect.isLessThan rOpaque 20uy "opaque blue surface blocks red background quad"
+
+                // Dynamic transition: Opaque -> AlphaBlend + lazy WireframeBatch creation
+                let alphaWireSpec =
+                    { opaqueSpec with
+                        Opacity = 0.35f
+                        Wireframe = ValueSome RgbaColor.white
+                    }
+
+                surfBatch.Update (alphaWireSpec, ReadOnlySpan<float>(heights), ReadOnlySpan<float>(scalars))
+                Expect.equal surfBatch.Batch.BlendMode BlendMode.AlphaBlend "Update switches Batch to AlphaBlend when Opacity < 0.999f"
+                Expect.equal firstOpaqueBatch.Count 0 "previous Opaque batch is resized to 0 so stale refs cannot double-draw"
+                Expect.isTrue surfBatch.WireframeBatch.IsSome "Update lazily creates WireframeBatch when Wireframe toggles ValueSome"
+                Expect.isGreaterThan surfBatch.WireframeBatch.Value.SegmentCount 0 "lazily created WireframeBatch has active segments"
+                let firstAlphaBatch = surfBatch.Batch
+
+                ScenePass.create cam
+                |> ScenePass.withClear (RgbaColor (0.0f, 0.0f, 0.0f, 1.0f))
+                |> ScenePass.withBatches [| bgBatch; firstOpaqueBatch; surfBatch.Batch |]
+                |> WgpuContext.render ctx
+                |> ignore
+
+                let struct (rAlpha, _, _, _) = pixelAt ctx 32 32
+                Expect.isGreaterThan rAlpha (rOpaque + 50uy) "translucent AlphaBlend surface reveals red background quad behind it"
+
+                // Zero-allocation steady state after dynamic creation
+                surfBatch.Update (alphaWireSpec, ReadOnlySpan<float>(heights), ReadOnlySpan<float>(scalars))
+                let beforeAlloc = GC.GetAllocatedBytesForCurrentThread ()
+
+                for _ = 1 to 10 do
+                    surfBatch.Update (alphaWireSpec, ReadOnlySpan<float>(heights), ReadOnlySpan<float>(scalars))
+
+                let afterAlloc = GC.GetAllocatedBytesForCurrentThread ()
+                Expect.equal (afterAlloc - beforeAlloc) 0L "10 warmed Updates after dynamic Wireframe/AlphaBlend transition allocate 0 bytes"
+
+                // UpdateGrid transition: AlphaBlend -> Opaque + smaller dimensions
+                let grid8 =
+                    SurfaceGrid.fromFunction 8 8 (-1.0, 1.0) (-1.0, 1.0) (fun _ _ -> 1.0) ValueNone
+                    |> unwrapOk "grid8"
+
+                surfBatch.UpdateGrid (opaqueSpec, grid8)
+                Expect.equal surfBatch.Batch.BlendMode BlendMode.Opaque "UpdateGrid restores Opaque batch when Opacity = 1.0f"
+                Expect.equal surfBatch.Batch.Count 1 "active Opaque batch has 1 instance"
+                Expect.equal firstAlphaBatch.Count 0 "previous AlphaBlend batch is resized to 0 when returning to Opaque"
+                Expect.equal surfBatch.WireframeBatch.Value.SegmentCount 0 "Wireframe = ValueNone clears wireframe segments"
         ]
