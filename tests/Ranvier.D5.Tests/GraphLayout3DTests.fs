@@ -377,4 +377,92 @@ let tests =
             let lZDecMap = lZDec.Nodes |> List.map (fun n -> n.Id, n.Center) |> Map.ofList
             Expect.isTrue (lZIncMap["ui1"].Z < lZIncMap["api"].Z && lZIncMap["api"].Z < lZIncMap["db"].Z) "Layered3D Z Increasing progresses +Z"
             Expect.isTrue (lZDecMap["ui1"].Z > lZDecMap["api"].Z && lZDecMap["api"].Z > lZDecMap["db"].Z) "Layered3D Z Decreasing progresses -Z"
+
+        testCase "DiagramNode.sized3D / Pinned3D, Point3Chain conversions, Quaternion64, Hyperbolic3D.slerp and H3.projectCentersInto invariants" <| fun _ ->
+            // 1. Pinned3D & sized3D honored in both Force3D (incl. PreventOverlap) and Stress3D
+            let pinPos = Point3.create 12. -34. 56.
+            let pNodes =
+                [ DiagramNode.sized3D "pin" 30. 30. 30. |> DiagramNode.withPin3D pinPos
+                  DiagramNode.sized3D "near" 30. 30. 30. |> DiagramNode.withPin (Point.create 12. -34.)
+                  DiagramNode.create "free" ]
+            let pEdges = [ Association.create "e1" "pin" "free"; Association.create "e2" "pin" "near" ]
+            let pGraph = DiagramGraph.simple pNodes pEdges |> ok
+            Expect.throwsT<ArgumentException> (fun () -> DiagramNode.withPin3D (Point3.create nan 0. 0.) (DiagramNode.create "bad") |> ignore) "withPin3D rejects non-finite coordinates via Point3.create"
+            Expect.isTrue (DiagramGraph.simple [ DiagramNode.sized3D "bad" 10. 10. -2. ] [] |> Result.isError) "DiagramGraph rejects non-positive DepthSize from sized3D"
+
+            let fPinned = Force3D.layout { Force3DConfig.create cube with Iterations = 40; PreventOverlap = true } pGraph |> ok
+            let fPinNode = fPinned.Nodes |> List.find (fun n -> n.Id = "pin")
+            Expect.floatClose Accuracy.veryHigh fPinNode.Center.X 12. "Force3D preserves Pinned3D X"
+            Expect.floatClose Accuracy.veryHigh fPinNode.Center.Y -34. "Force3D preserves Pinned3D Y"
+            Expect.floatClose Accuracy.veryHigh fPinNode.Center.Z 56. "Force3D preserves Pinned3D Z even with PreventOverlap"
+
+            let sPinned = Stress3D.layout { Stress3DConfig.create cube with Iterations = 25 } pGraph |> ok
+            let sPinNode = sPinned.Nodes |> List.find (fun n -> n.Id = "pin")
+            Expect.floatClose Accuracy.veryHigh sPinNode.Center.X 12. "Stress3D preserves Pinned3D X"
+            Expect.floatClose Accuracy.veryHigh sPinNode.Center.Y -34. "Stress3D preserves Pinned3D Y"
+            Expect.floatClose Accuracy.veryHigh sPinNode.Center.Z 56. "Stress3D preserves Pinned3D Z"
+
+            // 2. Point3Chain.toArray defensive copy & Point3Chain.asSpan zero-copy
+            let p0, p1 = Point3.create 1. 2. 3., Point3.create 4. 5. 6.
+            let chain = Point3Chain.ofList [ p0; p1 ]
+            let copyArr = Point3Chain.toArray chain
+            Expect.equal copyArr [| p0; p1 |] "Point3Chain.toArray returns equal array"
+            copyArr[0] <- Point3.create -99. -99. -99.
+            Expect.equal chain[0] p0 "mutating toArray output does not mutate chain"
+            let sp = Point3Chain.asSpan chain
+            Expect.equal sp.Length 2 "Point3Chain.asSpan length"
+            Expect.equal sp[1] p1 "Point3Chain.asSpan element"
+
+            // 3. Quaternion64 alias + System.Numerics.Quaternion interop
+            let q64 : Quaternion64 = Quaternion.fromAxisAngle (Point3.create 0. 1. 0.) (Math.PI * 0.5)
+            let q32 : System.Numerics.Quaternion = Quaternion64.toNumerics q64
+            let qRt = Quaternion64.ofNumerics q32
+            Expect.floatClose Accuracy.high qRt.W q64.W "Quaternion64 W round-trips"
+            Expect.floatClose Accuracy.high qRt.Y q64.Y "Quaternion64 Y round-trips"
+
+            // 4. Hyperbolic3D.slerp exact geodesic interpolation on Minkowski upper sheet
+            let hA = Hyperbolic3D.fromSpherical 1.2 0.6 0.4
+            let hB = Hyperbolic3D.fromSpherical 2.0 1.4 -0.7
+            let s0 = Hyperbolic3D.slerp hA hB 0.0
+            let s1 = Hyperbolic3D.slerp hA hB 1.0
+            let sMid = Hyperbolic3D.slerp hA hB 0.5
+            Expect.floatClose Accuracy.veryHigh s0.X hA.X "slerp t=0 X matches a"
+            Expect.floatClose Accuracy.veryHigh s0.Y hA.Y "slerp t=0 Y matches a"
+            Expect.floatClose Accuracy.veryHigh s0.Z hA.Z "slerp t=0 Z matches a"
+            Expect.floatClose Accuracy.veryHigh s0.W hA.W "slerp t=0 W matches a"
+            Expect.floatClose Accuracy.veryHigh s1.X hB.X "slerp t=1 X matches b"
+            Expect.floatClose Accuracy.veryHigh s1.Y hB.Y "slerp t=1 Y matches b"
+            Expect.floatClose Accuracy.veryHigh s1.Z hB.Z "slerp t=1 Z matches b"
+            Expect.floatClose Accuracy.veryHigh s1.W hB.W "slerp t=1 W matches b"
+            Expect.isLessThan (Hyperbolic3D.distance hA s0) 1e-6 "slerp t=0 geodesic distance < 1e-6 (acosh(1+ulp) sensitivity)"
+            Expect.isLessThan (Hyperbolic3D.distance hB s1) 1e-6 "slerp t=1 geodesic distance < 1e-6 (acosh(1+ulp) sensitivity)"
+            Expect.floatClose Accuracy.high (Hyperbolic3D.minkowskiDot sMid sMid) -1. "slerp midpoint stays on hyperboloid sheet"
+            let dAB = Hyperbolic3D.distance hA hB
+            Expect.floatClose Accuracy.high (Hyperbolic3D.distance hA sMid) (dAB * 0.5) "slerp midpoint bisects geodesic d(a, mid)"
+            Expect.floatClose Accuracy.high (Hyperbolic3D.distance hB sMid) (dAB * 0.5) "slerp midpoint bisects geodesic d(b, mid)"
+            let sClose = Hyperbolic3D.slerp hA hA 0.5
+            Expect.floatClose Accuracy.veryHigh sClose.W hA.W "slerp close points avoid NaN"
+            Expect.isLessThan (Hyperbolic3D.distance hA sClose) 1e-6 "slerp close points geodesic distance < 1e-6"
+
+            // 5. H3.projectCentersInto matches H3.project across Klein & Poincare with 0 steady-state bytes
+            let treeNodes = [ for i in 0 .. 15 -> DiagramNode.create (sprintf "h%d" i) ]
+            let treeEdges = [ for i in 1 .. 15 -> Association.create (sprintf "he%d" i) (sprintf "h%d" ((i - 1) / 3)) (sprintf "h%d" i) ]
+            let treeDg = DiagramGraph.simple treeNodes treeEdges |> ok
+            for model in [ HyperbolicModel.Klein; HyperbolicModel.Poincare ] do
+                let st : H3State = H3.buildState { H3Config.defaultValue with Model = model; RootId = Some "h0" } treeDg |> ok
+                let boosted = H3.focusNode "h9" st |> ok
+                let tf = H3.viewTransform boosted
+                let proj = H3.project boosted
+                let dest = Array.zeroCreate<Point3> treeNodes.Length
+                let count = H3.projectCentersInto model tf st (Span<Point3> dest)
+                Expect.equal count treeNodes.Length (sprintf "projectCentersInto count (%A)" model)
+                for i, nd in List.indexed proj.Nodes do
+                    Expect.floatClose Accuracy.veryHigh (Point3.distance nd.Center dest[i]) 0. (sprintf "projectCentersInto matches H3.project[%d] (%A)" i model)
+
+                // Zero steady-state allocation verification
+                for _ = 1 to 5 do H3.projectCentersInto model tf st (Span<Point3> dest) |> ignore
+                let b0 = GC.GetAllocatedBytesForCurrentThread()
+                for _ = 1 to 20 do H3.projectCentersInto model tf st (Span<Point3> dest) |> ignore
+                let b1 = GC.GetAllocatedBytesForCurrentThread()
+                Expect.equal (b1 - b0) 0L (sprintf "H3.projectCentersInto allocates 0 bytes (%A)" model)
     ]

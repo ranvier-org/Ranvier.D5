@@ -60,6 +60,37 @@ type SliceIndices3D =
         ZIndex: int option
     }
 
+/// <summary>Constructors for <c>SliceIndices3D</c>.</summary>
+[<RequireQualifiedAccess>]
+module SliceIndices3D =
+    /// <summary>Empty slice selection extracting no planes.</summary>
+    let none: SliceIndices3D =
+        {
+            XIndex = None
+            YIndex = None
+            ZIndex = None
+        }
+
+    /// <summary>Selects a single constant-X cross-section plane at voxel index <c>ix</c>.</summary>
+    let ofX (ix: int) : SliceIndices3D =
+        { none with XIndex = Some ix }
+
+    /// <summary>Selects a single constant-Y cross-section plane at voxel index <c>iy</c>.</summary>
+    let ofY (iy: int) : SliceIndices3D =
+        { none with YIndex = Some iy }
+
+    /// <summary>Selects a single constant-Z cross-section plane at voxel index <c>iz</c>.</summary>
+    let ofZ (iz: int) : SliceIndices3D =
+        { none with ZIndex = Some iz }
+
+    /// <summary>Creates a <c>SliceIndices3D</c> selecting optional X, Y, and Z orthogonal cross-section planes.</summary>
+    let create (xIndex: int option) (yIndex: int option) (zIndex: int option) : SliceIndices3D =
+        {
+            XIndex = xIndex
+            YIndex = yIndex
+            ZIndex = zIndex
+        }
+
 [<Struct>]
 type private MappedVolumeAxes =
     {
@@ -545,6 +576,16 @@ module VolumeGrid =
         (secondaryScalars: ReadOnlySpan<float32>)
         : Result<VolumeGrid, LayoutError list> =
         uniformWithBudget VolumeKernel.DefaultMaxVoxels nx ny nz bounds values secondaryScalars
+
+    /// <summary>Creates a uniform 3D scalar grid without secondary coloring scalars using the default <c>4,194,304</c>-voxel budget.</summary>
+    let uniform3D
+        (nx: int)
+        (ny: int)
+        (nz: int)
+        (bounds: Bounds3)
+        (values: ReadOnlySpan<float32>)
+        : Result<VolumeGrid, LayoutError list> =
+        uniform nx ny nz bounds values ReadOnlySpan.Empty
 
     /// <summary>
     /// Samples an analytical 3D scalar field (and optional secondary coloring field) across <c>bounds</c>

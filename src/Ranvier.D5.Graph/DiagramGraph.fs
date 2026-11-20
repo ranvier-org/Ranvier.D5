@@ -83,6 +83,9 @@ module DiagramGraph =
             n.Pinned |> Option.iter (fun pt ->
                 if not (Double.IsFinite pt.X && Double.IsFinite pt.Y) then
                     errors.Add(InvalidObservation("Pinned position must be finite: " + n.Id)))
+            n.Pinned3D |> Option.iter (fun pt ->
+                if not (Double.IsFinite pt.X && Double.IsFinite pt.Y && Double.IsFinite pt.Z) then
+                    errors.Add(InvalidObservation("Pinned 3D position must be finite: " + n.Id)))
             n.ParentGroup |> Option.iter (fun gid ->
                 if not (groupIds.Contains gid) then
                     errors.Add(MissingEndpoint gid))
@@ -202,6 +205,7 @@ module DiagramGraph =
                   Ports = []
                   Kind = NodeKind.Standard
                   Pinned = n.Pinned |> Option.orElse n.Position
+                  Pinned3D = None
                   Mass = n.Mass })
         let assocs =
             GraphData.links graph
@@ -377,6 +381,7 @@ module DiagramGraph =
                               Ports = []
                               Kind = NodeKind.Standard
                               Pinned = None
+                              Pinned3D = None
                               Mass = 1. }
                     | Some _ -> ()
 

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Ranvier.D5.Graph3D.Wgpu$(RanvierPackageSuffix)</PackageId>
+    <Description>Adapters and reactive GPU sinks bridging Ranvier.D5.Graph3D layouts directly to Ranvier.D5.Wgpu.</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="GraphScene3D.fs" />
+    <Compile Include="ReactiveGraph3D.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ranvier.D5.Wgpu.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />
+    <ProjectReference Include="../Ranvier.D5.Graph/Ranvier.D5.Graph.fsproj" />
+    <ProjectReference Include="../Ranvier.D5.Graph3D/Ranvier.D5.Graph3D.fsproj" />
+    <ProjectReference Include="../Ranvier.D5.Wgpu/Ranvier.D5.Wgpu.fsproj" />
+    <PackageReference Include="Ranvier.Wgpu" Version="$(RanvierWgpuVersion)" />
+    <PackageReference Update="FSharp.Core" Version="10.0.100" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

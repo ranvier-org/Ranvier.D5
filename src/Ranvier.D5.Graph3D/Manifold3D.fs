@@ -100,13 +100,7 @@ module Umap3DConfig =
 /// <summary>McInnes, Healy &amp; Melville (2018) 3D Uniform Manifold Approximation and Projection (<c>Umap3D</c>) and <c>DiagramLayout3D</c> skeleton conversion.</summary>
 [<RequireQualifiedAccess>]
 module Umap3D =
-    /// <summary>Computes a deterministic 3D UMAP embedding over <c>dataset</c> with cooperative cancellation.</summary>
-    let embedWithCancellation
-        (token: System.Threading.CancellationToken)
-        (config: Umap3DConfig)
-        (dataset: FeatureDataset<'Id>)
-        : Result<EmbeddedPoint3D<'Id> list, LayoutError list> =
-        token.ThrowIfCancellationRequested()
+    let private validateConfig (config: Umap3DConfig) =
         if config.Neighbors < 2
            || not (Double.IsFinite config.MinDist && Double.IsFinite config.Spread && Double.IsFinite config.LearningRate)
            || config.MinDist < 0.0 || config.Spread <= 0.0 || config.LearningRate <= 0.0
@@ -114,6 +108,18 @@ module Umap3D =
            || config.NegativeSampleRate < 0 || config.NegativeSampleRate > 256 then
             Error [ InvalidObservation "Umap3D requires Neighbors >= 2, MinDist >= 0, Spread > 0, LearningRate > 0, Epochs in [1,10000] and NegativeSampleRate in [0,256]." ]
         else
+            Ok ()
+
+    /// <summary>Computes a deterministic 3D UMAP embedding over <c>dataset</c> with cooperative cancellation.</summary>
+    let embedWithCancellation
+        (token: System.Threading.CancellationToken)
+        (config: Umap3DConfig)
+        (dataset: FeatureDataset<'Id>)
+        : Result<EmbeddedPoint3D<'Id> list, LayoutError list> =
+        token.ThrowIfCancellationRequested()
+        match validateConfig config with
+        | Error e -> Error e
+        | Ok () ->
             let ids, dim, data = FeatureDataset.raw dataset
             let coords =
                 ManifoldCore.embedUmapCore
@@ -135,6 +141,40 @@ module Umap3D =
     /// <summary>Computes a deterministic 3D UMAP embedding over <c>dataset</c> without cancellation.</summary>
     let embed (config: Umap3DConfig) (dataset: FeatureDataset<'Id>) : Result<EmbeddedPoint3D<'Id> list, LayoutError list> =
         embedWithCancellation System.Threading.CancellationToken.None config dataset
+
+    /// <summary>Computes a deterministic 3D UMAP embedding together with the underlying directed k-NN <c>NeighborLink</c> list in a single pass, with cooperative cancellation.</summary>
+    let embedWithLinksWithCancellation
+        (token: System.Threading.CancellationToken)
+        (config: Umap3DConfig)
+        (dataset: FeatureDataset<'Id>)
+        : Result<EmbeddedPoint3D<'Id> list * NeighborLink<'Id> list, LayoutError list> =
+        token.ThrowIfCancellationRequested()
+        match validateConfig config with
+        | Error e -> Error e
+        | Ok () ->
+            let ids, dim, data = FeatureDataset.raw dataset
+            let coords, kEff, knnIdx, knnDist =
+                ManifoldCore.embedUmapCoreWithKnn
+                    token
+                    3
+                    config.Metric
+                    config.Neighbors
+                    config.MinDist
+                    config.Spread
+                    config.Epochs
+                    config.NegativeSampleRate
+                    config.LearningRate
+                    config.Seed
+                    ids.Length
+                    dim
+                    data
+            let pts = Manifold3DFit.fitPoints3D config.Bounds ids coords[0] coords[1] coords[2]
+            let links = NnDescent.linksFromIndexedKnn ids kEff knnIdx knnDist
+            Ok(pts, links)
+
+    /// <summary>Computes a deterministic 3D UMAP embedding alongside its directed k-NN <c>NeighborLink</c> list without recomputing the k-NN graph.</summary>
+    let embedWithLinks (config: Umap3DConfig) (dataset: FeatureDataset<'Id>) : Result<EmbeddedPoint3D<'Id> list * NeighborLink<'Id> list, LayoutError list> =
+        embedWithLinksWithCancellation System.Threading.CancellationToken.None config dataset
 
     /// <summary>Converts a 3D point cloud and k-NN <c>NeighborLink&lt;string&gt;</c> skeleton into an immutable <c>DiagramLayout3D</c> ready for <c>Scene3D</c> or <c>Ranvier.D5.Wgpu</c>.</summary>
     let toDiagramLayout

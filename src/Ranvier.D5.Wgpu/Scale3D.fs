@@ -8,6 +8,7 @@ open Fable.Core
 open System.Runtime.CompilerServices
 #endif
 open Ranvier.D5
+open Ranvier.Wgpu
 
 /// <summary>Vertical data-axis orientation mapping data <c>(X, Y, Z)</c> into right-handed <c>Ranvier.Wgpu</c> Y-up world space.</summary>
 [<RequireQualifiedAccess; Struct>]
@@ -110,6 +111,14 @@ module AxisScale3D =
     /// <summary>Creates a symmetric logarithmic axis scale with positive linear-region constant normalized to <c>[0.0, 1.0]</c>.</summary>
     let symlog (constant: float) (domain: float * float) : AxisScale3D =
         AxisScale3D.Continuous (Scale.symlog constant domain (0.0, 1.0))
+
+    /// <summary>Creates a sign-preserving power axis scale normalized to <c>[0.0, 1.0]</c>; requires a finite positive exponent.</summary>
+    let pow (exponent: float) (domain: float * float) : AxisScale3D =
+        AxisScale3D.Continuous (Scale.power exponent domain (0.0, 1.0))
+
+    /// <summary>Creates a sign-preserving square-root axis scale normalized to <c>[0.0, 1.0]</c>.</summary>
+    let sqrt (domain: float * float) : AxisScale3D =
+        AxisScale3D.Continuous (Scale.sqrt domain (0.0, 1.0))
 
     /// <summary>Creates a piecewise-linear axis scale from strictly monotone domain knots to normalized outputs (typically <c>[0.0 .. 1.0]</c>).</summary>
     let piecewise (domain: float list) (normalizedOutputs: float list) : AxisScale3D =
@@ -502,6 +511,16 @@ type Scale3D =
     member internal this.MapperZ = this.MapZ
     member internal this.DataExtents = struct (this.DataExtentX, this.DataExtentY, this.DataExtentZ)
 
+/// <summary>Typed data coordinate over numeric, categorical band, or UTC instant 3D axes.</summary>
+[<RequireQualifiedAccess>]
+type AxisCoord3D =
+    /// <summary>Numeric observation mapped through a continuous or piecewise axis scale.</summary>
+    | Num of float
+    /// <summary>Categorical label resolved to the center of its band or point slot.</summary>
+    | Cat of string
+    /// <summary>UTC timestamp mapped along a <c>AxisScale3D.TimeUtc</c> axis.</summary>
+    | Time of DateTimeOffset
+
 /// <summary>Constructors, coordinate transforms, and bounding helpers for <c>Scale3D</c>.</summary>
 [<RequireQualifiedAccess>]
 module Scale3D =
@@ -594,6 +613,23 @@ module Scale3D =
     let cartesian (xDomain: float * float) (yDomain: float * float) (zDomain: float * float) : Scale3D =
         create BoxAspect.ChartDefault UpAxis.ZUp (AxisScale3D.linear xDomain) (AxisScale3D.linear yDomain) (AxisScale3D.linear zDomain)
 
+    /// <summary>Creates a Y-up linear Cartesian <c>Scale3D</c> with <c>ChartDefault</c> cuboid proportions <c>(2.0, 4.0 / 3.0, 2.0)</c>.</summary>
+    let cartesianYUp (xDomain: float * float) (yDomain: float * float) (zDomain: float * float) : Scale3D =
+        create BoxAspect.ChartDefault UpAxis.YUp (AxisScale3D.linear xDomain) (AxisScale3D.linear yDomain) (AxisScale3D.linear zDomain)
+
+    /// <summary>Creates a Y-up linear <c>Scale3D</c> with equal <c>[-1, +1]^3</c> unit-cube world extents.</summary>
+    let cubeYUp (xDomain: float * float) (yDomain: float * float) (zDomain: float * float) : Scale3D =
+        create BoxAspect.Cube UpAxis.YUp (AxisScale3D.linear xDomain) (AxisScale3D.linear yDomain) (AxisScale3D.linear zDomain)
+
+    /// <summary>Creates a linear <c>Scale3D</c> from the <c>X/Y/Z</c> extents of <c>bounds</c>.</summary>
+    let ofBounds3 (aspect: BoxAspect) (upAxis: UpAxis) (bounds: Bounds3) : Scale3D =
+        create
+            aspect
+            upAxis
+            (AxisScale3D.linear (Bounds3.minX bounds, Bounds3.maxX bounds))
+            (AxisScale3D.linear (Bounds3.minY bounds, Bounds3.maxY bounds))
+            (AxisScale3D.linear (Bounds3.minZ bounds, Bounds3.maxZ bounds))
+
     /// <summary>Returns the cuboid world extents <c>(spanWorldX, spanWorldY, spanWorldZ)</c> in <c>Ranvier.Wgpu</c> world coordinates.</summary>
     let worldExtents (scale: Scale3D) : Vector3 =
         scale.WorldExtents
@@ -677,3 +713,59 @@ module Scale3D =
             (AxisScale3D.invertNormalized scale.AxisX tx)
             (AxisScale3D.invertNormalized scale.AxisY ty)
             (AxisScale3D.invertNormalized scale.AxisZ tz)
+
+    /// <summary>Maps a typed <c>AxisCoord3D</c> (<c>Num</c>, <c>Cat</c>, or <c>Time</c>) into normalized <c>[0.0, 1.0]</c> coordinates along <c>axisScale</c>, resolving category centers automatically.</summary>
+    let tryMapCoord (axisScale: AxisScale3D) (coord: AxisCoord3D) : float voption =
+        match coord with
+        | AxisCoord3D.Num value ->
+            match axisScale with
+            | AxisScale3D.Categorical _ -> ValueNone
+            | _ -> AxisScale3D.tryMapNormalized axisScale value
+        | AxisCoord3D.Cat key ->
+            if isNull key then
+                ValueNone
+            else
+                match axisScale with
+                | AxisScale3D.Categorical band ->
+                    match Scale.bandPosition band key with
+                    | Some pos -> ValueSome (Math.Clamp (pos + Scale.bandwidth band * 0.5, 0.0, 1.0))
+                    | None -> ValueNone
+                | _ -> ValueNone
+        | AxisCoord3D.Time instant ->
+            match axisScale with
+            | AxisScale3D.TimeUtc _ -> AxisScale3D.tryMapNormalized axisScale (float (instant.ToUnixTimeMilliseconds ()))
+            | _ -> ValueNone
+
+    /// <summary>Maps mixed numeric, categorical, or UTC time coordinates along <c>X</c>, <c>Y</c>, and <c>Z</c> into centered <c>Ranvier.Wgpu</c> world space.</summary>
+    let tryMapCoordPoint (scale: Scale3D) (x: AxisCoord3D) (y: AxisCoord3D) (z: AxisCoord3D) : Vector3 voption =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        match tryMapCoord scale.XScale x with
+        | ValueNone -> ValueNone
+        | ValueSome tx ->
+            match tryMapCoord scale.YScale y with
+            | ValueNone -> ValueNone
+            | ValueSome ty ->
+                match tryMapCoord scale.ZScale z with
+                | ValueNone -> ValueNone
+                | ValueSome tz -> normalizedToWorld scale.Up scale.DataExtentX scale.DataExtentY scale.DataExtentZ tx ty tz
+
+    /// <summary>Maps a data <c>Point3</c> through <c>scale</c> and <c>camera</c> into a 2D viewport screen <c>Point</c>, or <c>ValueNone</c> when unmappable or clipped.</summary>
+    let projectToScreen (viewportWidth: int) (viewportHeight: int) (camera: Camera3D) (scale: Scale3D) (point: Point3) : Point voption =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if viewportWidth <= 0 then
+            raise (ArgumentOutOfRangeException (nameof viewportWidth, "Viewport width must be positive."))
+
+        if viewportHeight <= 0 then
+            raise (ArgumentOutOfRangeException (nameof viewportHeight, "Viewport height must be positive."))
+
+        match tryMap scale point with
+        | ValueNone -> ValueNone
+        | ValueSome worldPos ->
+            match Camera3D.projectToScreen viewportWidth viewportHeight camera worldPos with
+            | ValueSome screenPt when Check3D.isFinite32 screenPt.X && Check3D.isFinite32 screenPt.Y ->
+                ValueSome (Point.create (float screenPt.X) (float screenPt.Y))
+            | _ -> ValueNone

@@ -106,10 +106,15 @@ module Stress3D =
                     let mutable anyPinned = false
                     for li = 0 to subN - 1 do
                         let nd = nodes[mems[li]]
-                        match nd.Pinned with
-                        | Some p -> xs[li] <- p.X; ys[li] <- p.Y; pinXY[li] <- true; anyPinned <- true
-                        | None -> ()
-                        if hasFixedZ then
+                        match nd.Pinned3D with
+                        | Some p3 ->
+                            xs[li] <- p3.X; ys[li] <- p3.Y; zs[li] <- p3.Z
+                            pinXY[li] <- true; pinZ[li] <- true; anyPinned <- true
+                        | None ->
+                            match nd.Pinned with
+                            | Some p -> xs[li] <- p.X; ys[li] <- p.Y; pinXY[li] <- true; anyPinned <- true
+                            | None -> ()
+                        if hasFixedZ && not pinZ[li] then
                             match config.FixedZ |> Map.tryFind nd.Id with
                             | Some z -> zs[li] <- z; pinZ[li] <- true; anyPinned <- true
                             | None -> ()

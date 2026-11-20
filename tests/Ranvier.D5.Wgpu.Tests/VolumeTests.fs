@@ -874,4 +874,19 @@ let volumeTests =
                     let v2 = revPwSlices.Vertices[int revPwSlices.Indices[t * 3 + 2]]
                     let cross = Vector3.Cross (v1.Position - v0.Position, v2.Position - v0.Position)
                     Expect.isGreaterThan (Vector3.Dot (cross, v0.Normal)) 0.0f $"revPwSlices tri[{t}] dot(cross, planeNormal) > 0"
+
+            testCase "VolumeGrid.uniform3D and SliceIndices3D convenience constructors match explicit SliceIndices3D and empty secondaryScalars"
+            <| fun () ->
+                Expect.equal SliceIndices3D.none { XIndex = None; YIndex = None; ZIndex = None } "SliceIndices3D.none"
+                Expect.equal (SliceIndices3D.ofX 2) { XIndex = Some 2; YIndex = None; ZIndex = None } "SliceIndices3D.ofX"
+                Expect.equal (SliceIndices3D.ofY 3) { XIndex = None; YIndex = Some 3; ZIndex = None } "SliceIndices3D.ofY"
+                Expect.equal (SliceIndices3D.ofZ 4) { XIndex = None; YIndex = None; ZIndex = Some 4 } "SliceIndices3D.ofZ"
+                Expect.equal (SliceIndices3D.create (Some 1) None (Some 3)) { XIndex = Some 1; YIndex = None; ZIndex = Some 3 } "SliceIndices3D.create"
+
+                let b = Bounds3.create 0. 0. 0. 1. 1. 1.
+                let vals = Array.init 27 (fun i -> float32 i)
+                let gFull = VolumeGrid.uniform 3 3 3 b (ReadOnlySpan<float32> vals) ReadOnlySpan.Empty |> unwrapOk "uniform"
+                let g3D = VolumeGrid.uniform3D 3 3 3 b (ReadOnlySpan<float32> vals) |> unwrapOk "uniform3D"
+                Expect.equal (VolumeGrid.dimensions g3D) (VolumeGrid.dimensions gFull) "uniform3D dimensions match"
+                Expect.equal (VolumeGrid.bounds g3D) (VolumeGrid.bounds gFull) "uniform3D bounds match"
         ]

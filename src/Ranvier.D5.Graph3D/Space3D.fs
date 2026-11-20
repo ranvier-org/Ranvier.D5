@@ -90,6 +90,28 @@ module Quaternion =
             (p.Y + q.W * ty + (q.Z * tx - q.X * tz))
             (p.Z + q.W * tz + (q.X * ty - q.Y * tx))
 
+/// <summary>Alias for <c>Ranvier.D5.Graph3D.Quaternion</c> avoiding ambiguity when <c>System.Numerics</c> is also open.</summary>
+type Quaternion64 = Quaternion
+
+#if !FABLE_COMPILER
+/// <summary>Single-precision <c>System.Numerics.Quaternion</c> conversions for <c>Quaternion64</c> on .NET targets.</summary>
+[<RequireQualifiedAccess>]
+module Quaternion64 =
+    /// <summary>Converts a double-precision <c>Quaternion64</c> into a single-precision <c>System.Numerics.Quaternion</c>.</summary>
+    let toNumerics (q: Quaternion64) : System.Numerics.Quaternion =
+        let x, y, z, w = float32 q.X, float32 q.Y, float32 q.Z, float32 q.W
+        if not (Double.IsFinite (float x) && Double.IsFinite (float y) && Double.IsFinite (float z) && Double.IsFinite (float w)) then
+            invalidArg "q" "Quaternion64 components must be finite in float32."
+        System.Numerics.Quaternion(x, y, z, w)
+
+    /// <summary>Converts a finite <c>System.Numerics.Quaternion</c> into a double-precision <c>Quaternion64</c>.</summary>
+    let ofNumerics (q: System.Numerics.Quaternion) : Quaternion64 =
+        let x, y, z, w = float q.X, float q.Y, float q.Z, float q.W
+        if not (Double.IsFinite x && Double.IsFinite y && Double.IsFinite z && Double.IsFinite w) then
+            invalidArg "q" "Quaternion components must be finite."
+        Quaternion(x, y, z, w)
+#endif
+
 /// <summary>Immutable, contiguous 3D waypoint chain providing O(1) indexed access for zero-allocation GPU batching without exposing mutable arrays.</summary>
 [<Struct>]
 type Point3Chain =
@@ -120,6 +142,12 @@ module Point3Chain =
     let item index (chain: Point3Chain) = chain[index]
     /// <summary>Returns the points as an immutable F# list.</summary>
     let toList (Point3Chain arr) = if isNull (box arr) then [] else Array.toList arr
+    /// <summary>Returns a defensive copy of the chain's points as a newly allocated array.</summary>
+    let toArray (Point3Chain arr) : Point3 array =
+        if isNull (box arr) then [||] else Array.copy arr
+    /// <summary>Returns a zero-copy read-only span view over the chain's contiguous points.</summary>
+    let asSpan (Point3Chain arr) : ReadOnlySpan<Point3> =
+        if isNull (box arr) then ReadOnlySpan<Point3>.Empty else ReadOnlySpan<Point3>(arr)
 
 /// <summary>A node positioned in 3D space with bounding cuboid, radius, conformal/hyperbolic scale attenuation and stable ID.</summary>
 type PositionedNode3D =

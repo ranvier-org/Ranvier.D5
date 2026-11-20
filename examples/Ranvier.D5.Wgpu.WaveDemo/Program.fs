@@ -153,6 +153,16 @@ let private createDemo (hidden: bool) (width: int) (height: int) : DemoSession =
             Z = { baseAxis.Z with Title = "Amplitude" }
         }
 
+    let colorbarScene =
+        Legend3D.colorbar
+            (float width)
+            (float height)
+            (ColorbarSpec3D.vertical
+                (Bounds.create (float width - 84.0) 110.0 16.0 210.0)
+                "Phase Vel"
+                (-2.8, 2.8)
+                velocityRamp)
+
     let surfaceSpec: SurfaceSpec =
         {
             Scale = scale
@@ -169,15 +179,27 @@ let private createDemo (hidden: bool) (width: int) (height: int) : DemoSession =
         SurfaceGrid.uniform GridN GridN (domainLo, domainHi) (domainLo, domainHi) (ReadOnlySpan<float>(heights)) (ReadOnlySpan<float>(velocities))
         |> unwrapOk "initialWaveGrid"
 
-    let camera, section, surfaceBatch, probeSink, batchesMem, frameTick, readoutSig, extremaColl =
+    let camera, section, surfaceBatch, pickRegistry, plotRevision, batchesMem, frameTick, readoutSig, extremaColl =
         graph.Run (fun () ->
             let cam = Reactive3D.editableCamera (fun () -> PlotCamera3D.defaultValue)
             let sec = Reactive3D.editableSection (fun () -> SectionPlane.disabled)
+            let rev = Reactive3D.createRevision ()
+            let reg = PickRegistry3D ()
+            let readout = Api.createSignal "Phase velocity 4th-dim ColorRamp | Drag orbit | Wheel zoom | S section | R reset"
+
             let surf = SurfaceBatch.Create (wgpu, surfaceSpec, initialGrid)
             Api.onCleanup (fun () -> surf.Dispose ())
 
-            let sphereMesh = wgpu.UploadMesh (Glyph3D.unitMesh GlyphShape3D.Sphere)
-            Api.onCleanup (fun () -> sphereMesh.Dispose ())
+            reg.RegisterStaticPick (
+                surfaceSpec.PickId,
+                "Wave Surface",
+                onHover = (fun h ->
+                    let pt = Probe3D.invertHit scale h
+                    readout.Value <- $"Surface: x={pt.X:F2}, y={pt.Y:F2}, z={pt.Z:F2}"),
+                onClick = (fun h ->
+                    let pt = Probe3D.invertHit scale h
+                    readout.Value <- $"Surface click: x={pt.X:F2}, y={pt.Y:F2}, z={pt.Z:F2}")
+            )
 
             let extrema = Api.createKeyedCollection (fun struct (k: string, _: GlyphDatum3D) -> k)
 
@@ -186,11 +208,30 @@ let private createDemo (hidden: bool) (width: int) (height: int) : DemoSession =
             extrema.AddOrUpdate (struct ("trough", makeExtremaMarker troughPt (RgbaColor (0.35f, 0.90f, 1.0f, 1.0f))))
 
             let rows = extrema.Rows |> Projection.map (fun struct (_, g) -> g)
-            let sink = Reactive3D.bindInstances wgpu 1uy sphereMesh BlendMode.Opaque false false (fun () -> scale) rows
+
+            let sinkOpts =
+                SinkOptions3D.defaultValue
+                |> SinkOptions3D.withLayerId (reg.AllocateLayer ())
+                |> SinkOptions3D.withRevision rev
+                |> SinkOptions3D.withBlendMode BlendMode.Opaque
+                |> SinkOptions3D.withDoubleSided false
+
+            let sink = Reactive3D.bindGlyphs wgpu GlyphShape3D.Sphere sinkOpts (fun () -> scale) rows
+
+            let updateExtremumReadout (picked: PickedMark<string>) =
+                readout.Value <-
+                    $"Extremum [{picked.Key}]: x={picked.DataPoint.X:F2}, y={picked.DataPoint.Y:F2}, z={picked.DataPoint.Z:F2}"
+
+            reg.RegisterSink (
+                sink,
+                describe = (fun picked -> $"Extremum [{picked.Key}]"),
+                onHover = updateExtremumReadout,
+                onClick = updateExtremumReadout
+            )
+
             let batches = ReadOnlyMemory<InstanceBatch> [| surf.Batch; sink.Batch |]
             let tick = Api.createSignal 0.0
-            let readout = Api.createSignal "Phase velocity 4th-dim ColorRamp | Drag orbit | Wheel zoom | S section | R reset"
-            cam, sec, surf, sink, batches, tick, readout, extrema)
+            cam, sec, surf, reg, rev, batches, tick, readout, extrema)
 
     let linesBuf =
         match surfaceBatch.WireframeBatch with
@@ -199,18 +240,19 @@ let private createDemo (hidden: bool) (width: int) (height: int) : DemoSession =
 
     let onHover (hit: PickHit voption) =
         match hit with
-        | ValueNone ->
+        | ValueSome h when h.PickId <> 0u ->
+            pickRegistry.DispatchHover (scale, hit)
+        | _ ->
             readoutSig.Value <- "Hover wave or extrema markers | Drag orbit | Shift+Drag pan | S section | R reset"
-        | ValueSome h ->
-            match Probe3D.resolveKeyed scale probeSink h with
-            | ValueSome picked ->
-                readoutSig.Value <-
-                    $"Extremum [{picked.Key}]: x={picked.DataPoint.X:F2}, y={picked.DataPoint.Y:F2}, z={picked.DataPoint.Z:F2}"
-            | ValueNone ->
-                let pt = Probe3D.invertHit scale h
-                readoutSig.Value <- $"Surface: x={pt.X:F2}, y={pt.Y:F2}, z={pt.Z:F2}"
+
+    let onClick (hit: PickHit voption) =
+        match hit with
+        | ValueSome h when h.PickId <> 0u ->
+            pickRegistry.DispatchClick (scale, hit)
+        | _ -> ()
 
     let readScene () : PlotPass3D =
+        let _ = plotRevision.Revision
         let t = frameTick.Value
         let sec = section.Value
 
@@ -230,12 +272,13 @@ let private createDemo (hidden: bool) (width: int) (height: int) : DemoSession =
             ExtraBatches = batchesMem
             ExtraLines = linesBuf
             ExtraOverlayMarks = [ hudMark ]
+            ExtraOverlay = ValueSome colorbarScene
         }
 
     let plotConfig: PlotViewConfig3D =
         PlotViewConfig3D.create width height camera
         |> PlotViewConfig3D.withOnHoverHit onHover
-        |> PlotViewConfig3D.withOnClickHit onHover
+        |> PlotViewConfig3D.withOnClickHit onClick
 
     let shellComponent =
         Component.template
@@ -292,7 +335,8 @@ let private createDemo (hidden: bool) (width: int) (height: int) : DemoSession =
             Api.batch (fun () ->
                 extremaColl.AddOrUpdate (struct ("peak", makeExtremaMarker peakPt (RgbaColor (1.0f, 0.88f, 0.25f, 1.0f))))
                 extremaColl.AddOrUpdate (struct ("trough", makeExtremaMarker troughPt (RgbaColor (0.35f, 0.90f, 1.0f, 1.0f))))
-                frameTick.Value <- t))
+                frameTick.Value <- t
+                plotRevision.MarkDirty ()))
 
     {
         Mounted = mounted

@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="PlotView3D.fs" />
+    <Compile Include="SubplotGrid3D.fs" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Ranvier.D5.Wgpu.Native.Tests" />

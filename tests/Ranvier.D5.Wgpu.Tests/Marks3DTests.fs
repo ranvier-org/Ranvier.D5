@@ -711,4 +711,83 @@ let marks3DTests =
                 Expect.isLessThan a3.Indices.Length a4.Indices.Length "i3 < i4"
                 Expect.isLessThan a4.Indices.Length a5.Indices.Length "i4 < i5"
                 Expect.isLessThan a5.Indices.Length a6.Indices.Length "i5 < i6"
+
+            testCase "BoxDatum3D preserves YUp coordinates, GlyphDatum3D/BarDatum3D/ArrowDatum3D builders, tryBarFromCoords, Line3D exempt/batch/wireframes/sphereCage"
+            <| fun () ->
+                // 1. BoxDatum3D + Glyph3D.packBoxes under YUp & ZUp
+                let yUpScale = Scale3D.cubeYUp (0.0, 10.0) (0.0, 10.0) (0.0, 10.0)
+                let cityBox = Bounds3.create 2.0 0.0 4.0 2.0 6.0 2.0 // X=[2..4], Y=[0..6], Z=[4..6]
+                let bDatum =
+                    BoxDatum3D.create cityBox (RgbaColor (0.3f, 0.7f, 0.9f, 1.0f))
+                    |> BoxDatum3D.withShading ShadingMode.Unlit
+                    |> BoxDatum3D.withPickId 88u
+                    |> BoxDatum3D.withSelected true
+                let packedBoxesYUp = Glyph3D.packBoxes yUpScale (ReadOnlySpan<BoxDatum3D> [| bDatum |])
+                Expect.equal packedBoxesYUp.Length 1 "packBoxes YUp packs 1 box"
+                let boxInst = packedBoxesYUp.Span[0]
+                Expect.equal boxInst.PickId 88u "box keeps PickId"
+                // Y in [0, 6] out of [0, 10] in [-1, 1] -> [-1.0, +0.2] => center Y = -0.4, scale Y = 1.2
+                Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float boxInst.ModelCol3.Y) -0.4 "packBoxes YUp preserves center.Y without Y/Z swap"
+                Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float boxInst.ModelCol1.Y) 1.2 "packBoxes YUp preserves height along +Y"
+
+                let zUpScale = Scale3D.create BoxAspect.Cube UpAxis.ZUp (AxisScale3D.linear (0.0, 10.0)) (AxisScale3D.linear (0.0, 10.0)) (AxisScale3D.linear (0.0, 10.0))
+                let packedBoxesZUp = Glyph3D.packBoxes zUpScale (ReadOnlySpan<BoxDatum3D> [| bDatum |])
+                Expect.equal packedBoxesZUp.Length 1 "packBoxes ZUp packs 1 box"
+                Expect.floatClose { absolute = 1e-4; relative = 0.0 } (float packedBoxesZUp.Span[0].ModelCol1.Y) 0.4 "packBoxes ZUp maps Z=[4..6] extent (2/10*2 = 0.4) vertically"
+
+                // 2. GlyphDatum3D, BarDatum3D, ArrowDatum3D pipeable builders & tryBarFromCoords
+                let col = RgbaColor (1.0f, 0.5f, 0.0f, 1.0f)
+                let gSphere = GlyphDatum3D.sphere (Point3.create 1.0 2.0 3.0) 0.25f col |> GlyphDatum3D.withShading ShadingMode.ExactUnlit |> GlyphDatum3D.withPickId 5u |> GlyphDatum3D.withSelected true
+                Expect.equal gSphere.Scale (Vector3 (0.25f, 0.25f, 0.25f)) "GlyphDatum3D.sphere uniform scale"
+                let gBox = GlyphDatum3D.box Point3.zero (Vector3 (1.0f, 2.0f, 3.0f)) col |> GlyphDatum3D.withUniformScale 0.5f
+                Expect.equal gBox.Scale (Vector3 (0.5f, 0.5f, 0.5f)) "GlyphDatum3D.withUniformScale"
+                let barBuilt = BarDatum3D.create 1.0 2.0 0.0 5.0 0.5 0.5 col |> BarDatum3D.withPickId 10u |> BarDatum3D.withSelected true
+                Expect.equal barBuilt.PickId 10u "BarDatum3D.withPickId"
+                let arrowVec = ArrowDatum3D.ofVector3 Point3.zero (Vector3 (1.0f, 0.0f, 0.0f)) 0.05f col |> ArrowDatum3D.withPickId 20u
+                Expect.equal arrowVec.Vector (Point3.create 1.0 0.0 0.0) "ArrowDatum3D.ofVector3 converts Vector3"
+
+                let mixedScale = Scale3D.create BoxAspect.Cube UpAxis.ZUp (AxisScale3D.band [ "Q1"; "Q2" ] 0.2 0.1) (AxisScale3D.linear (0.0, 10.0)) (AxisScale3D.linear (0.0, 10.0))
+                let mixedBar = Glyph3D.tryBarFromCoords mixedScale (AxisCoord3D.Cat "Q1") (AxisCoord3D.Num 5.0) 0.0 8.0 1.0 1.5 col
+                Expect.isTrue mixedBar.IsSome "tryBarFromCoords supports mixed Cat + Num axes"
+                let packedMixed = Glyph3D.packBars mixedScale (ReadOnlySpan<BarDatum3D> [| mixedBar.Value |])
+                Expect.equal packedMixed.Length 1 "tryBarFromCoords mixed bar packs via packBars"
+                Expect.equal (Glyph3D.tryBarFromCoords mixedScale (AxisCoord3D.Num 1.0) (AxisCoord3D.Num 5.0) 0.0 8.0 1.0 1.5 col) ValueNone "tryBarFromCoords rejects Num on Cat axis"
+
+                // 3. Line3D section-exempt helpers, tubes, ribbons, boxWireframe, circle, sphereCage
+                let segStd = Line3D.segments yUpScale (ReadOnlySpan<struct (Point3 * Point3 * RgbaColor)> [| struct (Point3.create 1. 1. 1., Point3.create 9. 9. 9., col) |])
+                let segEx = Line3D.segmentsExempt yUpScale (ReadOnlySpan<struct (Point3 * Point3 * RgbaColor)> [| struct (Point3.create 1. 1. 1., Point3.create 9. 9. 9., col) |])
+                Expect.equal segStd.Span[0].Pad 0.0f "segments Pad=0"
+                Expect.equal segEx.Span[0].Pad 1.0f "segmentsExempt Pad=1"
+
+                let polyList : System.Collections.Generic.IReadOnlyList<struct (Point3 * RgbaColor) voption> =
+                    [| ValueSome struct (Point3.create 1. 1. 1., col); ValueSome struct (Point3.create 5. 5. 5., col) |]
+                let polyEx = Line3D.polylineExempt yUpScale polyList
+                Expect.equal polyEx.Length 2 "polylineExempt length"
+                Expect.equal polyEx.Span[0].Pad 1.0f "polylineExempt Pad=1"
+
+                let t1 = [| struct (Point3.create 1. 1. 1., 0.05f, col); struct (Point3.create 9. 1. 1., 0.05f, col) |]
+                let t2 = [| struct (Point3.create 1. 9. 1., 0.05f, col); struct (Point3.create 9. 9. 1., 0.05f, col) |]
+                let single1 = Line3D.tube yUpScale 6 (ReadOnlySpan<_> t1) |> unwrapOk "single1"
+                let single2 = Line3D.tube yUpScale 6 (ReadOnlySpan<_> t2) |> unwrapOk "single2"
+                let batchedTubes = Line3D.tubes yUpScale 6 [| t1; t2 |] |> unwrapOk "Line3D.tubes"
+                Expect.equal batchedTubes.Vertices.Length (single1.Vertices.Length + single2.Vertices.Length) "tubes merges vertices"
+                Expect.equal batchedTubes.Indices.Length (single1.Indices.Length + single2.Indices.Length) "tubes merges indices"
+                verifyOutwardWinding batchedTubes "Line3D.tubes"
+
+                let r1 = [| struct (Point3.create 1. 1. 1., Point3.create 1. 3. 1., col); struct (Point3.create 9. 1. 1., Point3.create 9. 3. 1., col) |]
+                let r2 = [| struct (Point3.create 1. 5. 1., Point3.create 1. 7. 1., col); struct (Point3.create 9. 5. 1., Point3.create 9. 7. 1., col) |]
+                let batchedRibbons = Line3D.ribbons yUpScale [| r1; r2 |] |> unwrapOk "Line3D.ribbons"
+                verifyOutwardWinding batchedRibbons "Line3D.ribbons"
+
+                let wf1 = Line3D.boxWireframe yUpScale cityBox col true
+                Expect.equal wf1.Length 24 "boxWireframe emits 12 edges (24 vertices)"
+                Expect.equal wf1.Span[0].Pad 1.0f "boxWireframe respects ignoreSectionPlane = true"
+                let wfBatch = Line3D.boxesWireframe yUpScale (ReadOnlySpan<struct (Bounds3 * RgbaColor)> [| struct (cityBox, col); struct (cityBox, col) |]) false
+                Expect.equal wfBatch.Length 48 "boxesWireframe emits 48 vertices for 2 boxes"
+                Expect.equal wfBatch.Span[0].Pad 0.0f "boxesWireframe respects ignoreSectionPlane = false"
+
+                let circVerts = Line3D.circle yUpScale (Point3.create 5. 5. 5.) Vector3.UnitY 2.0 16 col true
+                Expect.equal circVerts.Length 32 "circle with 16 segments emits 32 vertices"
+                let cageVerts = Line3D.sphereCage yUpScale (Point3.create 5. 5. 5.) 2.0 3 16 col false
+                Expect.isGreaterThan cageVerts.Length 32 "sphereCage emits multi-ring vertices"
         ]

@@ -1431,23 +1431,37 @@ module Dbscan2D =
                         hitBuf.ToArray())
             Ok(DbscanCore.expandClusters ids neighbors minPoints)
 
+/// <summary>Enriched 3D DBSCAN output bundling the original item, identifier, projected position, cluster assignment and core-point flag.</summary>
+type ClusteredPoint3D<'T, 'Id> =
+    { /// <summary>Original input item.</summary>
+      Item: 'T
+      /// <summary>Item identifier.</summary>
+      Id: 'Id
+      /// <summary>Projected 3D coordinate.</summary>
+      Position: Point3
+      /// <summary>Zero-based cluster index in canonical deterministic order, or <c>None</c> for noise outliers.</summary>
+      ClusterId: int option
+      /// <summary>True when at least <c>minPoints</c> items lie within the inclusive epsilon neighborhood.</summary>
+      IsCore: bool }
+
 /// <summary>Three-dimensional density-based spatial clustering of applications with noise (Ester et al. 1996), accelerated by <c>Spatial3D.create</c>.</summary>
 [<RequireQualifiedAccess>]
 module Dbscan3D =
-    /// <summary>Partitions 3D <c>items</c> into density-connected clusters within inclusive Euclidean <c>epsilon</c> and minimum neighborhood size <c>minPoints</c>.</summary>
-    let cluster<'T, 'Id when 'Id: equality>
+    let private clusterCore<'T, 'Id when 'Id: equality>
         (epsilon: float)
         (minPoints: int)
         (key: 'T -> 'Id)
         (project: 'T -> Point3)
-        (items: 'T list)
-        : Result<DensityClusterAssignment<'Id> list, LayoutError list> =
+        (items: seq<'T>)
+        : Result<('T[] * Point3[] * DensityClusterAssignment<'Id> list) option, LayoutError list> =
+        if isNull (box items) then nullArg (nameof items)
         let errors = ResizeArray<LayoutError>()
         if not (Double.IsFinite epsilon) || epsilon <= 0. then
             errors.Add(InvalidObservation "DBSCAN epsilon must be finite and positive.")
         if minPoints < 1 then
             errors.Add(InvalidObservation "DBSCAN minPoints must be at least 1.")
         let seen = HashSet<'Id>()
+        let itemsBuf = ResizeArray<'T>()
         let idsBuf = ResizeArray<'Id>()
         let ptsBuf = ResizeArray<Point3>()
         for item in items do
@@ -1465,13 +1479,15 @@ module Dbscan3D =
             if not (Double.IsFinite pt.X && Double.IsFinite pt.Y && Double.IsFinite pt.Z) then
                 errors.Add(InvalidObservation "Point3 coordinates must be finite.")
             else
+                itemsBuf.Add item
                 idsBuf.Add id
                 ptsBuf.Add pt
         if errors.Count > 0 then
             Error(SeriationNumeric.toListRev errors)
-        elif items.IsEmpty then
-            Ok []
+        elif itemsBuf.Count = 0 then
+            Ok None
         else
+            let rawItems = itemsBuf.ToArray()
             let ids = idsBuf.ToArray()
             let pts = ptsBuf.ToArray()
             let n = pts.Length
@@ -1486,4 +1502,39 @@ module Dbscan3D =
                         res[w] <- j
                         w <- w + 1
                     res)
-            Ok(DbscanCore.expandClusters ids neighbors minPoints)
+            Ok(Some(rawItems, pts, DbscanCore.expandClusters ids neighbors minPoints))
+
+    /// <summary>Partitions 3D <c>items</c> into density-connected clusters within inclusive Euclidean <c>epsilon</c> and minimum neighborhood size <c>minPoints</c>.</summary>
+    let cluster<'T, 'Id when 'Id: equality>
+        (epsilon: float)
+        (minPoints: int)
+        (key: 'T -> 'Id)
+        (project: 'T -> Point3)
+        (items: 'T list)
+        : Result<DensityClusterAssignment<'Id> list, LayoutError list> =
+        match clusterCore epsilon minPoints key project items with
+        | Error errs -> Error errs
+        | Ok None -> Ok []
+        | Ok(Some(_, _, assignments)) -> Ok assignments
+
+    /// <summary>Partitions any sequence of 3D <c>items</c> into density-connected clusters and returns enriched <c>ClusteredPoint3D</c> records in input order.</summary>
+    let clusterItems<'T, 'Id when 'Id: equality>
+        (epsilon: float)
+        (minPoints: int)
+        (key: 'T -> 'Id)
+        (project: 'T -> Point3)
+        (items: seq<'T>)
+        : Result<ClusteredPoint3D<'T, 'Id> list, LayoutError list> =
+        match clusterCore epsilon minPoints key project items with
+        | Error errs -> Error errs
+        | Ok None -> Ok []
+        | Ok(Some(rawItems, pts, assignments)) ->
+            Ok(
+                assignments
+                |> List.mapi (fun i a ->
+                    { Item = rawItems[i]
+                      Id = a.Id
+                      Position = pts[i]
+                      ClusterId = a.ClusterId
+                      IsCore = a.IsCore })
+            )

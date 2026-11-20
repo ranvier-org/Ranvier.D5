@@ -641,4 +641,52 @@ let surfaceTests =
                 Expect.equal surfBatch.Batch.Count 1 "active Opaque batch has 1 instance"
                 Expect.equal firstAlphaBatch.Count 0 "previous AlphaBlend batch is resized to 0 when returning to Opaque"
                 Expect.equal surfBatch.WireframeBatch.Value.SegmentCount 0 "Wireframe = ValueNone clears wireframe segments"
+
+            testCase "SurfaceSpec pipeable builders and 3D-only SurfaceGrid/Surface3D/SurfaceBatch overloads preserve parity and zero steady-state allocs"
+            <| fun () ->
+                let scale = Scale3D.cartesian (-2.0, 2.0) (-2.0, 2.0) (-2.0, 2.0)
+                let ramp = ColorRamp.plasma (-2.0, 2.0)
+                let spec =
+                    SurfaceSpec.create scale ramp
+                    |> SurfaceSpec.withShading (ShadingMode.Lit (0.25f, 0.05f))
+                    |> SurfaceSpec.withOpacity 0.85f
+                    |> SurfaceSpec.withWireframe (ValueSome RgbaColor.white)
+                    |> SurfaceSpec.withPickId 42u
+
+                Expect.equal spec.PickId 42u "SurfaceSpec.withPickId"
+                Expect.floatClose { absolute = 1e-6; relative = 0.0 } (float spec.Opacity) 0.85 "SurfaceSpec.withOpacity"
+
+                let fnFull = SurfaceGrid.fromFunction 6 6 (-2.0, 2.0) (-2.0, 2.0) (fun x y -> sin x * cos y) ValueNone |> unwrapOk "fnFull"
+                let fn3D = SurfaceGrid.fromFunction3D 6 6 (-2.0, 2.0) (-2.0, 2.0) (fun x y -> sin x * cos y) |> unwrapOk "fn3D"
+                Expect.equal ((SurfaceMesh.vertices (Surface3D.build spec fn3D)).ToArray()) ((SurfaceMesh.vertices (Surface3D.build spec fnFull)).ToArray()) "fromFunction3D parity"
+
+                let hData = Array.init 16 (fun i -> float i * 0.1)
+                let uFull = SurfaceGrid.uniform 4 4 (-1.0, 1.0) (-1.0, 1.0) (ReadOnlySpan<float> hData) ReadOnlySpan.Empty |> unwrapOk "uFull"
+                let u3D = SurfaceGrid.uniform3D 4 4 (-1.0, 1.0) (-1.0, 1.0) (ReadOnlySpan<float> hData) |> unwrapOk "u3D"
+                Expect.equal ((SurfaceMesh.vertices (Surface3D.build spec u3D)).ToArray()) ((SurfaceMesh.vertices (Surface3D.build spec uFull)).ToArray()) "uniform3D parity"
+
+                let xs = [| -1.0; -0.2; 0.5; 1.0 |]
+                let ys = [| -1.0; -0.1; 0.3; 1.0 |]
+                let rFull = SurfaceGrid.rectilinear (ReadOnlySpan<float> xs) (ReadOnlySpan<float> ys) (ReadOnlySpan<float> hData) ReadOnlySpan.Empty |> unwrapOk "rFull"
+                let r3D = SurfaceGrid.rectilinear3D (ReadOnlySpan<float> xs) (ReadOnlySpan<float> ys) (ReadOnlySpan<float> hData) |> unwrapOk "r3D"
+                Expect.equal ((SurfaceMesh.vertices (Surface3D.build spec r3D)).ToArray()) ((SurfaceMesh.vertices (Surface3D.build spec rFull)).ToArray()) "rectilinear3D parity"
+
+                let curvi = [| for y in ys do for x in xs -> Point3.create x y (x * y) |]
+                let cFull = SurfaceGrid.curvilinear 4 4 (ReadOnlySpan<Point3> curvi) ReadOnlySpan.Empty |> unwrapOk "cFull"
+                let c3D = SurfaceGrid.curvilinear3D 4 4 (ReadOnlySpan<Point3> curvi) |> unwrapOk "c3D"
+                Expect.equal ((SurfaceMesh.vertices (Surface3D.build spec c3D)).ToArray()) ((SurfaceMesh.vertices (Surface3D.build spec cFull)).ToArray()) "curvilinear3D parity"
+
+                let scatterPts : System.Collections.Generic.IReadOnlyList<Point3> =
+                    [| Point3.create 0.0 0.0 0.0; Point3.create 1.0 0.0 0.2; Point3.create 0.0 1.0 -0.2; Point3.create 1.0 1.0 0.5 |]
+                let triFull = Surface3D.triangulatePoints spec scatterPts ReadOnlySpan.Empty |> unwrapOk "triFull"
+                let tri3D = Surface3D.triangulatePoints3D spec scatterPts |> unwrapOk "tri3D"
+                Expect.equal ((SurfaceMesh.indices tri3D).ToArray()) ((SurfaceMesh.indices triFull).ToArray()) "triangulatePoints3D parity"
+
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64)
+                use sb = SurfaceBatch.Create (ctx, spec, u3D)
+                for _ = 1 to 5 do sb.UpdateHeights (spec, ReadOnlySpan<float> hData)
+                let a0 = GC.GetAllocatedBytesForCurrentThread ()
+                for _ = 1 to 10 do sb.UpdateHeights (spec, ReadOnlySpan<float> hData)
+                let a1 = GC.GetAllocatedBytesForCurrentThread ()
+                Expect.equal (a1 - a0) 0L "UpdateHeights allocates 0 steady-state bytes"
         ]

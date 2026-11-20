@@ -96,6 +96,53 @@ type GlyphDatum3D =
         Selected: bool
     }
 
+/// <summary>Constructors and pipeable modifiers for <c>GlyphDatum3D</c>.</summary>
+[<RequireQualifiedAccess>]
+module GlyphDatum3D =
+    /// <summary>Creates a studio-lit <c>GlyphDatum3D</c> with identity rotation and picking disabled.</summary>
+    let create (position: Point3) (scale: Vector3) (color: RgbaColor) : GlyphDatum3D =
+        {
+            Position = position
+            Scale = scale
+            Rotation = Quaternion.Identity
+            Color = color
+            Shading = ShadingMode.Lit (0.45f, 0.0f)
+            PickId = 0u
+            Selected = false
+        }
+
+    /// <summary>Creates a uniformly scaled spherical glyph datum.</summary>
+    let sphere (position: Point3) (radius: float32) (color: RgbaColor) : GlyphDatum3D =
+        create position (Vector3 (radius, radius, radius)) color
+
+    /// <summary>Creates a box glyph datum with explicit world dimensions along X, Y, and Z.</summary>
+    let box (position: Point3) (size: Vector3) (color: RgbaColor) : GlyphDatum3D =
+        create position size color
+
+    /// <summary>Replaces the glyph's non-uniform local scale vector.</summary>
+    let withScale (scale: Vector3) (datum: GlyphDatum3D) : GlyphDatum3D =
+        { datum with Scale = scale }
+
+    /// <summary>Sets equal local scale across all three axes.</summary>
+    let withUniformScale (scale: float32) (datum: GlyphDatum3D) : GlyphDatum3D =
+        { datum with Scale = Vector3 (scale, scale, scale) }
+
+    /// <summary>Sets the world-space rotation quaternion.</summary>
+    let withRotation (rotation: Quaternion) (datum: GlyphDatum3D) : GlyphDatum3D =
+        { datum with Rotation = rotation }
+
+    /// <summary>Sets the glyph <c>ShadingMode</c>.</summary>
+    let withShading (shading: ShadingMode) (datum: GlyphDatum3D) : GlyphDatum3D =
+        { datum with Shading = shading }
+
+    /// <summary>Sets the hardware picking identifier.</summary>
+    let withPickId (pickId: uint32) (datum: GlyphDatum3D) : GlyphDatum3D =
+        { datum with PickId = pickId }
+
+    /// <summary>Sets the selection rim-highlight flag.</summary>
+    let withSelected (selected: bool) (datum: GlyphDatum3D) : GlyphDatum3D =
+        { datum with Selected = selected }
+
 /// <summary>Input datum describing an axis-aligned 3D bar/column anchored from <c>Z0</c> to <c>Z1</c>.</summary>
 [<Struct>]
 type BarDatum3D =
@@ -122,6 +169,36 @@ type BarDatum3D =
         Selected: bool
     }
 
+/// <summary>Constructors and pipeable modifiers for <c>BarDatum3D</c>.</summary>
+[<RequireQualifiedAccess>]
+module BarDatum3D =
+    /// <summary>Creates a studio-lit <c>BarDatum3D</c> anchored between <c>z0</c> and <c>z1</c> with picking disabled.</summary>
+    let create (x: float) (y: float) (z0: float) (z1: float) (widthX: float) (widthY: float) (color: RgbaColor) : BarDatum3D =
+        {
+            X = x
+            Y = y
+            Z0 = z0
+            Z1 = z1
+            WidthX = widthX
+            WidthY = widthY
+            Color = color
+            Shading = ShadingMode.Lit (0.45f, 0.0f)
+            PickId = 0u
+            Selected = false
+        }
+
+    /// <summary>Sets the bar <c>ShadingMode</c>.</summary>
+    let withShading (shading: ShadingMode) (datum: BarDatum3D) : BarDatum3D =
+        { datum with Shading = shading }
+
+    /// <summary>Sets the hardware picking identifier.</summary>
+    let withPickId (pickId: uint32) (datum: BarDatum3D) : BarDatum3D =
+        { datum with PickId = pickId }
+
+    /// <summary>Sets the selection rim-highlight flag.</summary>
+    let withSelected (selected: bool) (datum: BarDatum3D) : BarDatum3D =
+        { datum with Selected = selected }
+
 /// <summary>Input datum describing a 3D vector field arrow anchored at <c>Origin</c> pointing along <c>Vector</c>.</summary>
 [<Struct>]
 type ArrowDatum3D =
@@ -143,6 +220,79 @@ type ArrowDatum3D =
         /// <summary>When true, renders selection rim highlighting.</summary>
         Selected: bool
     }
+
+/// <summary>Constructors and pipeable modifiers for <c>ArrowDatum3D</c>.</summary>
+[<RequireQualifiedAccess>]
+module ArrowDatum3D =
+    /// <summary>Creates a studio-lit <c>ArrowDatum3D</c> with <c>LengthScale = 1.0f</c> and picking disabled.</summary>
+    let create (origin: Point3) (vector: Point3) (shaftRadius: float32) (color: RgbaColor) : ArrowDatum3D =
+        {
+            Origin = origin
+            Vector = vector
+            ShaftRadius = shaftRadius
+            LengthScale = 1.0f
+            Color = color
+            Shading = ShadingMode.Lit (0.45f, 0.0f)
+            PickId = 0u
+            Selected = false
+        }
+
+    /// <summary>Creates an <c>ArrowDatum3D</c> converting a <c>System.Numerics.Vector3</c> displacement vector into data-space <c>Point3</c>.</summary>
+    let ofVector3 (origin: Point3) (vector: Vector3) (shaftRadius: float32) (color: RgbaColor) : ArrowDatum3D =
+        create origin (Point3.create (float vector.X) (float vector.Y) (float vector.Z)) shaftRadius color
+
+    /// <summary>Sets the arrow <c>ShadingMode</c>.</summary>
+    let withShading (shading: ShadingMode) (datum: ArrowDatum3D) : ArrowDatum3D =
+        { datum with Shading = shading }
+
+    /// <summary>Sets the hardware picking identifier.</summary>
+    let withPickId (pickId: uint32) (datum: ArrowDatum3D) : ArrowDatum3D =
+        { datum with PickId = pickId }
+
+    /// <summary>Sets the selection rim-highlight flag.</summary>
+    let withSelected (selected: bool) (datum: ArrowDatum3D) : ArrowDatum3D =
+        { datum with Selected = selected }
+
+/// <summary>Input datum describing an axis-aligned 3D cuboid spanning a data-space <c>Bounds3</c> box (preserving Y/Z orientation directly under both <c>YUp</c> and <c>ZUp</c>).</summary>
+[<Struct>]
+type BoxDatum3D =
+    {
+        /// <summary>Data-space bounding cuboid.</summary>
+        Bounds: Bounds3
+        /// <summary>Per-instance RGBA albedo color and opacity.</summary>
+        Color: RgbaColor
+        /// <summary>Unlit or directional studio lighting mode.</summary>
+        Shading: ShadingMode
+        /// <summary>Hardware picking identifier (<c>0u</c> disables picking).</summary>
+        PickId: uint32
+        /// <summary>When true, renders selection rim highlighting.</summary>
+        Selected: bool
+    }
+
+/// <summary>Constructors and pipeable modifiers for <c>BoxDatum3D</c>.</summary>
+[<RequireQualifiedAccess>]
+module BoxDatum3D =
+    /// <summary>Creates a studio-lit <c>BoxDatum3D</c> over <c>bounds</c> with picking disabled.</summary>
+    let create (bounds: Bounds3) (color: RgbaColor) : BoxDatum3D =
+        {
+            Bounds = bounds
+            Color = color
+            Shading = ShadingMode.Lit (0.45f, 0.0f)
+            PickId = 0u
+            Selected = false
+        }
+
+    /// <summary>Sets the cuboid <c>ShadingMode</c>.</summary>
+    let withShading (shading: ShadingMode) (datum: BoxDatum3D) : BoxDatum3D =
+        { datum with Shading = shading }
+
+    /// <summary>Sets the hardware picking identifier.</summary>
+    let withPickId (pickId: uint32) (datum: BoxDatum3D) : BoxDatum3D =
+        { datum with PickId = pickId }
+
+    /// <summary>Sets the selection rim-highlight flag.</summary>
+    let withSelected (selected: bool) (datum: BoxDatum3D) : BoxDatum3D =
+        { datum with Selected = selected }
 
 module internal MarksKernel =
     let inline spanSlice (arr: 'T array) (start: int) (count: int) : ReadOnlySpan<'T> =
@@ -174,6 +324,7 @@ module internal MarksKernel =
 
         match shading with
         | ShadingMode.Unlit -> struct (true, 0.5f, 0.0f, InstanceFlags.Unlit ||| selFlag)
+        | ShadingMode.ExactUnlit -> struct (true, 0.5f, 0.0f, InstanceFlags.Unlit ||| InstanceFlags.ExactColor ||| selFlag)
         | ShadingMode.Lit (roughness, emissive) ->
             if
                 Check3D.isFinite32 roughness
@@ -305,6 +456,39 @@ module internal MarksKernel =
         else
             false
 
+    let tryPackBox (scale: Scale3D) (pickId: uint32) (d: BoxDatum3D) (out: Instance3D array) (slot: int) : bool =
+        let struct (shadeOk, roughness, emissive, flags) = shadingParams d.Shading d.Selected
+
+        if shadeOk && isFiniteColor d.Color then
+            let minPt = Bounds3.minPoint d.Bounds
+            let maxPt = Bounds3.maxPoint d.Bounds
+            let sx = Bounds3.sizeX d.Bounds
+            let sy = Bounds3.sizeY d.Bounds
+            let sz = Bounds3.sizeZ d.Bounds
+
+            if isFinitePoint3 minPt && isFinitePoint3 maxPt && Check3D.isFinite sx && Check3D.isFinite sy && Check3D.isFinite sz then
+                match Scale3D.tryMap scale minPt with
+                | ValueSome wMin ->
+                    match Scale3D.tryMap scale maxPt with
+                    | ValueSome wMax ->
+                        let center = (wMin + wMax) * 0.5f
+                        let ex = MathF.Abs (wMax.X - wMin.X)
+                        let ey = MathF.Abs (wMax.Y - wMin.Y)
+                        let ez = MathF.Abs (wMax.Z - wMin.Z)
+
+                        if isFiniteVec3 center && Check3D.isFinite32 ex && Check3D.isFinite32 ey && Check3D.isFinite32 ez then
+                            let worldMat = Matrix4x4.CreateScale (ex, ey, ez) * Matrix4x4.CreateTranslation center
+                            out[slot] <- Instance3D.fromMatrix worldMat d.Color roughness pickId flags emissive
+                            true
+                        else
+                            false
+                    | ValueNone -> false
+                | ValueNone -> false
+            else
+                false
+        else
+            false
+
     let private packBarMapped
         (dx: float)
         (dy: float)
@@ -425,7 +609,13 @@ module internal MarksKernel =
         else
             false
 
-    let tryPackSegment (scale: Scale3D) (pair: struct (Point3 * Point3 * RgbaColor)) (out: LineVertex3D array) (vertexSlot: int) : bool =
+    let tryPackSegmentWithSection
+        (ignoreSectionPlane: bool)
+        (scale: Scale3D)
+        (pair: struct (Point3 * Point3 * RgbaColor))
+        (out: LineVertex3D array)
+        (vertexSlot: int)
+        : bool =
         let struct (pA, pB, col) = pair
 
         if isFinitePoint3 pA && isFinitePoint3 pB && isFiniteColor col then
@@ -433,11 +623,55 @@ module internal MarksKernel =
             | ValueSome wA ->
                 match Scale3D.tryMap scale pB with
                 | ValueSome wB ->
-                    out[vertexSlot] <- LineVertex3D (wA, col)
-                    out[vertexSlot + 1] <- LineVertex3D (wB, col)
+                    out[vertexSlot] <- LineVertex3D (wA, col, ignoreSectionPlane)
+                    out[vertexSlot + 1] <- LineVertex3D (wB, col, ignoreSectionPlane)
                     true
                 | ValueNone -> false
             | ValueNone -> false
+        else
+            false
+
+    let tryPackSegment (scale: Scale3D) (pair: struct (Point3 * Point3 * RgbaColor)) (out: LineVertex3D array) (vertexSlot: int) : bool =
+        tryPackSegmentWithSection false scale pair out vertexSlot
+
+    let tryPackArrow (scale: Scale3D) (pickId: uint32) (d: ArrowDatum3D) (out: Instance3D array) (slot: int) : bool =
+        let struct (shadeOk, roughness, emissive, flags) = shadingParams d.Shading d.Selected
+
+        if
+            shadeOk
+            && isFinitePoint3 d.Origin
+            && isFinitePoint3 d.Vector
+            && Check3D.isFinite32 d.ShaftRadius
+            && Check3D.isFinite32 d.LengthScale
+            && d.ShaftRadius > 0.0f
+            && d.LengthScale > 0.0f
+            && isFiniteColor d.Color
+        then
+            let tipX = d.Origin.X + d.Vector.X
+            let tipY = d.Origin.Y + d.Vector.Y
+            let tipZ = d.Origin.Z + d.Vector.Z
+
+            if Check3D.isFinite tipX && Check3D.isFinite tipY && Check3D.isFinite tipZ then
+                let tipPt = Point3.create tipX tipY tipZ
+
+                match Scale3D.tryMap scale d.Origin with
+                | ValueSome worldOrigin ->
+                    match Scale3D.tryMap scale tipPt with
+                    | ValueSome worldTip ->
+                        let disp = (worldTip - worldOrigin) * d.LengthScale
+                        let lenSq = disp.LengthSquared ()
+
+                        if Check3D.isFinite32 lenSq && lenSq >= 1e-12f then
+                            let arrowLen = MathF.Sqrt lenSq
+                            let worldMat = Orientation3D.anisotropicMatrix worldOrigin disp d.ShaftRadius arrowLen
+                            out[slot] <- Instance3D.fromMatrix worldMat d.Color roughness pickId flags emissive
+                            true
+                        else
+                            false
+                    | ValueNone -> false
+                | ValueNone -> false
+            else
+                false
         else
             false
 
@@ -649,6 +883,61 @@ module Glyph3D =
             MarksKernel.trimMemory out count
 
     /// <summary>
+    /// Packs axis-aligned 3D cuboids for <c>Primitives.unitBox ()</c>, mapping <c>Bounds3</c> corners through <c>scale</c>
+    /// so <c>UpAxis.YUp</c> heights remain strictly along <c>+Y</c> without coordinate swapping.
+    /// </summary>
+    let packBoxes (scale: Scale3D) (items: ReadOnlySpan<BoxDatum3D>) : ReadOnlyMemory<Instance3D> =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if items.Length = 0 then
+            ReadOnlyMemory<Instance3D>.Empty
+        else
+            let out = Array.zeroCreate<Instance3D> items.Length
+            let mutable count = 0
+
+            for i = 0 to items.Length - 1 do
+                let d = items[i]
+
+                if MarksKernel.tryPackBox scale d.PickId d out count then
+                    count <- count + 1
+
+            MarksKernel.trimMemory out count
+
+    let private resolveBandCenterWidth (band: Band<string>) (key: string) : struct (float * float) voption =
+        if isNull key then
+            ValueNone
+        else
+            match Scale.bandPosition band key with
+            | Some pos ->
+                let bw = Scale.bandwidth band
+                let w = if bw > 0.0 then bw else 1.0 / float (max 1 (Scale.bandCategories band).Length) * 0.6
+                ValueSome struct (pos + bw * 0.5, w)
+            | None -> ValueNone
+
+    let private resolveBarCoord (axis: AxisScale3D) (coord: AxisCoord3D) (fallbackWidth: float) : struct (float * float) voption =
+        match axis, coord with
+        | AxisScale3D.Categorical band, AxisCoord3D.Cat key -> resolveBandCenterWidth band key
+        | AxisScale3D.TimeUtc _, AxisCoord3D.Time instant ->
+            if Check3D.isFinite fallbackWidth && fallbackWidth > 0.0 then
+                let ms = float (instant.ToUnixTimeMilliseconds ())
+                match AxisScale3D.tryMapNormalized axis ms with
+                | ValueSome _ -> ValueSome struct (ms, fallbackWidth)
+                | ValueNone -> ValueNone
+            else
+                ValueNone
+        | AxisScale3D.Continuous _, AxisCoord3D.Num v
+        | AxisScale3D.Piecewise _, AxisCoord3D.Num v
+        | AxisScale3D.TimeUtc _, AxisCoord3D.Num v ->
+            if Check3D.isFinite v && Check3D.isFinite fallbackWidth && fallbackWidth > 0.0 then
+                match AxisScale3D.tryMapNormalized axis v with
+                | ValueSome _ -> ValueSome struct (v, fallbackWidth)
+                | ValueNone -> ValueNone
+            else
+                ValueNone
+        | _ -> ValueNone
+
+    /// <summary>
     /// Builds a <c>BarDatum3D</c> centered on <c>xCategory</c> and <c>yCategory</c> from categorical <c>Scale3D</c> X/Y axes,
     /// returning <c>ValueNone</c> when either axis is not <c>AxisScale3D.Categorical</c>, either category is unknown, or <c>z0</c>/<c>z1</c> is non-finite.
     /// </summary>
@@ -666,40 +955,52 @@ module Glyph3D =
         if isNull (box scale) then
             nullArg (nameof scale)
 
-        if isNull xCategory || isNull yCategory || not (Check3D.isFinite z0 && Check3D.isFinite z1) then
+        if not (Check3D.isFinite z0 && Check3D.isFinite z1) then
             ValueNone
         else
-            match scale.XScale with
-            | AxisScale3D.Categorical bandX ->
-                match scale.YScale with
-                | AxisScale3D.Categorical bandY ->
-                    match Scale.bandPosition bandX xCategory with
-                    | Some posX ->
-                        match Scale.bandPosition bandY yCategory with
-                        | Some posY ->
-                            let bwX = Scale.bandwidth bandX
-                            let bwY = Scale.bandwidth bandY
-                            let wX = if bwX > 0.0 then bwX else 1.0 / float (max 1 (Scale.bandCategories bandX).Length) * 0.6
-                            let wY = if bwY > 0.0 then bwY else 1.0 / float (max 1 (Scale.bandCategories bandY).Length) * 0.6
-                            let cx = posX + bwX * 0.5
-                            let cy = posY + bwY * 0.5
-
-                            ValueSome
-                                {
-                                    X = cx
-                                    Y = cy
-                                    Z0 = z0
-                                    Z1 = z1
-                                    WidthX = wX
-                                    WidthY = wY
-                                    Color = color
-                                    Shading = shading
-                                    PickId = pickId
-                                    Selected = selected
-                                }
-                        | None -> ValueNone
-                    | None -> ValueNone
+            match scale.XScale, scale.YScale with
+            | AxisScale3D.Categorical bandX, AxisScale3D.Categorical bandY ->
+                match resolveBandCenterWidth bandX xCategory, resolveBandCenterWidth bandY yCategory with
+                | ValueSome struct (cx, wX), ValueSome struct (cy, wY) ->
+                    ValueSome
+                        {
+                            X = cx
+                            Y = cy
+                            Z0 = z0
+                            Z1 = z1
+                            WidthX = wX
+                            WidthY = wY
+                            Color = color
+                            Shading = shading
+                            PickId = pickId
+                            Selected = selected
+                        }
                 | _ -> ValueNone
+            | _ -> ValueNone
+
+    /// <summary>
+    /// Builds a <c>BarDatum3D</c> from mixed categorical, numeric, or UTC time <c>AxisCoord3D</c> coordinates on X and Y,
+    /// using categorical band widths automatically on categorical axes and <c>defaultWidthX</c>/<c>defaultWidthY</c> on continuous axes.
+    /// </summary>
+    let tryBarFromCoords
+        (scale: Scale3D)
+        (x: AxisCoord3D)
+        (y: AxisCoord3D)
+        (z0: float)
+        (z1: float)
+        (defaultWidthX: float)
+        (defaultWidthY: float)
+        (color: RgbaColor)
+        : BarDatum3D voption =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if not (Check3D.isFinite z0 && Check3D.isFinite z1 && MarksKernel.isFiniteColor color) then
+            ValueNone
+        else
+            match resolveBarCoord scale.XScale x defaultWidthX, resolveBarCoord scale.YScale y defaultWidthY with
+            | ValueSome struct (cx, wx), ValueSome struct (cy, wy) ->
+                ValueSome (BarDatum3D.create cx cy z0 z1 wx wy color)
             | _ -> ValueNone
 
     /// <summary>
@@ -739,47 +1040,16 @@ module Glyph3D =
 
             for i = 0 to items.Length - 1 do
                 let d = items[i]
-                let struct (shadeOk, roughness, emissive, flags) = MarksKernel.shadingParams d.Shading d.Selected
 
-                if
-                    shadeOk
-                    && MarksKernel.isFinitePoint3 d.Origin
-                    && MarksKernel.isFinitePoint3 d.Vector
-                    && Check3D.isFinite32 d.ShaftRadius
-                    && Check3D.isFinite32 d.LengthScale
-                    && d.ShaftRadius > 0.0f
-                    && d.LengthScale > 0.0f
-                    && MarksKernel.isFiniteColor d.Color
-                then
-                    let tipX = d.Origin.X + d.Vector.X
-                    let tipY = d.Origin.Y + d.Vector.Y
-                    let tipZ = d.Origin.Z + d.Vector.Z
-
-                    if Check3D.isFinite tipX && Check3D.isFinite tipY && Check3D.isFinite tipZ then
-                        let tipPt = Point3.create tipX tipY tipZ
-
-                        match Scale3D.tryMap scale d.Origin with
-                        | ValueSome worldOrigin ->
-                            match Scale3D.tryMap scale tipPt with
-                            | ValueSome worldTip ->
-                                let disp = (worldTip - worldOrigin) * d.LengthScale
-                                let lenSq = disp.LengthSquared ()
-
-                                if Check3D.isFinite32 lenSq && lenSq >= 1e-12f then
-                                    let arrowLen = MathF.Sqrt lenSq
-                                    let worldMat = Orientation3D.anisotropicMatrix worldOrigin disp d.ShaftRadius arrowLen
-                                    out[count] <- Instance3D.fromMatrix worldMat d.Color roughness d.PickId flags emissive
-                                    count <- count + 1
-                            | ValueNone -> ()
-                        | ValueNone -> ()
+                if MarksKernel.tryPackArrow scale d.PickId d out count then
+                    count <- count + 1
 
             MarksKernel.trimMemory out count
 
-/// <summary>3D hairline segment, gap-aware polyline, extruded smooth tube, and double-sided ribbon mesh builders.</summary>
+/// <summary>3D hairline segment, gap-aware polyline, extruded smooth tube, double-sided ribbon, and wireframe primitive builders.</summary>
 [<RequireQualifiedAccess>]
 module Line3D =
-    /// <summary>Maps independent 3D segment pairs into paired <c>LineList</c> vertices, omitting any pair with unmappable endpoints or non-finite colors.</summary>
-    let segments (scale: Scale3D) (pairs: ReadOnlySpan<struct (Point3 * Point3 * RgbaColor)>) : ReadOnlyMemory<LineVertex3D> =
+    let private segmentsWithSection (ignoreSectionPlane: bool) (scale: Scale3D) (pairs: ReadOnlySpan<struct (Point3 * Point3 * RgbaColor)>) : ReadOnlyMemory<LineVertex3D> =
         if isNull (box scale) then
             nullArg (nameof scale)
 
@@ -790,13 +1060,20 @@ module Line3D =
             let mutable count = 0
 
             for i = 0 to pairs.Length - 1 do
-                if MarksKernel.tryPackSegment scale pairs[i] out count then
+                if MarksKernel.tryPackSegmentWithSection ignoreSectionPlane scale pairs[i] out count then
                     count <- count + 2
 
             MarksKernel.trimMemory out count
 
-    /// <summary>Maps a polyline sequence into paired <c>LineList</c> vertices, breaking runs cleanly across <c>ValueNone</c> or unmappable gaps.</summary>
-    let polyline (scale: Scale3D) (points: IReadOnlyList<struct (Point3 * RgbaColor) voption>) : ReadOnlyMemory<LineVertex3D> =
+    /// <summary>Maps independent 3D segment pairs into paired <c>LineList</c> vertices, omitting any pair with unmappable endpoints or non-finite colors.</summary>
+    let segments (scale: Scale3D) (pairs: ReadOnlySpan<struct (Point3 * Point3 * RgbaColor)>) : ReadOnlyMemory<LineVertex3D> =
+        segmentsWithSection false scale pairs
+
+    /// <summary>Maps independent 3D segment pairs into paired <c>LineList</c> vertices exempt from active <c>SectionPlane</c> clipping (<c>Pad = 1.0f</c>).</summary>
+    let segmentsExempt (scale: Scale3D) (pairs: ReadOnlySpan<struct (Point3 * Point3 * RgbaColor)>) : ReadOnlyMemory<LineVertex3D> =
+        segmentsWithSection true scale pairs
+
+    let private polylineWithSection (ignoreSectionPlane: bool) (scale: Scale3D) (points: IReadOnlyList<struct (Point3 * RgbaColor) voption>) : ReadOnlyMemory<LineVertex3D> =
         if isNull (box scale) then
             nullArg (nameof scale)
 
@@ -818,8 +1095,8 @@ module Line3D =
                         | ValueSome w ->
                             match prev with
                             | ValueSome struct (prevW, prevCol) ->
-                                out.Add (LineVertex3D (prevW, prevCol))
-                                out.Add (LineVertex3D (w, col))
+                                out.Add (LineVertex3D (prevW, prevCol, ignoreSectionPlane))
+                                out.Add (LineVertex3D (w, col, ignoreSectionPlane))
                             | ValueNone -> ()
 
                             prev <- ValueSome struct (w, col)
@@ -831,6 +1108,178 @@ module Line3D =
                 ReadOnlyMemory<LineVertex3D>.Empty
             else
                 ReadOnlyMemory<LineVertex3D>(out.ToArray ())
+
+    /// <summary>Maps a polyline sequence into paired <c>LineList</c> vertices, breaking runs cleanly across <c>ValueNone</c> or unmappable gaps.</summary>
+    let polyline (scale: Scale3D) (points: IReadOnlyList<struct (Point3 * RgbaColor) voption>) : ReadOnlyMemory<LineVertex3D> =
+        polylineWithSection false scale points
+
+    /// <summary>Maps a polyline sequence into section-plane-exempt (<c>Pad = 1.0f</c>) paired <c>LineList</c> vertices, breaking runs cleanly across gaps.</summary>
+    let polylineExempt (scale: Scale3D) (points: IReadOnlyList<struct (Point3 * RgbaColor) voption>) : ReadOnlyMemory<LineVertex3D> =
+        polylineWithSection true scale points
+
+    let private appendBoxWireframe (scale: Scale3D) (bounds: Bounds3) (color: RgbaColor) (ignoreSectionPlane: bool) (out: ResizeArray<LineVertex3D>) =
+        if MarksKernel.isFiniteColor color then
+            let x0, y0, z0 = Bounds3.minX bounds, Bounds3.minY bounds, Bounds3.minZ bounds
+            let x1, y1, z1 = Bounds3.maxX bounds, Bounds3.maxY bounds, Bounds3.maxZ bounds
+
+            if Check3D.isFinite x0 && Check3D.isFinite y0 && Check3D.isFinite z0
+               && Check3D.isFinite x1 && Check3D.isFinite y1 && Check3D.isFinite z1 then
+                let c000 = Scale3D.tryMap scale (Point3.create x0 y0 z0)
+                let c100 = Scale3D.tryMap scale (Point3.create x1 y0 z0)
+                let c110 = Scale3D.tryMap scale (Point3.create x1 y1 z0)
+                let c010 = Scale3D.tryMap scale (Point3.create x0 y1 z0)
+                let c001 = Scale3D.tryMap scale (Point3.create x0 y0 z1)
+                let c101 = Scale3D.tryMap scale (Point3.create x1 y0 z1)
+                let c111 = Scale3D.tryMap scale (Point3.create x1 y1 z1)
+                let c011 = Scale3D.tryMap scale (Point3.create x0 y1 z1)
+
+                let emitEdge a b =
+                    match a, b with
+                    | ValueSome wa, ValueSome wb ->
+                        out.Add (LineVertex3D (wa, color, ignoreSectionPlane))
+                        out.Add (LineVertex3D (wb, color, ignoreSectionPlane))
+                    | _ -> ()
+
+                emitEdge c000 c100
+                emitEdge c100 c110
+                emitEdge c110 c010
+                emitEdge c010 c000
+                emitEdge c001 c101
+                emitEdge c101 c111
+                emitEdge c111 c011
+                emitEdge c011 c001
+                emitEdge c000 c001
+                emitEdge c100 c101
+                emitEdge c110 c111
+                emitEdge c010 c011
+
+    /// <summary>Emits the 12 edges (24 <c>LineVertex3D</c> endpoints) of <c>bounds</c> mapped through <c>scale</c>.</summary>
+    let boxWireframe (scale: Scale3D) (bounds: Bounds3) (color: RgbaColor) (ignoreSectionPlane: bool) : ReadOnlyMemory<LineVertex3D> =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        let out = ResizeArray<LineVertex3D>(24)
+        appendBoxWireframe scale bounds color ignoreSectionPlane out
+        if out.Count = 0 then ReadOnlyMemory<LineVertex3D>.Empty else ReadOnlyMemory<LineVertex3D>(out.ToArray ())
+
+    /// <summary>Batches wireframe edges across multiple <c>Bounds3</c> cuboids into a single contiguous <c>LineVertex3D</c> slice.</summary>
+    let boxesWireframe (scale: Scale3D) (boxes: ReadOnlySpan<struct (Bounds3 * RgbaColor)>) (ignoreSectionPlane: bool) : ReadOnlyMemory<LineVertex3D> =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if boxes.Length = 0 then
+            ReadOnlyMemory<LineVertex3D>.Empty
+        else
+            let out = ResizeArray<LineVertex3D>(boxes.Length * 24)
+
+            for i = 0 to boxes.Length - 1 do
+                let struct (b, col) = boxes[i]
+                appendBoxWireframe scale b col ignoreSectionPlane out
+
+            if out.Count = 0 then ReadOnlyMemory<LineVertex3D>.Empty else ReadOnlyMemory<LineVertex3D>(out.ToArray ())
+
+    let private appendCircle
+        (scale: Scale3D)
+        (center: Point3)
+        (normal: Vector3)
+        (radiusData: float)
+        (segments: int)
+        (color: RgbaColor)
+        (ignoreSectionPlane: bool)
+        (out: ResizeArray<LineVertex3D>)
+        =
+        if MarksKernel.isFinitePoint3 center
+           && MarksKernel.isFiniteVec3 normal
+           && Check3D.isFinite radiusData
+           && radiusData > 0.0
+           && MarksKernel.isFiniteColor color then
+            let lenSq = normal.LengthSquared ()
+            if lenSq > 1e-12f then
+                let n = Vector3.Normalize normal
+                let refAxis = if MathF.Abs n.Y < 0.9f then Vector3.UnitY else Vector3.UnitX
+                let u = Vector3.Normalize (Vector3.Cross (refAxis, n))
+                let v = Vector3.Cross (n, u)
+                let ux, uy, uz = float u.X * radiusData, float u.Y * radiusData, float u.Z * radiusData
+                let vx, vy, vz = float v.X * radiusData, float v.Y * radiusData, float v.Z * radiusData
+
+                let sampleRingPt i =
+                    let ang = float i * (Math.PI * 2.0 / float segments)
+                    let c = cos ang
+                    let s = sin ang
+                    let px = center.X + ux * c + vx * s
+                    let py = center.Y + uy * c + vy * s
+                    let pz = center.Z + uz * c + vz * s
+                    if Check3D.isFinite px && Check3D.isFinite py && Check3D.isFinite pz then
+                        Scale3D.tryMap scale (Point3.create px py pz)
+                    else
+                        ValueNone
+
+                let firstOpt = sampleRingPt 0
+                let mutable prevOpt = firstOpt
+
+                for i = 1 to segments do
+                    let currOpt = if i = segments then firstOpt else sampleRingPt i
+                    match prevOpt, currOpt with
+                    | ValueSome wa, ValueSome wb ->
+                        out.Add (LineVertex3D (wa, color, ignoreSectionPlane))
+                        out.Add (LineVertex3D (wb, color, ignoreSectionPlane))
+                    | _ -> ()
+                    prevOpt <- currOpt
+
+    /// <summary>Emits a closed 3D wireframe circle centered at <c>center</c> perpendicular to <c>normal</c> with radius <c>radiusData</c> in data units; requires <c>segments &gt;= 3</c>.</summary>
+    let circle
+        (scale: Scale3D)
+        (center: Point3)
+        (normal: Vector3)
+        (radiusData: float)
+        (segments: int)
+        (color: RgbaColor)
+        (ignoreSectionPlane: bool)
+        : ReadOnlyMemory<LineVertex3D> =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if segments < 3 then
+            raise (ArgumentOutOfRangeException (nameof segments, "Circle requires at least 3 segments."))
+
+        let out = ResizeArray<LineVertex3D>(segments * 2)
+        appendCircle scale center normal radiusData segments color ignoreSectionPlane out
+        if out.Count = 0 then ReadOnlyMemory<LineVertex3D>.Empty else ReadOnlyMemory<LineVertex3D>(out.ToArray ())
+
+    /// <summary>Emits a multi-ring spherical wireframe cage (latitude rings plus orthogonal meridian great circles); requires <c>rings &gt;= 1</c> and <c>segmentsPerRing &gt;= 3</c>.</summary>
+    let sphereCage
+        (scale: Scale3D)
+        (center: Point3)
+        (radiusData: float)
+        (rings: int)
+        (segmentsPerRing: int)
+        (color: RgbaColor)
+        (ignoreSectionPlane: bool)
+        : ReadOnlyMemory<LineVertex3D> =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if rings < 1 then
+            raise (ArgumentOutOfRangeException (nameof rings, "Sphere cage requires at least 1 latitude ring."))
+
+        if segmentsPerRing < 3 then
+            raise (ArgumentOutOfRangeException (nameof segmentsPerRing, "Sphere cage requires at least 3 segments per ring."))
+
+        if not (MarksKernel.isFinitePoint3 center && Check3D.isFinite radiusData && radiusData > 0.0 && MarksKernel.isFiniteColor color) then
+            ReadOnlyMemory<LineVertex3D>.Empty
+        else
+            let out = ResizeArray<LineVertex3D>((rings + 2) * segmentsPerRing * 2)
+
+            for r = 1 to rings do
+                let phi = Math.PI * float r / float (rings + 1)
+                let ringZ = center.Z + radiusData * cos phi
+                let ringRad = radiusData * sin phi
+                if Check3D.isFinite ringZ && ringRad > 1e-12 then
+                    appendCircle scale (Point3.create center.X center.Y ringZ) Vector3.UnitZ ringRad segmentsPerRing color ignoreSectionPlane out
+
+            appendCircle scale center Vector3.UnitX radiusData segmentsPerRing color ignoreSectionPlane out
+            appendCircle scale center Vector3.UnitY radiusData segmentsPerRing color ignoreSectionPlane out
+            if out.Count = 0 then ReadOnlyMemory<LineVertex3D>.Empty else ReadOnlyMemory<LineVertex3D>(out.ToArray ())
 
     let private computePolylineTangents (pts: Vector3 array) : Vector3 array voption =
         let n = pts.Length
@@ -875,20 +1324,17 @@ module Line3D =
 
         if anyValid then ValueSome tangents else ValueNone
 
-    /// <summary>
-    /// Extrudes a closed, capped cylindrical <c>MeshData</c> tube along variable-radius, per-vertex colored 3D polyline samples
-    /// using twist-free parallel transport frames and outward CCW winding.
-    /// </summary>
-    let tube (scale: Scale3D) (sides: int) (points: ReadOnlySpan<struct (Point3 * float32 * RgbaColor)>) : Result<MeshData, LayoutError list> =
-        if isNull (box scale) then
-            nullArg (nameof scale)
-
-        if sides < 3 then
-            Error [ LayoutError.InvalidObservation "Tube cross-section requires at least 3 sides." ]
-        elif points.Length < 2 then
+    let private appendTubeFromSpan
+        (scale: Scale3D)
+        (sides: int)
+        (points: ReadOnlySpan<struct (Point3 * float32 * RgbaColor)>)
+        (verts: ResizeArray<Vertex3D>)
+        (inds: ResizeArray<uint32>)
+        : Result<unit, LayoutError list> =
+        let n = points.Length
+        if n < 2 then
             Error [ LayoutError.InvalidObservation "Tube requires at least 2 points." ]
         else
-            let n = points.Length
             let wPts = Array.zeroCreate<Vector3> n
             let radii = Array.zeroCreate<float32> n
             let colors = Array.zeroCreate<Vector4> n
@@ -922,8 +1368,7 @@ module Line3D =
                 | ValueNone ->
                     Error [ LayoutError.InvalidObservation "Tube points must span a non-zero path." ]
                 | ValueSome tangents ->
-                    let verts = ResizeArray<Vertex3D>(n * sides + (sides + 1) * 2)
-                    let inds = ResizeArray<uint32>((n - 1) * sides * 6 + sides * 6)
+                    let baseVert = uint32 verts.Count
                     let cosTable = Array.zeroCreate<float32> sides
                     let sinTable = Array.zeroCreate<float32> sides
 
@@ -961,8 +1406,8 @@ module Line3D =
                             verts.Add (Vertex3D (p + nrm * r, nrm, col))
 
                     for idx = 0 to n - 2 do
-                        let ring0 = uint32 (idx * sides)
-                        let ring1 = uint32 ((idx + 1) * sides)
+                        let ring0 = baseVert + uint32 (idx * sides)
+                        let ring1 = baseVert + uint32 ((idx + 1) * sides)
 
                         for s = 0 to sides - 1 do
                             let sNext = (s + 1) % sides
@@ -1012,24 +1457,86 @@ module Line3D =
                             inds.Add (rimStart + uint32 s)
                             inds.Add (rimStart + uint32 sNext)
 
-                    Ok
-                        {
-                            Vertices = verts.ToArray ()
-                            Indices = inds.ToArray ()
-                        }
+                    Ok ()
 
     /// <summary>
-    /// Builds a double-sided ruled ribbon <c>MeshData</c> between paired <c>lower</c> and <c>upper</c> 3D curves with smooth normals
-    /// and explicit front/back faces so it remains visible from both sides even with back-face culling enabled.
+    /// Extrudes a closed, capped cylindrical <c>MeshData</c> tube along variable-radius, per-vertex colored 3D polyline samples
+    /// using twist-free parallel transport frames and outward CCW winding.
     /// </summary>
-    let ribbon (scale: Scale3D) (samples: ReadOnlySpan<struct (Point3 * Point3 * RgbaColor)>) : Result<MeshData, LayoutError list> =
+    let tube (scale: Scale3D) (sides: int) (points: ReadOnlySpan<struct (Point3 * float32 * RgbaColor)>) : Result<MeshData, LayoutError list> =
         if isNull (box scale) then
             nullArg (nameof scale)
 
-        if samples.Length < 2 then
+        if sides < 3 then
+            Error [ LayoutError.InvalidObservation "Tube cross-section requires at least 3 sides." ]
+        elif points.Length < 2 then
+            Error [ LayoutError.InvalidObservation "Tube requires at least 2 points." ]
+        else
+            let verts = ResizeArray<Vertex3D>(points.Length * sides + (sides + 1) * 2)
+            let inds = ResizeArray<uint32>((points.Length - 1) * sides * 6 + sides * 6)
+
+            match appendTubeFromSpan scale sides points verts inds with
+            | Error errs -> Error errs
+            | Ok () ->
+                Ok
+                    {
+                        Vertices = verts.ToArray ()
+                        Indices = inds.ToArray ()
+                    }
+
+    let private toSpanOfList (items: IReadOnlyList<'T>) : ReadOnlySpan<'T> =
+        match items with
+        | :? ('T array) as arr -> ReadOnlySpan<'T>(arr)
+        | _ ->
+            let arr = Array.zeroCreate<'T> items.Count
+            for i = 0 to items.Count - 1 do
+                arr[i] <- items[i]
+            ReadOnlySpan<'T>(arr)
+
+    /// <summary>Batches multiple variable-radius colored polyline tubes into a single indexed <c>MeshData</c> with merged vertex offsets.</summary>
+    let tubes (scale: Scale3D) (sides: int) (polylines: seq<#IReadOnlyList<struct (Point3 * float32 * RgbaColor)>>) : Result<MeshData, LayoutError list> =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if isNull (box polylines) then
+            nullArg (nameof polylines)
+
+        if sides < 3 then
+            Error [ LayoutError.InvalidObservation "Tube cross-section requires at least 3 sides." ]
+        else
+            let verts = ResizeArray<Vertex3D>()
+            let inds = ResizeArray<uint32>()
+            let mutable firstErr: LayoutError list option = None
+            use e = polylines.GetEnumerator ()
+
+            while e.MoveNext () && firstErr.IsNone do
+                let poly = e.Current
+                if isNull (box poly) then
+                    nullArg "polylines"
+
+                match appendTubeFromSpan scale sides (toSpanOfList poly) verts inds with
+                | Ok () -> ()
+                | Error errs -> firstErr <- Some errs
+
+            match firstErr with
+            | Some errs -> Error errs
+            | None ->
+                Ok
+                    {
+                        Vertices = verts.ToArray ()
+                        Indices = inds.ToArray ()
+                    }
+
+    let private appendRibbonFromSpan
+        (scale: Scale3D)
+        (samples: ReadOnlySpan<struct (Point3 * Point3 * RgbaColor)>)
+        (verts: ResizeArray<Vertex3D>)
+        (inds: ResizeArray<uint32>)
+        : Result<unit, LayoutError list> =
+        let n = samples.Length
+        if n < 2 then
             Error [ LayoutError.InvalidObservation "Ribbon requires at least 2 samples." ]
         else
-            let n = samples.Length
             let wLow = Array.zeroCreate<Vector3> n
             let wHigh = Array.zeroCreate<Vector3> n
             let wMid = Array.zeroCreate<Vector3> n
@@ -1104,50 +1611,97 @@ module Line3D =
                         elif seenGood && not validNormal[idx] then
                             normals[idx] <- lastGood
 
-                let verts = Array.zeroCreate<Vertex3D> (4 * n)
-                let inds = Array.zeroCreate<uint32> (12 * (n - 1))
-                let backVertexBase = 2 * n
+                let baseVert = uint32 verts.Count
+                let backVertexBase = uint32 (2 * n)
 
                 for idx = 0 to n - 1 do
                     let nrm = normals[idx]
                     let col = colors[idx]
-                    let fBase = idx * 2
-                    verts[fBase] <- Vertex3D (wLow[idx], nrm, col)
-                    verts[fBase + 1] <- Vertex3D (wHigh[idx], nrm, col)
-                    let bBase = backVertexBase + fBase
-                    verts[bBase] <- Vertex3D (wLow[idx], -nrm, col)
-                    verts[bBase + 1] <- Vertex3D (wHigh[idx], -nrm, col)
+                    verts.Add (Vertex3D (wLow[idx], nrm, col))
+                    verts.Add (Vertex3D (wHigh[idx], nrm, col))
 
-                let frontIndBase = 0
-                let backIndBase = 6 * (n - 1)
+                for idx = 0 to n - 1 do
+                    let nrm = normals[idx]
+                    let col = colors[idx]
+                    verts.Add (Vertex3D (wLow[idx], -nrm, col))
+                    verts.Add (Vertex3D (wHigh[idx], -nrm, col))
 
                 for idx = 0 to n - 2 do
-                    let fl0 = uint32 (idx * 2)
+                    let fl0 = baseVert + uint32 (idx * 2)
                     let fu0 = fl0 + 1u
                     let fl1 = fl0 + 2u
                     let fu1 = fl0 + 3u
-                    let fo = frontIndBase + idx * 6
-                    inds[fo] <- fl0
-                    inds[fo + 1] <- fl1
-                    inds[fo + 2] <- fu1
-                    inds[fo + 3] <- fl0
-                    inds[fo + 4] <- fu1
-                    inds[fo + 5] <- fu0
+                    inds.Add fl0
+                    inds.Add fl1
+                    inds.Add fu1
+                    inds.Add fl0
+                    inds.Add fu1
+                    inds.Add fu0
 
-                    let bl0 = uint32 (backVertexBase + idx * 2)
+                for idx = 0 to n - 2 do
+                    let bl0 = baseVert + backVertexBase + uint32 (idx * 2)
                     let bu0 = bl0 + 1u
                     let bl1 = bl0 + 2u
                     let bu1 = bl0 + 3u
-                    let bo = backIndBase + idx * 6
-                    inds[bo] <- bl0
-                    inds[bo + 1] <- bu1
-                    inds[bo + 2] <- bl1
-                    inds[bo + 3] <- bl0
-                    inds[bo + 4] <- bu0
-                    inds[bo + 5] <- bu1
+                    inds.Add bl0
+                    inds.Add bu1
+                    inds.Add bl1
+                    inds.Add bl0
+                    inds.Add bu0
+                    inds.Add bu1
 
+                Ok ()
+
+    /// <summary>
+    /// Builds a double-sided ruled ribbon <c>MeshData</c> between paired <c>lower</c> and <c>upper</c> 3D curves with smooth normals
+    /// and explicit front/back faces so it remains visible from both sides even with back-face culling enabled.
+    /// </summary>
+    let ribbon (scale: Scale3D) (samples: ReadOnlySpan<struct (Point3 * Point3 * RgbaColor)>) : Result<MeshData, LayoutError list> =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if samples.Length < 2 then
+            Error [ LayoutError.InvalidObservation "Ribbon requires at least 2 samples." ]
+        else
+            let verts = ResizeArray<Vertex3D>(4 * samples.Length)
+            let inds = ResizeArray<uint32>(12 * (samples.Length - 1))
+
+            match appendRibbonFromSpan scale samples verts inds with
+            | Error errs -> Error errs
+            | Ok () ->
                 Ok
                     {
-                        Vertices = verts
-                        Indices = inds
+                        Vertices = verts.ToArray ()
+                        Indices = inds.ToArray ()
                     }
+
+    /// <summary>Batches multiple double-sided ruled ribbon strips into a single indexed <c>MeshData</c> with merged vertex offsets.</summary>
+    let ribbons (scale: Scale3D) (strips: seq<#IReadOnlyList<struct (Point3 * Point3 * RgbaColor)>>) : Result<MeshData, LayoutError list> =
+        if isNull (box scale) then
+            nullArg (nameof scale)
+
+        if isNull (box strips) then
+            nullArg (nameof strips)
+
+        let verts = ResizeArray<Vertex3D>()
+        let inds = ResizeArray<uint32>()
+        let mutable firstErr: LayoutError list option = None
+        use e = strips.GetEnumerator ()
+
+        while e.MoveNext () && firstErr.IsNone do
+            let strip = e.Current
+            if isNull (box strip) then
+                nullArg "strips"
+
+            match appendRibbonFromSpan scale (toSpanOfList strip) verts inds with
+            | Ok () -> ()
+            | Error errs -> firstErr <- Some errs
+
+        match firstErr with
+        | Some errs -> Error errs
+        | None ->
+            Ok
+                {
+                    Vertices = verts.ToArray ()
+                    Indices = inds.ToArray ()
+                }
