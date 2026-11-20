@@ -1425,4 +1425,115 @@ let reactive3DTests =
                     let combinedMarks = Scene.marks compiled.ExtraOverlay.Value
                     Expect.isTrue (combinedMarks |> List.exists (fun m -> Mark.key m = "legend3d/swatch/s1/box")) "categorical swatch preserved in combined overlay"
                 )
+
+            testCase "PickRegistry3D preserves static pick labels/handlers across SinkOptions3D sinks and UpdateGrid, and rejects colliding static PickIds"
+            <| fun () ->
+                use ctx = new WgpuContext (initialWidth = 64, initialHeight = 64)
+                let scale = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+                let ramp = ColorRamp.viridis (-1.0, 1.0)
+                let grid1 = SurfaceGrid.fromFunction3D 6 6 (-0.8, 0.8) (-0.8, 0.8) (fun x y -> x * y) |> unwrapOk "staticRegGrid1"
+                let grid2 = SurfaceGrid.fromFunction3D 6 6 (-0.8, 0.8) (-0.8, 0.8) (fun x y -> x + y) |> unwrapOk "staticRegGrid2"
+                use graph = new Graph ()
+
+                graph.Run (fun () ->
+                    let reg = PickRegistry3D ()
+                    let preHovers = ResizeArray<PickHit>()
+                    let preClicks = ResizeArray<PickHit>()
+                    let postHovers = ResizeArray<PickHit>()
+                    let postClicks = ResizeArray<PickHit>()
+                    let tubeHovers = ResizeArray<PickHit>()
+                    let tubeClicks = ResizeArray<PickHit>()
+
+                    // 1. Pre-registered static picks survive bindSurfaceWith + reactive UpdateGrid, and bindTubes
+                    reg.RegisterStaticPick(701u, label = "Surface:pre", onHover = preHovers.Add, onClick = preClicks.Add)
+                    reg.RegisterStaticPick(703u, label = "Tubes:pre", onHover = tubeHovers.Add, onClick = tubeClicks.Add)
+
+                    let specSig1 = Api.createSignal { SurfaceSpec.create scale ramp with PickId = 701u }
+                    let gridSig1 = Api.createSignal grid1
+                    let _surfPre =
+                        Reactive3D.bindSurfaceWith
+                            ctx
+                            (SinkOptions3D.defaultValue |> SinkOptions3D.withRegistry reg |> SinkOptions3D.withPickId 701u)
+                            (fun () -> specSig1.Value)
+                            (fun () -> gridSig1.Value)
+
+                    let hitPre = { PickId = 701u; WorldPosition = Vector3.Zero }
+                    Expect.equal (reg.DescribeHit(scale, hitPre)) (ValueSome "Surface:pre") "bindSurfaceWith preserves pre-registered static PickId label"
+                    reg.DispatchHover(scale, ValueSome hitPre)
+                    reg.DispatchClick(scale, ValueSome hitPre)
+                    Expect.equal preHovers.Count 1 "bindSurfaceWith preserves pre-registered static PickId hover handler"
+                    Expect.equal preClicks.Count 1 "bindSurfaceWith preserves pre-registered static PickId click handler"
+
+                    // Reactive UpdateGrid must NOT clobber pre-registered static pick
+                    gridSig1.Value <- grid2
+                    specSig1.Value <- { SurfaceSpec.create scale ramp with PickId = 701u; Opacity = 0.9f }
+                    Expect.equal (reg.DescribeHit(scale, hitPre)) (ValueSome "Surface:pre") "UpdateGrid preserves pre-registered static PickId label"
+                    reg.DispatchHover(scale, ValueSome hitPre)
+                    reg.DispatchClick(scale, ValueSome hitPre)
+                    Expect.equal preHovers.Count 2 "UpdateGrid preserves pre-registered static PickId hover handler"
+                    Expect.equal preClicks.Count 2 "UpdateGrid preserves pre-registered static PickId click handler"
+
+                    let _tubeBatch =
+                        Reactive3D.bindTubes
+                            ctx
+                            (SinkOptions3D.defaultValue |> SinkOptions3D.withRegistry reg |> SinkOptions3D.withPickId 703u)
+                            6
+                            (fun () -> ShadingMode.Unlit)
+                            (fun () -> scale)
+                            (fun () -> [| [| struct (Point3.create -0.5 0.0 0.0, 0.1f, RgbaColor.white); struct (Point3.create 0.5 0.0 0.0, 0.1f, RgbaColor.white) |] |])
+
+                    let hitTube = { PickId = 703u; WorldPosition = Vector3.Zero }
+                    Expect.equal (reg.DescribeHit(scale, hitTube)) (ValueSome "Tubes:pre") "bindTubes preserves pre-registered static PickId label"
+                    reg.DispatchHover(scale, ValueSome hitTube)
+                    reg.DispatchClick(scale, ValueSome hitTube)
+                    Expect.equal tubeHovers.Count 1 "bindTubes preserves pre-registered static PickId hover handler"
+                    Expect.equal tubeClicks.Count 1 "bindTubes preserves pre-registered static PickId click handler"
+
+                    // 2. Post-registered static pick after bindSurfaceWith survives subsequent UpdateGrid updates
+                    let specSig2 = Api.createSignal (SurfaceSpec.create scale ramp)
+                    let gridSig2 = Api.createSignal grid1
+                    let _surfPost =
+                        Reactive3D.bindSurfaceWith
+                            ctx
+                            (SinkOptions3D.defaultValue |> SinkOptions3D.withRegistry reg |> SinkOptions3D.withPickId 702u)
+                            (fun () -> specSig2.Value)
+                            (fun () -> gridSig2.Value)
+
+                    reg.RegisterStaticPick(702u, label = "Surface:post", onHover = postHovers.Add, onClick = postClicks.Add)
+                    gridSig2.Value <- grid2
+                    let hitPost = { PickId = 702u; WorldPosition = Vector3.Zero }
+                    Expect.equal (reg.DescribeHit(scale, hitPost)) (ValueSome "Surface:post") "UpdateGrid preserves post-registered static PickId label"
+                    reg.DispatchHover(scale, ValueSome hitPost)
+                    reg.DispatchClick(scale, ValueSome hitPost)
+                    Expect.equal postHovers.Count 1 "UpdateGrid preserves post-registered static PickId hover handler"
+                    Expect.equal postClicks.Count 1 "UpdateGrid preserves post-registered static PickId click handler"
+
+                    // 3. Duplicate active RegisterStaticPick throws InvalidOperationException and inner disposal never deletes outer entry
+                    let outerClicks = ResizeArray<PickHit>()
+                    reg.RegisterStaticPick(704u, label = "Outer:static", onClick = outerClicks.Add)
+
+                    let collideInner =
+                        Api.createRoot (fun root ->
+                            Expect.throwsT<InvalidOperationException>
+                                (fun () -> reg.RegisterStaticPick(704u, label = "Inner:collide"))
+                                "duplicate active RegisterStaticPick throws InvalidOperationException"
+                            root)
+
+                    collideInner.Dispose ()
+                    let hit704 = { PickId = 704u; WorldPosition = Vector3.Zero }
+                    Expect.equal (reg.DescribeHit(scale, hit704)) (ValueSome "Outer:static") "colliding inner registration and disposal preserve outer static label"
+                    reg.DispatchClick(scale, ValueSome hit704)
+                    Expect.equal outerClicks.Count 1 "colliding inner registration and disposal preserve outer static click handler"
+
+                    // 4. Manual UnregisterStaticPick + re-register in outer scope does not let old owner disposal remove new entry
+                    let manualInner =
+                        Api.createRoot (fun root ->
+                            reg.RegisterStaticPick(705u, label = "ScopeA")
+                            reg.UnregisterStaticPick 705u
+                            root)
+
+                    reg.RegisterStaticPick(705u, label = "ScopeB")
+                    manualInner.Dispose ()
+                    Expect.equal (reg.DescribeHit(scale, { PickId = 705u; WorldPosition = Vector3.Zero })) (ValueSome "ScopeB") "old scope disposal after manual UnregisterStaticPick does not clear later ScopeB entry"
+                )
         ]

@@ -37,7 +37,7 @@ type SinkOptions3D =
     {
         /// <summary>Explicit pick layer byte in <c>[1uy .. 255uy]</c>, or <c>ValueNone</c> to auto-allocate when <c>Registry</c> is provided (defaulting to <c>1uy</c> otherwise).</summary>
         LayerId: byte voption
-        /// <summary>Optional <c>PickRegistry3D</c> used to allocate layers and auto-register pickable sinks or static <c>PickId</c>s.</summary>
+        /// <summary>Optional <c>PickRegistry3D</c> used to allocate layers and auto-register keyed pickable sinks.</summary>
         Registry: PickRegistry3D voption
         /// <summary>Optional <c>PlotRevision3D</c> automatically marked dirty whenever the bound sink uploads or resizes GPU geometry.</summary>
         Revision: PlotRevision3D voption
@@ -82,7 +82,7 @@ module SinkOptions3D =
     let withLayerId (layerId: byte) (options: SinkOptions3D) : SinkOptions3D =
         { options with LayerId = ValueSome layerId }
 
-    /// <summary>Attaches a <c>PickRegistry3D</c> for automatic layer allocation and sink/static pick registration.</summary>
+    /// <summary>Attaches a <c>PickRegistry3D</c> for automatic layer allocation and keyed sink registration.</summary>
     let withRegistry (registry: PickRegistry3D) (options: SinkOptions3D) : SinkOptions3D =
         if isNull (box registry) then nullArg (nameof registry)
         { options with Registry = ValueSome registry }
@@ -371,16 +371,6 @@ module Reactive3D =
             match options.Registry with
             | ValueSome reg -> reg.AllocateLayer ()
             | ValueNone -> 1uy
-
-    let private registerKeyedSinkIfNeeded (options: SinkOptions3D) (sink: IKeyedPickResolver<'K>) =
-        match options.Registry with
-        | ValueSome reg -> reg.RegisterSink sink
-        | ValueNone -> ()
-
-    let private registerStaticPickIfNeeded (options: SinkOptions3D) (pickId: uint32) =
-        match options.Registry with
-        | ValueSome reg when pickId <> 0u -> reg.RegisterStaticPick pickId
-        | _ -> ()
 
     let private attachSyncedEffect
         (rows: Projection<'K, 'Datum>)
@@ -1358,7 +1348,6 @@ module Reactive3D =
         let initialGrid = Api.untrack grid
         let surfaceBatch = SurfaceBatch.Create (context, initialSpec, initialGrid)
         OwnerCleanup.tryOnCleanup (fun () -> surfaceBatch.Dispose ())
-        registerStaticPickIfNeeded options initialSpec.PickId
         markRevisionDirty options.Revision
 
         let mutable initialized = false
@@ -1378,7 +1367,6 @@ module Reactive3D =
             else
                 initialized <- true
                 surfaceBatch.UpdateGrid (s, g)
-                registerStaticPickIfNeeded options s.PickId
                 markRevisionDirty options.Revision)
 
         surfaceBatch
@@ -1425,7 +1413,6 @@ module Reactive3D =
 
         let batch = context.CreateBatch (meshHandle, options.BlendMode, options.DoubleSided, drawBeforeLines = options.DrawBeforeLines)
         OwnerCleanup.tryOnCleanup (fun () -> batch.Dispose ())
-        registerStaticPickIfNeeded options options.PickId
 
         let mutable lastScale = Unchecked.defaultof<Scale3D>
         let mutable lastData = Unchecked.defaultof<'Data>
@@ -1591,7 +1578,6 @@ module Reactive3D =
         let mutable latestError: LayoutError list voption = ValueNone
         let sink = new IsoSurfaceSink (memo, host, fun () -> latestError)
         OwnerCleanup.tryOnCleanup sink.Dispose
-        registerStaticPickIfNeeded options options.PickId
 
         Api.createEffect (fun () ->
             if not host.IsDisposed && not context.IsDisposed then
@@ -1653,7 +1639,6 @@ module Reactive3D =
         let mutable latestError: LayoutError list voption = ValueNone
         let sink = new VolumeSliceSink (host, fun () -> latestError)
         OwnerCleanup.tryOnCleanup sink.Dispose
-        registerStaticPickIfNeeded options options.PickId
 
         let mutable hasGeomCache = false
         let mutable lastScale = Unchecked.defaultof<Scale3D>

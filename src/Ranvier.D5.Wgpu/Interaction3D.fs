@@ -1365,10 +1365,14 @@ type PickRegistry3D() =
     /// <summary>
     /// Registers a static single-batch or surface <c>PickId</c> (such as <c>layerId = 0uy</c> or a custom non-zero <c>PickId</c>)
     /// with optional label and hover/click handlers, cleaning up on Ranvier owner disposal.
+    /// Rejects duplicate registrations for an already active <c>pickId</c> with <c>InvalidOperationException</c>.
     /// </summary>
     member this.RegisterStaticPick(pickId: uint32, ?label: string, ?onHover: PickHit -> unit, ?onClick: PickHit -> unit) : unit =
         if pickId = 0u then
             raise (ArgumentOutOfRangeException (nameof pickId, "Static pickId must be non-zero."))
+
+        if staticPicks.ContainsKey pickId then
+            raise (InvalidOperationException $"Static PickId {pickId} is already registered.")
 
         let nextGen =
             match staticGen.TryGetValue pickId with
@@ -1391,9 +1395,13 @@ type PickRegistry3D() =
 
     /// <summary>Removes a static <c>PickId</c> registration from the registry.</summary>
     member _.UnregisterStaticPick(pickId: uint32) : unit =
-        if pickId <> 0u then
-            staticPicks.Remove pickId |> ignore
-            staticGen.Remove pickId |> ignore
+        if pickId <> 0u && staticPicks.Remove pickId then
+            let nextGen =
+                match staticGen.TryGetValue pickId with
+                | true, g -> g + 1
+                | _ -> 1
+
+            staticGen[pickId] <- nextGen
 
     /// <summary>Resolves <c>hit</c> to a strongly typed <c>PickedMark</c> when its layer owns an active matching sink.</summary>
     member _.TryResolveKeyed<'K when 'K: equality>(scale: Scale3D, hit: PickHit) : PickedMark<'K> voption =
