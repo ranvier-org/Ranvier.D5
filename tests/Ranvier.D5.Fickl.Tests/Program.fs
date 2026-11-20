@@ -7,6 +7,57 @@ open Ranvier.D5.Geo
 open Ranvier.D5.Graph
 open Ranvier.D5.Graph3D
 
+module TaskD6Checks =
+    open System.Numerics
+    open Ranvier.D5.Wgpu
+    open Ranvier.D5.Graph3D.Wgpu
+    open Ranvier.D5.Wgpu.View
+    open Ranvier.Wgpu
+
+    let private okLocal label = function
+        | Ok value -> value
+        | Error errs -> failwithf "Fickl JS %s returned Error: %A" label errs
+
+    let run (check: bool -> string -> unit) (vp3D: Bounds3) (featDs: FeatureDataset<string>) (nnLinks: NeighborLink<string> list) (ccOut: CityBuilding<string> list) (unitBox3: Bounds3) (vt3Out: VoronoiTreemap3DCell<string> list) (pk3Out: PackedSphere3D<string> list) (tm3Out: HierarchyCuboid<string> list) =
+        let umapPts3, _ = Umap3D.embedWithLinks { Umap3DConfig.create vp3D with Neighbors = 6; Epochs = 40 } featDs |> okLocal "TaskD6.Umap3D"
+        let umap3Diag = Umap3D.toDiagramLayout 4.0 umapPts3 nnLinks
+        let graphTheme = GraphTheme3D.darkDefault
+        let layoutScale = GraphScene3D.scaleOfLayout BoxAspect.Cube UpAxis.YUp 0.05 umap3Diag
+        let layoutNodes = GraphScene3D.packNodes graphTheme (Set.singleton "f_0_0") umap3Diag
+        let layoutLines = GraphScene3D.packAssociationLines layoutScale graphTheme umap3Diag
+        let layoutTubes = GraphScene3D.buildAssociationTubes layoutScale 5 graphTheme umap3Diag |> okLocal "GraphScene3D.buildAssociationTubes"
+        check (layoutNodes.Length = 30 && layoutLines.Length > 0 && layoutTubes.Vertices.Length > 0) "GraphScene3D diagram adapters in JS"
+
+        let ccScale = GraphScene3D.scaleOfCodeCity ccOut
+        check ((Scale3D.map ccScale (Point3.create 0.0 80.0 0.0)).Y > 0.0f && (Scale3D.map ccScale (Point3.create 0.0 0.0 80.0)).Z > 0.0f) "GraphScene3D.scaleOfCodeCity uses YUp in JS"
+        let struct (ccLeaves, ccDistricts) = GraphScene3D.packCodeCity (fun _ -> RgbaColor.white) ShadingMode.Unlit Set.empty ccOut
+        check (ccLeaves.Length = 5 && ccDistricts.Length = 3) "GraphScene3D.packCodeCity splits leaves & districts in JS"
+
+        let vtMesh = GraphScene3D.buildVoronoiCellMeshes (Scale3D.ofBounds3 BoxAspect.Cube UpAxis.YUp unitBox3) 0.85 (fun _ -> RgbaColor.white) vt3Out
+        let vtWire = GraphScene3D.packVoronoiWireframe (Scale3D.ofBounds3 BoxAspect.Cube UpAxis.YUp unitBox3) 0.85 (fun _ -> RgbaColor.white) false vt3Out
+        check (vtMesh.Vertices.Length > 0 && vtWire.Length > 0) "GraphScene3D Voronoi cell meshes & wireframes in JS"
+
+        let sphPacked = GraphScene3D.packSpheres (fun _ -> RgbaColor.white) ShadingMode.Unlit true pk3Out
+        let tmPacked = GraphScene3D.packTreemapCuboids (fun _ -> RgbaColor.white) ShadingMode.Unlit true tm3Out
+        check (sphPacked.Length = 5 && tmPacked.Length = 5) "GraphScene3D Pack3D & Treemap3D adapters in JS"
+
+        let cbScene = Legend3D.colorbar 800.0 600.0 (ColorbarSpec3D.vertical (Bounds.create 720.0 50.0 16.0 180.0) "Metric" (-1.0, 1.0) (ColorRamp.turbo (-1.0, 1.0)))
+        check (not (List.isEmpty (Scene.definitions cbScene))) "Legend3D.colorbar definitions in JS"
+
+        let reg = PickRegistry3D ()
+        reg.RegisterStaticPick (0x01000005u, "static-probe")
+        check (reg.DescribeHit (layoutScale, { PickId = 0x01000005u; WorldPosition = Vector3.Zero }) = ValueSome "static-probe") "PickRegistry3D in JS"
+
+        let spRects = SubplotGrid3D.grid 2 2 8 800 600
+        check (spRects.Count = 4 && spRects[0].Width = 396 && spRects[3].Y = 304) "SubplotGrid3D.grid math in JS"
+
+        let browserPass = PlotPass3D.create (Axis3D.defaultSpec layoutScale)
+        check (browserPass.ClearColor = RgbaColor.darkBackdrop) "Fable PlotPass3D in JS"
+        ignore PlotView3D.create
+        ignore PlotView3D.createContextAsync
+        ignore SubplotGrid3D.create
+        ignore ReactiveGraph3D.bindDiagram
+
 let private check condition message =
     if not condition then
         failwith ("Fickl JS check failed: " + message)
@@ -422,6 +473,9 @@ let main _ =
 
     let umapPts3, umapLinks3 = Umap3D.embedWithLinks { Umap3DConfig.create vp3D with Neighbors = 6; Epochs = 40 } featDs |> ok "Umap3D.embedWithLinks"
     check (umapPts3.Length = 30 && umapLinks3.Length = 180) "Umap3D.embedWithLinks in JS"
+
+    // 12. Task D6: Fable.Ranvier.D5.Graph3D.Wgpu & Fable.Ranvier.D5.Wgpu.View runtime checks in JS
+    TaskD6Checks.run check vp3D featDs nnLinks ccOut unitBox3 vt3Out pk3Out tm3Out
 
     printfn "Fickl JS runtime suite passed: all Wave 1, Wave 2, Atlas Recipe and B1 ergonomics engines executed cleanly in JavaScript."
     0

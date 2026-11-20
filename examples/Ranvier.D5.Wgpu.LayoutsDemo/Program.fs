@@ -78,7 +78,6 @@ type private DemoSession =
         ActiveScene: Signal<LayoutSceneId>
         Camera: Editable<PlotCamera3D>
         Section: Editable<SectionPlane>
-        FrameTick: Signal<float>
         Paused: Signal<bool>
         Readout: Signal<string>
     }
@@ -90,7 +89,7 @@ type private DemoSession =
             (this.Window :> IDisposable).Dispose ()
 
 let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int) (height: int) : DemoSession =
-    let win = Window.Create ("Ranvier.D5.Wgpu — 0.3.0 3D Layouts Showcase", width, height, hidden = hidden)
+    let win = Window.Create ("Ranvier.D5.Wgpu — 0.5.0 3D Layouts Showcase", width, height, hidden = hidden)
     let wgpu = WgpuSdlSurface.CreateContext win
     let graph = new Graph ()
 
@@ -98,17 +97,16 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
     win.Host.Document.body.setAttribute ("style", "margin:0;padding:0;overflow:hidden;background:#04060b;")
     win.Host.Document.body.appendChild root |> ignore
 
-    let activeScene, camera, section, frameTick, paused, readoutSig, stage =
+    let activeScene, camera, section, paused, readoutSig, stage =
         graph.Run (fun () ->
             let sc = Api.createSignal initialScene
             let cam = Reactive3D.editableCamera (fun () -> PlotCamera3D.defaultValue)
             let sec = Reactive3D.editableSection (fun () -> SectionPlane.disabled)
-            let tick = Api.createSignal 0.0
             let isPaused = Api.createSignal false
             let readout = Api.createSignal ""
             let stg = new LayoutsStage3D (wgpu)
             Api.onCleanup (fun () -> (stg :> IDisposable).Dispose ())
-            sc, cam, sec, tick, isPaused, readout, stg)
+            sc, cam, sec, isPaused, readout, stg)
 
     let focusPlot () =
         match root.querySelector "[tabindex='0']" with
@@ -119,8 +117,7 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
         graph.Run (fun () ->
             Api.batch (fun () ->
                 activeScene.Value <- sc
-                readoutSig.Value <- ""
-                frameTick.Value <- frameTick.Value + 1e-4))
+                readoutSig.Value <- ""))
 
     let toggleSection () =
         graph.Run (fun () ->
@@ -152,8 +149,7 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
         graph.Run (fun () ->
             Api.batch (fun () ->
                 let msg = stage.ScrubScene (activeScene.Value, delta)
-                readoutSig.Value <- msg
-                frameTick.Value <- frameTick.Value + 1e-4))
+                readoutSig.Value <- msg))
 
     let togglePause () =
         graph.Run (fun () -> paused.Value <- not paused.Value)
@@ -166,8 +162,7 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
 
                 section.Reset ()
                 stage.ResetScene activeScene.Value
-                readoutSig.Value <- "Reset camera, section & layout parameters"
-                frameTick.Value <- frameTick.Value + 1e-4))
+                readoutSig.Value <- "Reset camera, section & layout parameters"))
 
     let onHover (hit: PickHit voption) =
         match hit with
@@ -182,12 +177,11 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
         | ValueSome h when h.PickId <> 0u ->
             graph.Run (fun () ->
                 Api.batch (fun () ->
-                    readoutSig.Value <- stage.ClickHit (activeScene.Value, h)
-                    frameTick.Value <- frameTick.Value + 1e-4))
+                    readoutSig.Value <- stage.ClickHit (activeScene.Value, h)))
         | _ -> ()
 
     let readScene () : PlotPass3D =
-        let _ = frameTick.Value
+        let _ = stage.Revision
         let sc = activeScene.Value
         let sec = section.Value
         let pass = stage.BuildPass (sc, sec)
@@ -339,7 +333,6 @@ let private createDemo (hidden: bool) (initialScene: LayoutSceneId) (width: int)
         ActiveScene = activeScene
         Camera = camera
         Section = section
-        FrameTick = frameTick
         Paused = paused
         Readout = readoutSig
     }
@@ -390,9 +383,7 @@ let private poseSceneForCapture (demo: DemoSession) (scene: LayoutSceneId) =
                         ElevationRad = 0.38f
                         Perspectiveness = 0.30f
                         Zoom = 1.08f
-                    }
-
-            demo.FrameTick.Value <- demo.FrameTick.Value + 1.0))
+                    }))
 
 let private capturePoseToBmp (demo: DemoSession) (scene: LayoutSceneId) (outputPath: string) =
     let sw = Stopwatch.StartNew ()
@@ -458,12 +449,10 @@ let main args =
                 simTimeSec <- simTimeSec + dt
 
                 demo.Graph.Run (fun () ->
-                    demo.Stage.StepScene (demo.ActiveScene.Value, simTimeSec)
-                    demo.FrameTick.Value <- simTimeSec)
+                    demo.Stage.StepScene (demo.ActiveScene.Value, simTimeSec))
             elif demo.ActiveScene.Value = LayoutSceneId.PoincareH3 && demo.Stage.HasPendingPoincareTransition then
                 demo.Graph.Run (fun () ->
-                    demo.Stage.StepPendingPoincare dt
-                    demo.FrameTick.Value <- demo.FrameTick.Value + 1e-4)
+                    demo.Stage.StepPendingPoincare dt)
 
         0
     | _ ->

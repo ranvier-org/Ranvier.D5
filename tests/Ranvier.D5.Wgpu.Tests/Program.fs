@@ -100,6 +100,7 @@ let main args =
                 VolumeTests.volumeTests
                 Reactive3DTests.reactive3DTests
                 Legend3DTests.legend3DTests
+                GraphScene3DTests.graphScene3DTests
             ]
 
     runTestsWithCLIArgs [] args allTests

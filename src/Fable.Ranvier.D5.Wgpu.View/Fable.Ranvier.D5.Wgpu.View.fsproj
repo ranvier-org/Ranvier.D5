@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Ranvier.D5.Wgpu.View</RootNamespace>
+    <AssemblyName>Fable.Ranvier.D5.Wgpu.View</AssemblyName>
+    <PackageId>Fable.Ranvier.D5.Wgpu.View$(RanvierPackageSuffix)</PackageId>
+    <Description>Browser WebGPU and WebGL2 interactive 3D plot host and multi-pass subplot grid for Fable.Ranvier.D5.Wgpu over Ranvier.View.Dsl.</Description>
+    <DefineConstants>$(DefineConstants);FABLE_COMPILER</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="PlotView3D.fs" />
+    <Compile Include="SubplotGrid3D.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />
+    <ProjectReference Include="../Ranvier.D5.View/Ranvier.D5.View.fsproj" />
+    <ProjectReference Include="../Fable.Ranvier.D5.Wgpu/Fable.Ranvier.D5.Wgpu.fsproj" />
+    <PackageReference Include="Fable.Ranvier.Wgpu" Version="$(FableRanvierWgpuVersion)" />
+    <PackageReference Include="Ranvier.View$(RanvierPackageSuffix)" Version="$(RanvierViewVersion)" />
+    <PackageReference Include="Ranvier.View.Dom$(RanvierPackageSuffix)" Version="$(RanvierViewVersion)" />
+    <PackageReference Update="FSharp.Core" Version="10.0.100" />
+    <None Include="$(MSBuildProjectFile);*.fs" Pack="true" PackagePath="fable/" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

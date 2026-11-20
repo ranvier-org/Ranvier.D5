@@ -131,6 +131,9 @@ jobs:
           dotnet pack src/Ranvier.D5.Wgpu -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
           dotnet pack src/Fable.Ranvier.D5.Wgpu -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
           dotnet pack src/Ranvier.D5.Wgpu.Sdl -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+          dotnet pack src/Ranvier.D5.Graph3D.Wgpu -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+          dotnet pack src/Fable.Ranvier.D5.Graph3D.Wgpu -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
+          dotnet pack src/Fable.Ranvier.D5.Wgpu.View -c Release -p:RanvierTrace=${{ matrix.traced }} -o artifacts/packages
       - name: Consume packed View and core
         shell: bash
         run: |
@@ -138,7 +141,7 @@ jobs:
           if [[ "${{ matrix.traced }}" == true ]]; then suffix=".Traced"; fi
           mkdir -p artifacts/consumer
           cat > artifacts/consumer/Consumer.fsproj <<EOF
-          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Graph$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Graph3D$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Wgpu$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Wgpu.Sdl$suffix" Version="[0.4.0]" /></ItemGroup></Project>
+          <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup><ItemGroup><Compile Include="Program.fs" /><PackageReference Include="Ranvier.D5.View$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Charts$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Geo$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Graph$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Graph3D$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Wgpu$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Wgpu.Sdl$suffix" Version="[0.4.0]" /><PackageReference Include="Ranvier.D5.Graph3D.Wgpu$suffix" Version="[0.4.0]" /></ItemGroup></Project>
           EOF
           cat > artifacts/consumer/Program.fs <<'EOF'
           open Ranvier
@@ -263,6 +266,18 @@ jobs:
           let surfMesh = Ranvier.D5.Wgpu.Surface3D.build surfSpec surfGrid
           if (Ranvier.D5.Wgpu.SurfaceMesh.vertices surfMesh).Length <> 36 || (Ranvier.D5.Wgpu.SurfaceMesh.indices surfMesh).Length <> 150 then failwith "Packed Surface3D failed"
           if typeof<Ranvier.D5.Wgpu.Sdl.PlotPass3D>.Name <> "PlotPass3D" then failwith "Packed Ranvier.D5.Wgpu.Sdl failed"
+          if (Ranvier.D5.Wgpu.Sdl.SubplotGrid3D.grid 2 2 8 800 600).Count <> 4 then failwith "Packed SubplotGrid3D.grid failed"
+          let cc = Ranvier.D5.Graph3D.CodeCity.layout (Ranvier.D5.Graph3D.CodeCityConfig.create (Bounds.create -10. -10. 20. 20.) 30. (fun _ -> 10.)) (Ranvier.D5.Hierarchy.node "r" 0. [ Ranvier.D5.Hierarchy.node "a" 5. [] ]) |> Result.defaultWith (fun errors -> failwithf "%A" errors)
+          let ccScale = Ranvier.D5.Graph3D.Wgpu.GraphScene3D.scaleOfCodeCity cc
+          let struct (ccLeaves, _) = Ranvier.D5.Graph3D.Wgpu.GraphScene3D.packCodeCity (fun _ -> Ranvier.Wgpu.RgbaColor.white) Ranvier.D5.Wgpu.ShadingMode.Unlit Set.empty cc
+          if ccLeaves.Length <> 1 || (Ranvier.D5.Wgpu.Scale3D.map ccScale (Ranvier.D5.Point3.create 0. 30. 0.)).Y <= 0.0f then failwith "Packed GraphScene3D failed"
+          let boxD = Ranvier.D5.Wgpu.BoxDatum3D.create (Ranvier.D5.Bounds3.create -1. -1. -1. 2. 2. 2.) Ranvier.Wgpu.RgbaColor.white
+          if (Ranvier.D5.Wgpu.Glyph3D.packBoxes ccScale (System.ReadOnlySpan<Ranvier.D5.Wgpu.BoxDatum3D> [| boxD |])).Length <> 1 then failwith "Packed BoxDatum3D failed"
+          let cb = Ranvier.D5.Wgpu.Legend3D.colorbar 640. 480. (Ranvier.D5.Wgpu.ColorbarSpec3D.vertical (Bounds.create 560. 40. 16. 180.) "Val" (-1., 1.) ramp3d)
+          if List.isEmpty (Ranvier.D5.Scene.definitions cb) then failwith "Packed Legend3D.colorbar failed"
+          let pickReg = new Ranvier.D5.Wgpu.PickRegistry3D()
+          pickReg.RegisterStaticPick (0x01000001u, "probe")
+          if pickReg.DescribeHit (ccScale, { PickId = 0x01000001u; WorldPosition = System.Numerics.Vector3.Zero }) <> ValueSome "probe" then failwith "Packed PickRegistry3D failed"
           graph.Dispose()
           EOF
           cat > artifacts/consumer/NuGet.Config <<'EOF'
@@ -279,6 +294,8 @@ jobs:
           dotnet fickl src/Ranvier.D5.Graph -o artifacts/fable/graph
           dotnet fickl src/Ranvier.D5.Graph3D -o artifacts/fable/graph3d
           dotnet fickl src/Fable.Ranvier.D5.Wgpu -o artifacts/fable/d5-wgpu
+          dotnet fickl src/Fable.Ranvier.D5.Graph3D.Wgpu -o artifacts/fable/graph3d-wgpu
+          dotnet fickl src/Fable.Ranvier.D5.Wgpu.View -o artifacts/fable/d5-wgpu-view
           dotnet fickl tests/Ranvier.D5.Fickl.Tests -o artifacts/fable/tests
           printf '{"type":"module"}\n' > artifacts/fable/tests/package.json
           node artifacts/fable/tests/Program.js
@@ -292,6 +309,8 @@ jobs:
             <ItemGroup>
               <Compile Include="Program.fs" />
               <PackageReference Include="Fable.Ranvier.D5.Wgpu" Version="[0.4.0]" />
+              <PackageReference Include="Fable.Ranvier.D5.Graph3D.Wgpu" Version="[0.4.0]" />
+              <PackageReference Include="Fable.Ranvier.D5.Wgpu.View" Version="[0.4.0]" />
             </ItemGroup>
           </Project>
           EOF
@@ -436,7 +455,24 @@ jobs:
           if Vector3.Distance (wCam0.Position, wCamArc.Position) > 1e-3f then
               failwith "PlotCamera3D.withMode Arcball JS failed to preserve Position"
 
-          // 7. Ranvier owner + KeyedCollection + Reactive3D.domainExtent + Reactive3D.asyncIsoSurface
+          // 7. Graph3D.Wgpu, Legend3D.colorbar, PickRegistry3D & Fable.Ranvier.D5.Wgpu.View checks
+          let ccSmoke = Ranvier.D5.Graph3D.CodeCity.layout (Ranvier.D5.Graph3D.CodeCityConfig.create (Bounds.create -10.0 -10.0 20.0 20.0) 30.0 (fun _ -> 10.0)) (Hierarchy.node "r" 0.0 [ Hierarchy.node "a" 5.0 [] ]) |> Result.defaultWith (fun e -> failwithf "%A" e)
+          let ccScaleSmoke = Ranvier.D5.Graph3D.Wgpu.GraphScene3D.scaleOfCodeCity ccSmoke
+          let struct (ccLeafsSmoke, _) = Ranvier.D5.Graph3D.Wgpu.GraphScene3D.packCodeCity (fun _ -> RgbaColor.white) ShadingMode.Unlit Set.empty ccSmoke
+          if ccLeafsSmoke.Length <> 1 || (Scale3D.map ccScaleSmoke (Point3.create 0.0 30.0 0.0)).Y <= 0.0f then failwith "GraphScene3D.packCodeCity JS failed"
+          let vtBoxSmoke = Bounds3.create 0.0 0.0 0.0 10.0 10.0 10.0
+          let vtCellsSmoke = Ranvier.D5.Graph3D.VoronoiTreemap3D.layout 10 0.05 vtBoxSmoke (Hierarchy.node "r" 0.0 [ Hierarchy.node "a" 5.0 []; Hierarchy.node "b" 5.0 [] ]) |> Result.defaultWith (fun e -> failwithf "%A" e)
+          let vtMeshSmoke = Ranvier.D5.Graph3D.Wgpu.GraphScene3D.buildVoronoiCellMeshes (Scale3D.ofBounds3 BoxAspect.Cube UpAxis.YUp vtBoxSmoke) 0.85 (fun _ -> RgbaColor.white) vtCellsSmoke
+          if vtMeshSmoke.Vertices.Length = 0 then failwith "GraphScene3D.buildVoronoiCellMeshes JS failed"
+          let cbSmoke = Legend3D.colorbar 640.0 480.0 (ColorbarSpec3D.vertical (Bounds.create 560.0 40.0 16.0 180.0) "Metric" (-1.0, 1.0) ramp)
+          if List.isEmpty (Scene.definitions cbSmoke) then failwith "Legend3D.colorbar JS failed"
+          let pickRegSmoke = new PickRegistry3D()
+          pickRegSmoke.RegisterStaticPick (0x01000001u, "probe")
+          if pickRegSmoke.DescribeHit (ccScaleSmoke, { PickId = 0x01000001u; WorldPosition = Vector3.Zero }) <> ValueSome "probe" then failwith "PickRegistry3D JS failed"
+          if typeof<Ranvier.D5.Wgpu.View.PlotPass3D>.Name <> "PlotPass3D" then failwith "Fable.Ranvier.D5.Wgpu.View type check failed"
+          if (Ranvier.D5.Wgpu.View.SubplotGrid3D.grid 2 2 8 800 600).Count <> 4 then failwith "Fable SubplotGrid3D.grid JS failed"
+
+          // 8. Ranvier owner + KeyedCollection + Reactive3D.domainExtent + Reactive3D.asyncIsoSurface
           let graph = new Graph ()
           let isoMemo =
               graph.Run (fun () ->

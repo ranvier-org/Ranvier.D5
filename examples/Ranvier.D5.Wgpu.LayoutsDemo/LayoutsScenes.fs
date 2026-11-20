@@ -12,9 +12,10 @@ open Ranvier.D5.Graph
 open Ranvier.D5.Graph3D
 open System.Numerics
 open Ranvier.D5.Wgpu
+open Ranvier.D5.Graph3D.Wgpu
 open Ranvier.Wgpu
 
-/// <summary>Identifies one of the four 0.3.0 3D layout showcase scenes.</summary>
+/// <summary>Identifies one of the four 0.5.0 3D layout showcase scenes.</summary>
 [<RequireQualifiedAccess; Struct>]
 type LayoutSceneId =
     /// <summary>Scene 1: Poincaré H^3 hyperbolic graph with smooth Lorentz focus boosts.</summary>
@@ -138,110 +139,10 @@ module private LayoutsHelpers =
             Z = { baseSpec.Z with Title = zTitle; TickCount = tickCount }
         }
 
-    let private appendMappedWireframeBox
-        (mapCorner: float -> float -> float -> Vector3)
-        (box: Bounds3)
-        (color: RgbaColor)
-        (dst: ResizeArray<LineVertex3D>)
-        =
-        let x0, y0, z0 = Bounds3.minX box, Bounds3.minY box, Bounds3.minZ box
-        let x1, y1, z1 = Bounds3.maxX box, Bounds3.maxY box, Bounds3.maxZ box
-        let c000 = mapCorner x0 y0 z0
-        let c100 = mapCorner x1 y0 z0
-        let c010 = mapCorner x0 y1 z0
-        let c110 = mapCorner x1 y1 z0
-        let c001 = mapCorner x0 y0 z1
-        let c101 = mapCorner x1 y0 z1
-        let c011 = mapCorner x0 y1 z1
-        let c111 = mapCorner x1 y1 z1
-        let vCol = color.ToVector4 ()
-        let inline addEdge (a: Vector3) (b: Vector3) =
-            dst.Add (LineVertex3D (a, vCol))
-            dst.Add (LineVertex3D (b, vCol))
-        addEdge c000 c100
-        addEdge c010 c110
-        addEdge c001 c101
-        addEdge c011 c111
-        addEdge c000 c010
-        addEdge c100 c110
-        addEdge c001 c011
-        addEdge c101 c111
-        addEdge c000 c001
-        addEdge c100 c101
-        addEdge c010 c011
-        addEdge c110 c111
-
-    let appendWireframeBoxXZFloor (scale: Scale3D) (box: Bounds3) (color: RgbaColor) (dst: ResizeArray<LineVertex3D>) =
-        // CodeCity / Treemap3D emit Bounds3 in (X, +Y elevation, Z depth); ZUp Scale3D expects (X, Z depth, +Y elevation).
-        appendMappedWireframeBox (fun x y z -> Scale3D.map scale (Point3.create x z y)) box color dst
-
-    let appendWireframeBox (scale: Scale3D) (box: Bounds3) (color: RgbaColor) (dst: ResizeArray<LineVertex3D>) =
-        appendMappedWireframeBox (fun x y z -> Scale3D.map scale (Point3.create x y z)) box color dst
-
-    let appendGreatCircleSegments
-        (scale: Scale3D)
-        (radius: float)
-        (steps: int)
-        (color: RgbaColor)
-        (axisPair: int)
-        (dst: ResizeArray<LineVertex3D>)
-        =
-        let vCol = color.ToVector4 ()
-
-        let pointAt (ang: float) =
-            let ca = radius * cos ang
-            let sa = radius * sin ang
-
-            match axisPair with
-            | 0 -> Point3.create ca sa 0.0
-            | 1 -> Point3.create ca 0.0 sa
-            | _ -> Point3.create 0.0 ca sa
-
-        for k = 0 to steps - 1 do
-            let a0 = 2.0 * Math.PI * float k / float steps
-            let a1 = 2.0 * Math.PI * float (k + 1) / float steps
-            let w0 = Scale3D.map scale (pointAt a0)
-            let w1 = Scale3D.map scale (pointAt a1)
-            dst.Add (LineVertex3D (w0, vCol))
-            dst.Add (LineVertex3D (w1, vCol))
-
-    let mergeMeshes (meshes: ResizeArray<MeshData>) : MeshData =
-        let mutable totalVerts = 0
-        let mutable totalInds = 0
-
-        for i = 0 to meshes.Count - 1 do
-            let m = meshes[i]
-            totalVerts <- totalVerts + m.Vertices.Length
-            totalInds <- totalInds + m.Indices.Length
-
-        let verts = Array.zeroCreate<Vertex3D> totalVerts
-        let inds = Array.zeroCreate<uint32> totalInds
-        let mutable vOff = 0
-        let mutable iOff = 0
-
-        for i = 0 to meshes.Count - 1 do
-            let m = meshes[i]
-            let baseV = uint32 vOff
-            Array.Copy (m.Vertices, 0, verts, vOff, m.Vertices.Length)
-
-            for k = 0 to m.Indices.Length - 1 do
-                inds[iOff + k] <- baseV + m.Indices[k]
-
-            vOff <- vOff + m.Vertices.Length
-            iOff <- iOff + m.Indices.Length
-
-        { Vertices = verts; Indices = inds }
-
     let makeSphereGlyph (pos: Point3) (radius: float32) (color: RgbaColor) (selected: bool) (emissive: float32) : GlyphDatum3D =
-        {
-            Position = pos
-            Scale = Vector3 (radius, radius, radius)
-            Rotation = Quaternion.Identity
-            Color = color
-            Shading = ShadingMode.Lit (0.24f, emissive)
-            PickId = 0u
-            Selected = selected
-        }
+        GlyphDatum3D.sphere pos radius color
+        |> GlyphDatum3D.withShading (ShadingMode.Lit (0.24f, emissive))
+        |> GlyphDatum3D.withSelected selected
 
 type private SphericalEdgePre =
     {
@@ -255,19 +156,13 @@ type private SphericalEdgePre =
         Bundled: Point3[]
     }
 
-type private ManifoldBoxItem =
-    {
-        Id: string
-        Position: Point3
-        Box: Bounds3
-    }
-
 /// <summary>
-/// Dual-target (.NET 10 + Fable/Fickl) 4-scene controller showcasing Ranvier.D5 0.3.0 &amp; Ranvier.D5.Graph3D 0.3.0
-/// driven incrementally through Ranvier KeyedCollection, Projection, and Reactive3D GPU sinks.
+/// Dual-target (.NET 10 + Fable/Fickl) 4-scene controller showcasing Ranvier.D5 0.5.0 &amp; Ranvier.D5.Graph3D 0.5.0
+/// driven incrementally through Ranvier KeyedCollection, Projection, Reactive3D, and GraphScene3D GPU sinks.
 /// </summary>
 type LayoutsStage3D(wgpu: WgpuContext) =
-    let sphereMesh = wgpu.UploadMesh (Glyph3D.unitMesh GlyphShape3D.Sphere)
+    let plotRevision = Reactive3D.createRevision ()
+    let pickRegistry = PickRegistry3D ()
 
     // =========================================================================
     // Scene 1: Poincare H^3 Hyperbolic Graph + Live Lorentz Focus
@@ -345,19 +240,23 @@ type LayoutsStage3D(wgpu: WgpuContext) =
     let h3Coll = Api.createKeyedCollection (fun struct (k: string, _: GlyphDatum3D) -> k)
     let h3Sink =
         let rows = h3Coll.Rows |> Projection.map (fun struct (_, g) -> g)
-        Reactive3D.bindInstances wgpu 1uy sphereMesh BlendMode.Opaque false false (fun () -> h3Scale) rows
+
+        let opts =
+            SinkOptions3D.defaultValue
+            |> SinkOptions3D.withLayerId (pickRegistry.AllocateLayer ())
+            |> SinkOptions3D.withRevision plotRevision
+            |> SinkOptions3D.withBlendMode BlendMode.Opaque
+            |> SinkOptions3D.withDoubleSided false
+
+        Reactive3D.bindGlyphs wgpu GlyphShape3D.Sphere opts (fun () -> h3Scale) rows
 
     let h3LineBatch = wgpu.CreateLineBatch ()
     let h3Batches = ReadOnlyMemory<InstanceBatch> [| h3Sink.Batch |]
     let h3Lines = ReadOnlyMemory<LineBatch> [| h3LineBatch |]
 
     let h3MeridianVerts =
-        let buf = ResizeArray<LineVertex3D>(400)
-        let meridianCol = RgbaColor (0.36f, 0.50f, 0.74f, 0.34f)
-        LayoutsHelpers.appendGreatCircleSegments h3Scale 1.0 64 meridianCol 0 buf
-        LayoutsHelpers.appendGreatCircleSegments h3Scale 1.0 64 meridianCol 1 buf
-        LayoutsHelpers.appendGreatCircleSegments h3Scale 1.0 64 meridianCol 2 buf
-        buf.ToArray ()
+        let cage = Line3D.sphereCage h3Scale Point3.zero 1.0 1 64 (RgbaColor (0.36f, 0.50f, 0.74f, 0.34f)) false
+        cage.Span.ToArray ()
 
     let mutable h3CurrentFocusPt = Hyperbolic3D.origin
     let mutable h3FocusNodeId = "root"
@@ -429,13 +328,10 @@ type LayoutsStage3D(wgpu: WgpuContext) =
                     lineVerts.Add (LineVertex3D (wB, vCol))
 
         h3LineBatch.UpdateVertices (lineVerts.ToArray ())
+        plotRevision.MarkDirty ()
 
     let interpMinkowski (a: MinkowskiPoint) (b: MinkowskiPoint) (u: float) : MinkowskiPoint =
-        let s = LayoutsHelpers.smoothstep u
-        Hyperbolic3D.ofSpacelike
-            (a.X + (b.X - a.X) * s)
-            (a.Y + (b.Y - a.Y) * s)
-            (a.Z + (b.Z - a.Z) * s)
+        Hyperbolic3D.slerp a b (LayoutsHelpers.smoothstep u)
 
     let stepPoincareInternal (t: float) =
         let dt = if t >= lastSceneT then t - lastSceneT else 0.0
@@ -476,18 +372,8 @@ type LayoutsStage3D(wgpu: WgpuContext) =
     do applyPoincareFocus Hyperbolic3D.origin "root"
 
     // =========================================================================
-    // Scene 2: CodeCity <-> Exploded CubeHilbert Treemap3D Morph
+    // Scene 2: CodeCity <-> Exploded CubeHilbert Treemap3D Morph + VoronoiTreemap3D
     // =========================================================================
-    let cityScale =
-        Scale3D.create
-            BoxAspect.Cube
-            UpAxis.ZUp
-            (AxisScale3D.linear (-1.05, 1.05))
-            (AxisScale3D.linear (-1.05, 1.05))
-            (AxisScale3D.linear (0.0, 2.05))
-
-    let cityAxisSpec = LayoutsHelpers.buildAxisSpec cityScale "City X (LOC)" "City Z (Depth)" "Elevation / Hilbert Y" 5
-
     let districtPalettes =
         dict [
             "Compiler", RgbaColor (0.20f, 0.85f, 0.96f, 1.0f)
@@ -575,6 +461,15 @@ type LayoutsStage3D(wgpu: WgpuContext) =
                             ]
             ]
 
+    let voronoiDistrictHierarchy =
+        Hierarchy.node
+            "Architecture"
+            0.0
+            [
+                for distName, mods in archSpec ->
+                    Hierarchy.node distName (mods |> List.sumBy (fun (_, areaW, _) -> areaW)) []
+            ]
+
     let cubeHilbertBounds = Bounds3.create -0.95 0.08 -0.95 1.90 1.84 1.90
 
     let hilbertCuboids =
@@ -596,6 +491,10 @@ type LayoutsStage3D(wgpu: WgpuContext) =
         m
 
     let hilbertGroups = hilbertCuboids |> List.filter (fun c -> not c.IsLeaf)
+
+    let voronoiCells =
+        VoronoiTreemap3D.layout 16 2e-2 cubeHilbertBounds voronoiDistrictHierarchy
+        |> LayoutsHelpers.unwrapOk "VoronoiTreemap3D.layout"
 
     let mutable cityBuildings : CityBuilding<string> list = []
     let mutable currentMorphT = 0.0
@@ -622,31 +521,64 @@ type LayoutsStage3D(wgpu: WgpuContext) =
 
         cityBuildings <- CodeCity.layout cfg archHierarchy |> LayoutsHelpers.unwrapOk "CodeCity.layout"
 
-    let cityColl = Api.createKeyedCollection (fun struct (k: string, _: BarDatum3D) -> k)
+    do recomputeCodeCity ()
+
+    // GraphScene3D.scaleOfCodeCity preserves CodeCity's native YUp orientation with zero Y <-> Z swaps.
+    let cityFitScale = GraphScene3D.scaleOfCodeCity cityBuildings
+
+    do
+        let yUpProbe = Scale3D.map cityFitScale (Point3.create 0.0 1.2 0.0)
+        if yUpProbe.Y <= 0.0f then failwith "Expected GraphScene3D.scaleOfCodeCity to map +Y elevation upward."
+
+    let cityScale = Scale3D.cubeYUp (-1.05, 1.05) (0.0, 2.05) (-1.05, 1.05)
+
+    let cityAxisSpec = LayoutsHelpers.buildAxisSpec cityScale "City X (LOC)" "Elevation / Hilbert Y" "City Z (Depth)" 5
+
+    let cityColl = Api.createKeyedCollection (fun struct (k: string, _: BoxDatum3D) -> k)
     let citySink =
         let rows = cityColl.Rows |> Projection.map (fun struct (_, b) -> b)
-        Reactive3D.bindBars wgpu 2uy (fun () -> cityScale) rows
+
+        let opts =
+            SinkOptions3D.defaultValue
+            |> SinkOptions3D.withLayerId (pickRegistry.AllocateLayer ())
+            |> SinkOptions3D.withRevision plotRevision
+
+        Reactive3D.bindBoxes wgpu opts (fun () -> cityScale) rows
+
+    let cityVoronoiMesh =
+        let voronoiColor (cell: VoronoiTreemap3DCell<string>) =
+            match districtPalettes.TryGetValue cell.Id with
+            | true, c -> RgbaColor (c.R, c.G, c.B, 0.11f)
+            | _ -> RgbaColor (0.35f, 0.48f, 0.68f, 0.09f)
+
+        GraphScene3D.buildVoronoiCellMeshes cityScale 0.90 voronoiColor voronoiCells
+        |> wgpu.UploadMesh
+
+    let cityVoronoiBatch = wgpu.CreateSingleBatch (cityVoronoiMesh, BlendMode.AlphaBlend, false, drawBeforeLines = true)
+
+    do cityVoronoiBatch.SetSingle (Instance3D.fromMatrix Matrix4x4.Identity RgbaColor.white 0.5f 0u InstanceFlags.Unlit 0.0f)
 
     let cityWireBatch = wgpu.CreateLineBatch ()
-    let cityBatches = ReadOnlyMemory<InstanceBatch> [| citySink.Batch |]
+    let cityBatches = ReadOnlyMemory<InstanceBatch> [| citySink.Batch; cityVoronoiBatch |]
     let cityLines = ReadOnlyMemory<LineBatch> [| cityWireBatch |]
 
-    let boundsToCityBar (box: Bounds3) (color: RgbaColor) (selected: bool) (emissive: float32) : BarDatum3D =
-        let sx = max 0.012 (Bounds3.sizeX box)
-        let sy = max 0.008 (Bounds3.sizeY box)
-        let sz = max 0.012 (Bounds3.sizeZ box)
-        {
-            X = Bounds3.minX box + sx * 0.5
-            Y = Bounds3.minZ box + sz * 0.5
-            Z0 = Bounds3.minY box
-            Z1 = Bounds3.minY box + sy
-            WidthX = sx
-            WidthY = sz
-            Color = color
-            Shading = ShadingMode.Lit (0.28f, emissive)
-            PickId = 0u
-            Selected = selected
-        }
+    let colorForCityItem (isSelected: bool) (b: CityBuilding<string>) : RgbaColor =
+        if b.IsDistrict then
+            match districtPalettes.TryGetValue b.Id with
+            | true, c -> RgbaColor (c.R * 0.34f, c.G * 0.34f, c.B * 0.38f, 1.0f)
+            | _ -> RgbaColor (0.14f, 0.18f, 0.26f, 1.0f)
+        elif isSelected then
+            RgbaColor (1.0f, 0.92f, 0.45f, 1.0f)
+        else
+            let distName = moduleDistrict[b.Id]
+            let distCol = districtPalettes[distName]
+            let hFrac = float32 (Math.Clamp (b.HeightMetric / 110.0, 0.25, 1.0))
+            RgbaColor (
+                Math.Clamp (distCol.R * (0.55f + 0.50f * hFrac), 0.0f, 1.0f),
+                Math.Clamp (distCol.G * (0.55f + 0.50f * hFrac), 0.0f, 1.0f),
+                Math.Clamp (distCol.B * (0.55f + 0.50f * hFrac), 0.0f, 1.0f),
+                1.0f
+            )
 
     let lerpBounds3 (a: Bounds3) (b: Bounds3) (t: float) : Bounds3 =
         let x0 = Bounds3.minX a + (Bounds3.minX b - Bounds3.minX a) * t
@@ -660,65 +592,97 @@ type LayoutsStage3D(wgpu: WgpuContext) =
     let syncCityVisuals (morphT: float) =
         let u = LayoutsHelpers.smoothstep (Math.Clamp (morphT, 0.0, 1.0))
         currentMorphT <- Math.Clamp (morphT, 0.0, 1.0)
+        let selSet = match selectedBuildingId with Some id -> Set.singleton id | None -> Set.empty
 
-        Api.batch (fun () ->
-            for b in cityBuildings do
-                if b.IsDistrict then
-                    let key = $"plinth:{b.Id}"
-                    let baseBox = b.Bounds
-                    let heightScale = max 0.05 (1.0 - u)
-                    let morphedBox =
-                        Bounds3.create
-                            (Bounds3.minX baseBox)
-                            (Bounds3.minY baseBox * (1.0 - u * 0.85))
-                            (Bounds3.minZ baseBox)
-                            (Bounds3.sizeX baseBox)
-                            (Bounds3.sizeY baseBox * heightScale)
-                            (Bounds3.sizeZ baseBox)
+        if u <= 1e-4 then
+            let struct (leafBoxes, distBoxes) =
+                GraphScene3D.packCodeCity
+                    (fun b -> colorForCityItem (Set.contains b.Id selSet) b)
+                    (ShadingMode.Lit (0.28f, 0.06f))
+                    selSet
+                    cityBuildings
 
-                    let plinthCol =
-                        match districtPalettes.TryGetValue b.Id with
-                        | true, c -> RgbaColor (c.R * 0.34f, c.G * 0.34f, c.B * 0.38f, 1.0f)
-                        | _ -> RgbaColor (0.14f, 0.18f, 0.26f, 1.0f)
+            Api.batch (fun () ->
+                let leafSpan = leafBoxes.Span
+                let distSpan = distBoxes.Span
+                let mutable li = 0
+                let mutable di = 0
 
-                    cityColl.AddOrUpdate (struct (key, boundsToCityBar morphedBox plinthCol false 0.03f))
-                else
-                    let key = $"mod:{b.Id}"
-                    let hBox = hilbertLeafById[b.Id]
-                    let morphed = lerpBounds3 b.Bounds hBox u
-                    let distName = moduleDistrict[b.Id]
-                    let distCol = districtPalettes[distName]
-                    let hFrac = float32 (Math.Clamp (b.HeightMetric / 110.0, 0.25, 1.0))
-                    let shadedCol =
-                        RgbaColor (
-                            Math.Clamp (distCol.R * (0.55f + 0.50f * hFrac), 0.0f, 1.0f),
-                            Math.Clamp (distCol.G * (0.55f + 0.50f * hFrac), 0.0f, 1.0f),
-                            Math.Clamp (distCol.B * (0.55f + 0.50f * hFrac), 0.0f, 1.0f),
-                            1.0f
-                        )
+                for b in cityBuildings do
+                    if b.IsDistrict then
+                        if di < distSpan.Length then
+                            cityColl.AddOrUpdate (struct ($"plinth:{b.Id}", distSpan[di]))
+                            di <- di + 1
+                    else
+                        if li < leafSpan.Length then
+                            cityColl.AddOrUpdate (struct ($"mod:{b.Id}", leafSpan[li]))
+                            li <- li + 1)
+        else
+            Api.batch (fun () ->
+                for b in cityBuildings do
+                    if b.IsDistrict then
+                        let key = $"plinth:{b.Id}"
+                        let baseBox = b.Bounds
+                        let heightScale = max 0.05 (1.0 - u)
+                        let morphedBox =
+                            Bounds3.create
+                                (Bounds3.minX baseBox)
+                                (Bounds3.minY baseBox * (1.0 - u * 0.85))
+                                (Bounds3.minZ baseBox)
+                                (Bounds3.sizeX baseBox)
+                                (Bounds3.sizeY baseBox * heightScale)
+                                (Bounds3.sizeZ baseBox)
 
-                    let isSel = selectedBuildingId = Some b.Id
-                    let col = if isSel then RgbaColor (1.0f, 0.92f, 0.45f, 1.0f) else shadedCol
-                    let em = if isSel then 0.28f else 0.06f
-                    cityColl.AddOrUpdate (struct (key, boundsToCityBar morphed col isSel em)))
+                        let plinthDatum =
+                            BoxDatum3D.create morphedBox (colorForCityItem false b)
+                            |> BoxDatum3D.withShading (ShadingMode.Lit (0.28f, 0.03f))
 
-        // Draw exploded CubeHilbert district wireframe envelopes fading in as morphT rises
-        let wireVerts = ResizeArray<LineVertex3D>(hilbertGroups.Length * 24)
+                        cityColl.AddOrUpdate (struct (key, plinthDatum))
+                    else
+                        let key = $"mod:{b.Id}"
+                        let hBox = hilbertLeafById[b.Id]
+                        let morphed = lerpBounds3 b.Bounds hBox u
+                        let isSel = Set.contains b.Id selSet
+                        let em = if isSel then 0.28f else 0.06f
+
+                        let modDatum =
+                            BoxDatum3D.create morphed (colorForCityItem isSel b)
+                            |> BoxDatum3D.withShading (ShadingMode.Lit (0.28f, em))
+                            |> BoxDatum3D.withSelected isSel
+
+                        cityColl.AddOrUpdate (struct (key, modDatum)))
+
+        // Draw exploded CubeHilbert district wireframe envelopes & VoronoiTreemap3D cell cages fading with morphT
         let wireAlpha = float32 (0.14 + 0.58 * u)
 
-        for grp in hilbertGroups do
-            let baseCol =
-                match districtPalettes.TryGetValue grp.Id with
-                | true, c -> RgbaColor (c.R, c.G, c.B, wireAlpha)
-                | _ -> RgbaColor (0.45f, 0.56f, 0.72f, wireAlpha * 0.5f)
+        let treemapWire =
+            GraphScene3D.packTreemapWireframe
+                cityScale
+                (fun grp ->
+                    match districtPalettes.TryGetValue grp.Id with
+                    | true, c -> RgbaColor (c.R, c.G, c.B, wireAlpha)
+                    | _ -> RgbaColor (0.45f, 0.56f, 0.72f, wireAlpha * 0.5f))
+                false
+                hilbertGroups
 
-            LayoutsHelpers.appendWireframeBoxXZFloor cityScale grp.Bounds baseCol wireVerts
+        let voronoiWire =
+            GraphScene3D.packVoronoiWireframe
+                cityScale
+                0.90
+                (fun cell ->
+                    match districtPalettes.TryGetValue cell.Id with
+                    | true, c -> RgbaColor (c.R, c.G, c.B, float32 (0.18 + 0.24 * u))
+                    | _ -> RgbaColor (0.45f, 0.56f, 0.72f, 0.18f))
+                false
+                voronoiCells
 
-        cityWireBatch.UpdateVertices (wireVerts.ToArray ())
+        let combinedWire = ResizeArray<LineVertex3D>(treemapWire.Length + voronoiWire.Length)
+        combinedWire.AddRange (treemapWire.Span.ToArray ())
+        combinedWire.AddRange (voronoiWire.Span.ToArray ())
+        cityWireBatch.UpdateVertices (combinedWire.ToArray ())
+        plotRevision.MarkDirty ()
 
-    do
-        recomputeCodeCity ()
-        syncCityVisuals 0.0
+    do syncCityVisuals 0.0
 
     // =========================================================================
     // Scene 3: SphericalStress3D S^2 + HierarchicalBundle3D / KdeBundle3D + Tubes + Discs
@@ -809,10 +773,9 @@ type LayoutsStage3D(wgpu: WgpuContext) =
             sphGraph
         |> LayoutsHelpers.unwrapOk "SphericalStress3D"
 
-    // Strip pre-padded layout Groups before HierarchicalBundle3D so LCA centers synthesize from actual 3D hub positions on S^2.
     let sphHebLayout =
-        HierarchicalBundle3D.bundle 0.78 14 sphHierarchy { sphStressLayout with Groups = [] }
-        |> LayoutsHelpers.unwrapOk "HierarchicalBundle3D"
+        HierarchicalBundle3D.bundleGraph 0.78 14 sphGraph sphStressLayout
+        |> LayoutsHelpers.unwrapOk "HierarchicalBundle3D.bundleGraph"
 
     let sphKdeLayout =
         KdeBundle3D.bundle
@@ -856,22 +819,34 @@ type LayoutsStage3D(wgpu: WgpuContext) =
     let sphHubColl = Api.createKeyedCollection (fun struct (k: string, _: GlyphDatum3D) -> k)
     let sphHubSink =
         let rows = sphHubColl.Rows |> Projection.map (fun struct (_, g) -> g)
-        Reactive3D.bindInstances wgpu 3uy sphereMesh BlendMode.Opaque false false (fun () -> sphScale) rows
+
+        let opts =
+            SinkOptions3D.defaultValue
+            |> SinkOptions3D.withLayerId (pickRegistry.AllocateLayer ())
+            |> SinkOptions3D.withRevision plotRevision
+            |> SinkOptions3D.withBlendMode BlendMode.Opaque
+            |> SinkOptions3D.withDoubleSided false
+
+        Reactive3D.bindGlyphs wgpu GlyphShape3D.Sphere opts (fun () -> sphScale) rows
 
     let sphPacketColl = Api.createKeyedCollection (fun struct (k: string, _: ScatterDatum3D) -> k)
     let sphPacketSink =
         let rows = sphPacketColl.Rows |> Projection.map (fun struct (_, d) -> d)
-        Reactive3D.bindDiscs wgpu 4uy false (fun () -> sphScale) rows
+
+        let opts =
+            SinkOptions3D.defaultValue
+            |> SinkOptions3D.withLayerId (pickRegistry.AllocateLayer ())
+            |> SinkOptions3D.withRevision plotRevision
+            |> SinkOptions3D.withPreserveOrder true
+
+        Reactive3D.bindDiscsWith wgpu opts (fun () -> sphScale) rows
 
     let sphWireBatch = wgpu.CreateLineBatch ()
 
     do
-        let wireVerts = ResizeArray<LineVertex3D>(400)
         let shellCol = RgbaColor (0.28f, 0.38f, 0.56f, 0.25f)
-        LayoutsHelpers.appendGreatCircleSegments sphScale 1.05 64 shellCol 0 wireVerts
-        LayoutsHelpers.appendGreatCircleSegments sphScale 1.05 64 shellCol 1 wireVerts
-        LayoutsHelpers.appendGreatCircleSegments sphScale 1.05 64 shellCol 2 wireVerts
-        sphWireBatch.UpdateVertices (wireVerts.ToArray ())
+        let cageVerts = Line3D.sphereCage sphScale Point3.zero 1.05 1 64 shellCol false
+        sphWireBatch.UpdateVertices cageVerts.Span
 
     let buildSphericalTubesMesh (bundleBlend: float) (selectedHub: string option) : MeshData =
         let beta = LayoutsHelpers.smoothstep (Math.Clamp (bundleBlend, 0.0, 1.0))
@@ -916,7 +891,7 @@ type LayoutsStage3D(wgpu: WgpuContext) =
                 | Ok m -> parts.Add m
                 | Error _ -> ()
 
-        LayoutsHelpers.mergeMeshes parts
+        MeshData.merge parts
 
     let sphTubeMesh = wgpu.UploadMesh (buildSphericalTubesMesh 0.82 None)
     let sphTubeBatch = wgpu.CreateBatch (sphTubeMesh, BlendMode.Opaque, false)
@@ -994,6 +969,7 @@ type LayoutsStage3D(wgpu: WgpuContext) =
             sphLastMeshHub <- sphSelectedHub
             sphTubeMesh.UpdateMesh (buildSphericalTubesMesh clamped sphSelectedHub)
             syncSphericalHubs ()
+            plotRevision.MarkDirty ()
 
         syncSphericalPackets clamped t
 
@@ -1057,8 +1033,8 @@ type LayoutsStage3D(wgpu: WgpuContext) =
 
         FeatureDataset.ofRows rows |> LayoutsHelpers.unwrapOk "FeatureDataset.ofRows"
 
-    let embeddedPoints =
-        Umap3D.embed
+    let embeddedPoints, knnLinks =
+        Umap3D.embedWithLinks
             { Umap3DConfig.create umapBounds with
                 Neighbors = 10
                 MinDist = 1.8
@@ -1067,26 +1043,17 @@ type LayoutsStage3D(wgpu: WgpuContext) =
                 Epochs = 140
                 Seed = 42u }
             manifoldDataset
-        |> LayoutsHelpers.unwrapOk "Umap3D.embed"
-
-    let knnLinks =
-        NnDescent.buildGraph DistanceMetric.Euclidean 6 42u manifoldDataset
-        |> LayoutsHelpers.unwrapOk "NnDescent.buildGraph"
+        |> LayoutsHelpers.unwrapOk "Umap3D.embedWithLinks"
 
     let umapDiagram = Umap3D.toDiagramLayout 0.045 embeddedPoints knnLinks
 
     let hilbertOrdered = Hilbert3D.orderBy umapBounds (fun (p: EmbeddedPoint3D<string>) -> p.Position) embeddedPoints
     let hilbertCagePts = Hilbert3D.curve 2 umapBounds
 
-    let manifoldBvh =
-        let r = 0.085
-        let items =
-            embeddedPoints
-            |> List.map (fun (p: EmbeddedPoint3D<string>) ->
-                let b = Bounds3.create (p.Position.X - r) (p.Position.Y - r) (p.Position.Z - r) (2.0 * r) (2.0 * r) (2.0 * r)
-                { Id = p.Id; Position = p.Position; Box = b })
+    let bvhPointHalfExtent = 0.085
 
-        Bvh3D.build (fun item -> item.Box) items
+    let manifoldBvh =
+        Bvh3D.buildPoints bvhPointHalfExtent (fun (p: EmbeddedPoint3D<string>) -> p.Position) embeddedPoints
 
     let manifoldStaticLineBatch = wgpu.CreateLineBatch ()
     let manifoldRayLineBatch = wgpu.CreateLineBatch ()
@@ -1127,99 +1094,58 @@ type LayoutsStage3D(wgpu: WgpuContext) =
     let manifoldDiscColl = Api.createKeyedCollection (fun struct (k: string, _: ScatterDatum3D) -> k)
     let manifoldSink =
         let rows = manifoldDiscColl.Rows |> Projection.map (fun struct (_, d) -> d)
-        Reactive3D.bindDiscs wgpu 5uy false (fun () -> manifoldScale) rows
+
+        let opts =
+            SinkOptions3D.defaultValue
+            |> SinkOptions3D.withLayerId (pickRegistry.AllocateLayer ())
+            |> SinkOptions3D.withRevision plotRevision
+            |> SinkOptions3D.withPreserveOrder false
+
+        Reactive3D.bindDiscsWith wgpu opts (fun () -> manifoldScale) rows
 
     let manifoldBatches = ReadOnlyMemory<InstanceBatch>.Empty
     let manifoldLines = ReadOnlyMemory<LineBatch> [| manifoldStaticLineBatch; manifoldRayLineBatch |]
     let manifoldDiscs = ReadOnlyMemory<DiscBatch> [| manifoldSink.Batch |]
 
-    let clusterPalette =
-        [|
-            RgbaColor (0.20f, 0.88f, 0.96f, 0.98f)
-            RgbaColor (0.34f, 0.92f, 0.54f, 0.98f)
-            RgbaColor (0.98f, 0.64f, 0.22f, 0.98f)
-            RgbaColor (0.76f, 0.50f, 0.98f, 0.98f)
-            RgbaColor (0.98f, 0.86f, 0.28f, 0.98f)
-            RgbaColor (0.26f, 0.66f, 0.98f, 0.98f)
-        |]
-
-    let noiseColor = RgbaColor (0.92f, 0.34f, 0.52f, 0.88f)
-
-    let embeddedById =
-        let m = Dictionary<string, EmbeddedPoint3D<string>>(StringComparer.Ordinal)
-
-        for p in embeddedPoints do
-            m[p.Id] <- p
-
-        m
-
     let mutable dbscanEps = 0.17
     let mutable dbscanClusterCount = 0
     let mutable dbscanNoiseCount = 0
-    let mutable dbscanAssignments : DensityClusterAssignment<string> list = []
+    let mutable dbscanAssignments : ClusteredPoint3D<EmbeddedPoint3D<string>, string> list = []
     let mutable rayHitId : string option = None
     let mutable clickedManifoldId : string option = None
     let mutable manifoldDetail = "Sweeping Bvh3D raycast | [ / ] adjusts DBSCAN epsilon"
 
     let syncManifoldDiscs () =
+        let selSet =
+            [ yield! Option.toList rayHitId; yield! Option.toList clickedManifoldId ]
+            |> Set.ofList
+
+        let packed =
+            GraphScene3D.packClusteredScatter
+                (fun item ->
+                    let isHit = Set.contains item.Id selSet
+
+                    match item.ClusterId, item.IsCore with
+                    | Some _, true -> if isHit then 14.5f else 10.5f
+                    | Some _, false -> if isHit then 13.5f else 9.0f
+                    | None, _ -> if isHit then 13.0f else 8.5f)
+                selSet
+                dbscanAssignments
+
         Api.batch (fun () ->
-            for a in dbscanAssignments do
-                let pt = embeddedById[a.Id].Position
-                let isHit = rayHitId = Some a.Id || clickedManifoldId = Some a.Id
+            let span = packed.Span
 
-                let datum =
-                    match a.ClusterId, a.IsCore with
-                    | Some cid, true ->
-                        let baseC = clusterPalette[cid % clusterPalette.Length]
-                        let r = if isHit then 14.5f else 10.5f
-                        {
-                            Position = pt
-                            RadiusPx = r
-                            Color = baseC
-                            RingPrimary = 1.0f
-                            RingSecondary = 0.0f
-                            RingThicknessPx = 2.0f
-                            PortalHollow = 0.0f
-                            PickId = 0u
-                            Selected = isHit
-                        }
-                    | Some cid, false ->
-                        let baseC = clusterPalette[cid % clusterPalette.Length]
-                        let r = if isHit then 13.5f else 9.0f
-                        {
-                            Position = pt
-                            RadiusPx = r
-                            Color = RgbaColor (baseC.R * 0.90f, baseC.G * 0.90f, baseC.B * 0.90f, 0.92f)
-                            RingPrimary = 0.45f
-                            RingSecondary = 0.55f
-                            RingThicknessPx = 2.2f
-                            PortalHollow = 0.45f
-                            PickId = 0u
-                            Selected = isHit
-                        }
-                    | None, _ ->
-                        let r = if isHit then 13.0f else 8.5f
-                        {
-                            Position = pt
-                            RadiusPx = r
-                            Color = noiseColor
-                            RingPrimary = 0.0f
-                            RingSecondary = 1.0f
-                            RingThicknessPx = 2.4f
-                            PortalHollow = 0.78f
-                            PickId = 0u
-                            Selected = isHit
-                        }
-
-                manifoldDiscColl.AddOrUpdate (struct (a.Id, datum)))
+            for i, a in List.indexed dbscanAssignments do
+                if i < span.Length then
+                    manifoldDiscColl.AddOrUpdate (struct (a.Id, span[i])))
 
     let runDbscan (eps: float) =
         let clamped = Math.Clamp (eps, 0.08, 0.48)
         dbscanEps <- clamped
 
         let res =
-            Dbscan3D.cluster clamped 4 (fun (p: EmbeddedPoint3D<string>) -> p.Id) (fun p -> p.Position) embeddedPoints
-            |> LayoutsHelpers.unwrapOk "Dbscan3D.cluster"
+            Dbscan3D.clusterItems clamped 4 (fun (p: EmbeddedPoint3D<string>) -> p.Id) (fun p -> p.Position) embeddedPoints
+            |> LayoutsHelpers.unwrapOk "Dbscan3D.clusterItems"
 
         dbscanAssignments <- res
         let mutable maxCid = -1
@@ -1244,29 +1170,39 @@ type LayoutsStage3D(wgpu: WgpuContext) =
         let ce = cos el
         let origin = Point3.create (1.28 * ce * cos az) (1.28 * sin el) (1.28 * ce * sin az)
         let target = Point3.create (anchor.X + 0.04 * sin (t * 1.9)) (anchor.Y + 0.04 * cos (t * 1.5)) anchor.Z
-        let rawDir = Point3.create (target.X - origin.X) (target.Y - origin.Y) (target.Z - origin.Z)
-        let len = max 1e-6 (sqrt (rawDir.X * rawDir.X + rawDir.Y * rawDir.Y + rawDir.Z * rawDir.Z))
-        let dir = Point3.create (rawDir.X / len) (rawDir.Y / len) (rawDir.Z / len)
+        let rawDir = target - origin
+        let dir = Point3.normalize rawDir
         let maxT = 3.4
 
-        let hitOpt = Bvh3D.raycastClosest origin dir maxT manifoldBvh
+        let hitOpt = Bvh3D.raycastNormalized origin rawDir maxT manifoldBvh
         let prevHit = rayHitId
         let rayVerts = ResizeArray<LineVertex3D>(32)
 
         match hitOpt with
         | Some (hitItem, hitT) ->
             rayHitId <- Some hitItem.Id
-            let hitPt = Point3.create (origin.X + dir.X * hitT) (origin.Y + dir.Y * hitT) (origin.Z + dir.Z * hitT)
+            let hitPt = origin + dir * hitT
             let wOrigin = Scale3D.map manifoldScale origin
             let wHit = Scale3D.map manifoldScale hitPt
             let rayCol = RgbaColor (1.0f, 0.92f, 0.32f, 0.98f)
             rayVerts.Add (LineVertex3D (wOrigin, rayCol))
             rayVerts.Add (LineVertex3D (wHit, rayCol))
-            LayoutsHelpers.appendWireframeBox manifoldScale hitItem.Box (RgbaColor (1.0f, 0.88f, 0.24f, 0.96f)) rayVerts
+
+            let hitBox =
+                Bounds3.create
+                    (hitItem.Position.X - bvhPointHalfExtent)
+                    (hitItem.Position.Y - bvhPointHalfExtent)
+                    (hitItem.Position.Z - bvhPointHalfExtent)
+                    (2.0 * bvhPointHalfExtent)
+                    (2.0 * bvhPointHalfExtent)
+                    (2.0 * bvhPointHalfExtent)
+
+            let boxWire = Line3D.boxesWireframe manifoldScale (ReadOnlySpan<struct (Bounds3 * RgbaColor)> [| struct (hitBox, RgbaColor (1.0f, 0.88f, 0.24f, 0.96f)) |]) false
+            rayVerts.AddRange (boxWire.Span.ToArray ())
             manifoldDetail <- $"Bvh3D ray hit [{hitItem.Id}] at t={hitT:F2} · eps={dbscanEps:F2} ({dbscanClusterCount} clusters, {dbscanNoiseCount} noise)"
         | None ->
             rayHitId <- None
-            let endPt = Point3.create (origin.X + dir.X * maxT) (origin.Y + dir.Y * maxT) (origin.Z + dir.Z * maxT)
+            let endPt = origin + dir * maxT
             let wOrigin = Scale3D.map manifoldScale origin
             let wEnd = Scale3D.map manifoldScale endPt
             let rayCol = RgbaColor (0.45f, 0.72f, 0.95f, 0.55f)
@@ -1275,17 +1211,70 @@ type LayoutsStage3D(wgpu: WgpuContext) =
             manifoldDetail <- $"Bvh3D ray miss · eps={dbscanEps:F2} ({dbscanClusterCount} clusters, {dbscanNoiseCount} noise)"
 
         manifoldRayLineBatch.UpdateVertices (rayVerts.ToArray ())
+        plotRevision.MarkDirty ()
 
         if prevHit <> rayHitId then
             syncManifoldDiscs ()
 
     do
+        pickRegistry.RegisterSink (
+            h3Sink,
+            describe = (fun m -> $"H³ node [{m.Key}] at ({m.DataPoint.X:F2}, {m.DataPoint.Y:F2}, {m.DataPoint.Z:F2}) · click to focus")
+        )
+
+        pickRegistry.RegisterSink (
+            citySink,
+            describe =
+                (fun m ->
+                    if m.Key.StartsWith "mod:" then
+                        let modId = m.Key.Substring 4
+                        let dist = match moduleDistrict.TryGetValue modId with true, d -> d | _ -> ""
+                        let h = match moduleHeightMetric.TryGetValue modId with true, v -> v | _ -> 0.0
+                        $"[{dist}/{modId}] complexity={h:F1} · click to boost"
+                    elif m.Key.StartsWith "plinth:" then
+                        $"District [{m.Key.Substring 7}]"
+                    else
+                        $"District [{m.Key}]")
+        )
+
+        pickRegistry.RegisterSink (
+            sphHubSink,
+            describe =
+                (fun m ->
+                    let rName = regionNames[hubRegionIdx[m.Key]]
+                    $"Hub [{m.Key}] ({rName}) · click to isolate corridors")
+        )
+
+        pickRegistry.RegisterSink (
+            sphPacketSink,
+            describe = (fun pkt -> $"Packet [{pkt.Key}] at ({pkt.DataPoint.X:F2}, {pkt.DataPoint.Y:F2}, {pkt.DataPoint.Z:F2})")
+        )
+
+        pickRegistry.RegisterSink (
+            manifoldSink,
+            describe =
+                (fun m ->
+                    let cidOpt = dbscanAssignments |> List.tryFind (fun x -> x.Id = m.Key)
+
+                    match cidOpt with
+                    | Some a ->
+                        match a.ClusterId with
+                        | Some cid ->
+                            let role = if a.IsCore then "core" else "border"
+                            $"Point [{m.Key}] · Cluster #{cid} ({role})"
+                        | None -> $"Point [{m.Key}] · DBSCAN noise outlier"
+                    | None -> $"Point [{m.Key}]")
+        )
+
         runDbscan 0.17
         stepManifoldRayInternal 0.75
 
     // =========================================================================
     // Public Controller Surface
     // =========================================================================
+
+    /// <summary>Reactive scene revision counter updated when any GPU sink, mesh, or wireframe mutates.</summary>
+    member _.Revision: int = plotRevision.Revision
 
     /// <summary>Returns the <see cref="T:Ranvier.D5.Wgpu.Scale3D"/> active for <paramref name="scene"/>.</summary>
     member _.ScaleFor(scene: LayoutSceneId) : Scale3D =
@@ -1494,56 +1483,19 @@ type LayoutsStage3D(wgpu: WgpuContext) =
             stepManifoldRayInternal (if abs lastSceneT > 1e-6 then lastSceneT else 0.75)
 
     /// <summary>Resolves a GPU hover <see cref="T:Ranvier.Wgpu.PickHit"/> into a concise readout string.</summary>
-    member _.DescribeHit(scene: LayoutSceneId, hit: PickHit) : string =
-        match scene with
-        | LayoutSceneId.PoincareH3 ->
-            match Probe3D.resolveKeyed h3Scale h3Sink hit with
-            | ValueSome m -> $"H³ node [{m.Key}] at ({m.DataPoint.X:F2}, {m.DataPoint.Y:F2}, {m.DataPoint.Z:F2}) · click to focus"
-            | ValueNone ->
-                let pt = Probe3D.invertHit h3Scale hit
-                $"Poincaré ball ({pt.X:F2}, {pt.Y:F2}, {pt.Z:F2})"
-        | LayoutSceneId.CodeCityTreemap3D ->
-            match Probe3D.resolveKeyed cityScale citySink hit with
-            | ValueSome m ->
-                if m.Key.StartsWith "mod:" then
-                    let modId = m.Key.Substring 4
-                    let dist = match moduleDistrict.TryGetValue modId with true, d -> d | _ -> ""
-                    let h = match moduleHeightMetric.TryGetValue modId with true, v -> v | _ -> 0.0
-                    $"[{dist}/{modId}] complexity={h:F1} · click to boost"
-                elif m.Key.StartsWith "plinth:" then
-                    let distName = m.Key.Substring 7
-                    $"District [{distName}]"
-                else
-                    $"District [{m.Key}]"
-            | ValueNone ->
-                let pt = Probe3D.invertHit cityScale hit
-                $"City ({pt.X:F2}, {pt.Y:F2}, {pt.Z:F2})"
-        | LayoutSceneId.SphericalBundling3D ->
-            match Probe3D.resolveKeyed sphScale sphHubSink hit with
-            | ValueSome m ->
-                let rName = regionNames[hubRegionIdx[m.Key]]
-                $"Hub [{m.Key}] ({rName}) · click to isolate corridors"
-            | ValueNone ->
-                match Probe3D.resolveDisc sphScale sphPacketSink hit with
-                | ValueSome pkt -> $"Packet [{pkt.Key}] at ({pkt.DataPoint.X:F2}, {pkt.DataPoint.Y:F2}, {pkt.DataPoint.Z:F2})"
-                | ValueNone ->
-                    let pt = Probe3D.invertHit sphScale hit
-                    $"Sphere ({pt.X:F2}, {pt.Y:F2}, {pt.Z:F2})"
-        | LayoutSceneId.ManifoldClusterBvh3D ->
-            match Probe3D.resolveDisc manifoldScale manifoldSink hit with
-            | ValueSome m ->
-                let cidOpt = dbscanAssignments |> List.tryFind (fun x -> x.Id = m.Key)
-                match cidOpt with
-                | Some a ->
-                    match a.ClusterId with
-                    | Some cid ->
-                        let role = if a.IsCore then "core" else "border"
-                        $"Point [{m.Key}] · Cluster #{cid} ({role})"
-                    | None -> $"Point [{m.Key}] · DBSCAN noise outlier"
-                | None -> $"Point [{m.Key}]"
-            | ValueNone ->
-                let pt = Probe3D.invertHit manifoldScale hit
-                $"UMAP ({pt.X:F2}, {pt.Y:F2}, {pt.Z:F2})"
+    member this.DescribeHit(scene: LayoutSceneId, hit: PickHit) : string =
+        let sc = this.ScaleFor scene
+
+        match pickRegistry.DescribeHit (sc, hit) with
+        | ValueSome desc -> desc
+        | ValueNone ->
+            let pt = Probe3D.invertHit sc hit
+
+            match scene with
+            | LayoutSceneId.PoincareH3 -> $"Poincaré ball ({pt.X:F2}, {pt.Y:F2}, {pt.Z:F2})"
+            | LayoutSceneId.CodeCityTreemap3D -> $"City ({pt.X:F2}, {pt.Y:F2}, {pt.Z:F2})"
+            | LayoutSceneId.SphericalBundling3D -> $"Sphere ({pt.X:F2}, {pt.Y:F2}, {pt.Z:F2})"
+            | LayoutSceneId.ManifoldClusterBvh3D -> $"UMAP ({pt.X:F2}, {pt.Y:F2}, {pt.Z:F2})"
 
     /// <summary>Executes click interaction for <paramref name="hit"/> on the active scene and returns status text.</summary>
     member this.ClickHit(scene: LayoutSceneId, hit: PickHit) : string =
@@ -1629,5 +1581,6 @@ type LayoutsStage3D(wgpu: WgpuContext) =
             sphTubeBatch.Dispose ()
             sphTubeMesh.Dispose ()
             cityWireBatch.Dispose ()
+            cityVoronoiBatch.Dispose ()
+            cityVoronoiMesh.Dispose ()
             h3LineBatch.Dispose ()
-            sphereMesh.Dispose ()

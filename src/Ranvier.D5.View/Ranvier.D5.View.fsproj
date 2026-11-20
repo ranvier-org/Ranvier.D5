@@ -4,6 +4,7 @@
   <ItemGroup>
     <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" /><ProjectReference Include="../Ranvier.D5.Charts/Ranvier.D5.Charts.fsproj" />
     <PackageReference Include="Ranvier.View$(RanvierPackageSuffix)" Version="$(RanvierViewVersion)" />
+    <None Include="$(MSBuildProjectFile);*.fs" Pack="true" PackagePath="fable/" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>

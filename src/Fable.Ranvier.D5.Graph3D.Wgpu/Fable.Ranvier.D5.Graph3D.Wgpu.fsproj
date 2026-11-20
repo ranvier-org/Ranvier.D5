@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Ranvier.D5.Graph3D.Wgpu</RootNamespace>
+    <AssemblyName>Fable.Ranvier.D5.Graph3D.Wgpu</AssemblyName>
+    <PackageId>Fable.Ranvier.D5.Graph3D.Wgpu$(RanvierPackageSuffix)</PackageId>
+    <Description>Browser/Fable adapters and reactive GPU sinks bridging Ranvier.D5.Graph3D layouts to Fable.Ranvier.D5.Wgpu.</Description>
+    <DefineConstants>$(DefineConstants);FABLE_COMPILER</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Ranvier.D5.Graph3D.Wgpu/GraphScene3D.fs">
+      <Link>./GraphScene3D.fs</Link>
+    </Compile>
+    <Compile Include="../Ranvier.D5.Graph3D.Wgpu/ReactiveGraph3D.fs">
+      <Link>./ReactiveGraph3D.fs</Link>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Fable.Ranvier.D5.Graph3D.Wgpu.fsproj" PackagePath="fable/" />
+    <Content Include="../Ranvier.D5.Graph3D.Wgpu/*.fs" PackagePath="fable/" Visible="false" />
+    <ProjectReference Include="../Ranvier.D5/Ranvier.D5.fsproj" />
+    <ProjectReference Include="../Ranvier.D5.Graph/Ranvier.D5.Graph.fsproj" />
+    <ProjectReference Include="../Ranvier.D5.Graph3D/Ranvier.D5.Graph3D.fsproj" />
+    <ProjectReference Include="../Fable.Ranvier.D5.Wgpu/Fable.Ranvier.D5.Wgpu.fsproj" />
+    <PackageReference Include="Fable.Ranvier.Wgpu" Version="$(FableRanvierWgpuVersion)" />
+    <PackageReference Update="FSharp.Core" Version="10.0.100" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

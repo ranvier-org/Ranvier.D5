@@ -793,10 +793,178 @@ let private runLayersAndPolishChecks () =
     wgpu.Dispose ()
     (win :> IDisposable).Dispose ()
 
+let private runSubplotGridChecks () =
+    // 1. Validate SubplotGrid3D.grid layout math & validation guards
+    let grid4 = SubplotGrid3D.grid 2 2 8 480 360
+    Expect.equal grid4.Count 4 "SubplotGrid3D.grid 2x2 produces 4 viewports"
+    Expect.equal grid4[0] (ViewportRect.create 0 0 236 176) "grid cell (0,0)"
+    Expect.equal grid4[1] (ViewportRect.create 244 0 236 176) "grid cell (0,1)"
+    Expect.equal grid4[2] (ViewportRect.create 0 184 236 176) "grid cell (1,0)"
+    Expect.equal grid4[3] (ViewportRect.create 244 184 236 176) "grid cell (1,1)"
+    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> SubplotGrid3D.grid 0 2 8 480 360 |> ignore) "rejects rows <= 0"
+    Expect.throwsT<ArgumentOutOfRangeException> (fun () -> SubplotGrid3D.grid 2 2 -1 480 360 |> ignore) "rejects gapPx < 0"
+
+    // 2. Live 1x2 multi-pass grid over a SINGLE shared WgpuContext + SDL window
+    let win = Window.Create ("D5WgpuSubplotGrid", 480, 360, hidden = true)
+    let wgpu = WgpuSdlSurface.CreateContext win
+    let graph = new Graph ()
+
+    let scale0 = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+    let scale1 = Scale3D.cartesian (-1.0, 1.0) (-1.0, 1.0) (-1.0, 1.0)
+
+    let surfGrid0 =
+        SurfaceGrid.fromFunction3D 14 14 (-0.9, 0.9) (-0.9, 0.9) (fun x y -> 0.5 * cos (x * 2.0) * sin (y * 2.0))
+        |> unwrapOk "subplotGrid0"
+
+    let surfGrid1 =
+        SurfaceGrid.fromFunction3D 14 14 (-0.9, 0.9) (-0.9, 0.9) (fun x y -> 0.6 * sin (x * 2.5 + y * 2.5))
+        |> unwrapOk "subplotGrid1"
+
+    let clickHits0 = ResizeArray<PickHit voption>()
+    let clickHits1 = ResizeArray<PickHit voption>()
+    let hoverHits0 = ResizeArray<PickHit voption>()
+    let hoverHits1 = ResizeArray<PickHit voption>()
+
+    let cam0, cam1, surf0, surf1 =
+        graph.Run (fun () ->
+            let c0 = Reactive3D.editableCamera (fun () -> PlotCamera3D.defaultValue)
+            let c1 = Reactive3D.editableCamera (fun () -> PlotCamera3D.defaultValue)
+
+            let spec0 =
+                { SurfaceSpec.create scale0 (ColorRamp.viridis (-0.6, 0.6)) with
+                    PickId = 0x0A000001u
+                    Shading = ShadingMode.Unlit
+                }
+
+            let spec1 =
+                { SurfaceSpec.create scale1 (ColorRamp.turbo (-0.6, 0.6)) with
+                    PickId = 0x0B000002u
+                    Shading = ShadingMode.Unlit
+                }
+
+            let s0 = SurfaceBatch.Create (wgpu, spec0, surfGrid0)
+            let s1 = SurfaceBatch.Create (wgpu, spec1, surfGrid1)
+            Api.onCleanup (fun () -> s0.Dispose (); s1.Dispose ())
+            c0, c1, s0, s1)
+
+    let pass0 = PlotPass3D.ofLayers (Axis3D.defaultSpec scale0) [ Layer3D.surface surf0 ]
+    let pass1 = PlotPass3D.ofLayers (Axis3D.defaultSpec scale1) [ Layer3D.surface surf1 ]
+
+    let viewports = SubplotGrid3D.grid 1 2 10 480 360
+
+    let cells =
+        [
+            SubplotCell3D.create viewports[0] cam0 (fun () -> pass0)
+            |> SubplotCell3D.withOnHoverHit hoverHits0.Add
+            |> SubplotCell3D.withOnClickHit clickHits0.Add
+
+            SubplotCell3D.create viewports[1] cam1 (fun () -> pass1)
+            |> SubplotCell3D.withOnHoverHit hoverHits1.Add
+            |> SubplotCell3D.withOnClickHit clickHits1.Add
+        ]
+
+    let container = win.Host.Document.createElement "div"
+    win.Host.Document.body.appendChild container |> ignore
+
+    let mounted =
+        Mounting.mount
+            graph
+            None
+            (fun errors -> raise (AggregateException errors))
+            container
+            None
+            (fun ctx -> Program.run (SubplotGrid3D.create win wgpu 480 360 cells) ctx.Backend)
+
+    pumpFrames win 3
+
+    // Verify rendered non-backdrop pixels strictly exist inside BOTH left (cell 0) and right (cell 1) viewports, while center gap remains backdrop
+    let pixels, pw, ph = readWindowPixels win
+    let docEl = win.Host.Document.documentElement
+    let dprX = if not (isNull docEl) && docEl.clientWidth > 0 then float pw / float docEl.clientWidth else 1.0
+    let mutable leftNonBg = 0
+    let mutable rightNonBg = 0
+    let br = int (MathF.Round (RgbaColor.darkBackdrop.R * 255.0f))
+    let bg = int (MathF.Round (RgbaColor.darkBackdrop.G * 255.0f))
+    let bb = int (MathF.Round (RgbaColor.darkBackdrop.B * 255.0f))
+    let splitXLeft = int (Math.Round (235.0 * dprX))
+    let splitXRight = int (Math.Round (245.0 * dprX))
+
+    for y = 0 to ph - 1 do
+        for x = 0 to pw - 1 do
+            let idx = (y * pw + x) * 4
+            let isNonBg = abs (int pixels[idx] - br) > 12 || abs (int pixels[idx + 1] - bg) > 12 || abs (int pixels[idx + 2] - bb) > 12
+
+            if isNonBg then
+                if x < splitXLeft then leftNonBg <- leftNonBg + 1
+                elif x >= splitXRight then rightNonBg <- rightNonBg + 1
+
+    Expect.isGreaterThan leftNonBg 500 "SubplotGrid3D renders left viewport pixels"
+    Expect.isGreaterThan rightNonBg 500 "SubplotGrid3D renders right viewport pixels"
+
+    // Verify each cell's SVG overlay div is positioned at its ViewportRect
+    let cellOverlays = container.querySelectorAll "[data-subplot-cell]"
+    Expect.equal cellOverlays.length 2u "Each subplot cell mounts an SVG overlay host"
+    let style0 = (cellOverlays.item 0u :?> Element).getAttribute "style"
+    let style1 = (cellOverlays.item 1u :?> Element).getAttribute "style"
+    Expect.stringContains style0 "left:0px" "Cell 0 SVG overlay offset at left:0px"
+    Expect.stringContains style1 "left:245px" "Cell 1 SVG overlay offset at left:245px"
+
+    // Verify independent pointer orbit/wheel routing per cell
+    let cam0Initial = graph.Run (fun () -> cam0.Value)
+    let cam1Initial = graph.Run (fun () -> cam1.Value)
+
+    win.Host.Mouse (1, 110, 180, 0, 1, 0) |> ignore
+    win.Host.Mouse (0, 145, 195, 0, 1, 0) |> ignore
+    win.Host.Mouse (2, 145, 195, 0, 1, 0) |> ignore
+    win.Host.Wheel (110, 180, 0.0f, -120.0f, 0) |> ignore
+    pumpFrames win 2
+
+    let cam0AfterCell0 = graph.Run (fun () -> cam0.Value)
+    let cam1AfterCell0 = graph.Run (fun () -> cam1.Value)
+    Expect.notEqual cam0AfterCell0 cam0Initial "Cell 0 orbit+wheel mutates cam0"
+    Expect.equal cam1AfterCell0 cam1Initial "Cell 0 interaction leaves cam1 untouched"
+
+    win.Host.Mouse (1, 360, 180, 0, 1, 0) |> ignore
+    win.Host.Mouse (0, 395, 165, 0, 1, 0) |> ignore
+    win.Host.Mouse (2, 395, 165, 0, 1, 0) |> ignore
+    win.Host.Wheel (360, 180, 0.0f, -120.0f, 0) |> ignore
+    pumpFrames win 2
+
+    let cam0AfterCell1 = graph.Run (fun () -> cam0.Value)
+    let cam1AfterCell1 = graph.Run (fun () -> cam1.Value)
+    Expect.equal cam0AfterCell1 cam0AfterCell0 "Cell 1 interaction leaves cam0 untouched"
+    Expect.notEqual cam1AfterCell1 cam1AfterCell0 "Cell 1 orbit+wheel mutates cam1"
+
+    // Verify click pick routing exclusively to the clicked cell via PickPasses
+    clickHits0.Clear ()
+    clickHits1.Clear ()
+    win.Host.Mouse (1, 117, 180, 0, 1, 0) |> ignore
+    win.Host.Mouse (2, 117, 180, 0, 1, 0) |> ignore
+    pumpFrames win 2
+    let h0 = clickHits0 |> Seq.tryLast |> Option.bind (function ValueSome x -> Some x | _ -> None)
+    Expect.equal (h0 |> Option.map (fun h -> h.PickId)) (Some 0x0A000001u) "Click in cell 0 hits cell 0 PickId"
+    Expect.equal clickHits1.Count 0 "Click in cell 0 does not fire cell 1 OnClickHit"
+
+    clickHits0.Clear ()
+    win.Host.Mouse (1, 362, 180, 0, 1, 0) |> ignore
+    win.Host.Mouse (2, 362, 180, 0, 1, 0) |> ignore
+    pumpFrames win 2
+    let h1 = clickHits1 |> Seq.tryLast |> Option.bind (function ValueSome x -> Some x | _ -> None)
+    Expect.equal (h1 |> Option.map (fun h -> h.PickId)) (Some 0x0B000002u) "Click in cell 1 hits cell 1 PickId"
+    Expect.equal clickHits0.Count 0 "Click in cell 1 does not fire cell 0 OnClickHit"
+
+    mounted.Dispose ()
+    mounted.Dispose ()
+    win.Host.Cycle ()
+    graph.Dispose ()
+    wgpu.Dispose ()
+    (win :> IDisposable).Dispose ()
+
 [<EntryPoint>]
 let main _ =
     runNativeAcceptance ()
     runSubRectDprAndKeyMapChecks ()
     runLayersAndPolishChecks ()
-    printfn "Ranvier.D5.Wgpu.Native.Tests passed: PlotView3D live wave, DOM identity, 0 mark wheel listeners, idle RAF, hover coalescing, keyboard hygiene, ExtraOverlay, DPR resize, PlotPass3D.ofLayers, B0 polish, and safe idempotent disposal."
+    runSubplotGridChecks ()
+    printfn "Ranvier.D5.Wgpu.Native.Tests passed: PlotView3D, SubplotGrid3D multi-pass, DOM overlays, DPR resize, PlotPass3D.ofLayers, B0 polish, and safe idempotent disposal."
     0

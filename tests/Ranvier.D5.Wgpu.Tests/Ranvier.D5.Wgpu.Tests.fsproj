@@ -12,11 +12,15 @@
     <Compile Include="VolumeTests.fs" />
     <Compile Include="Reactive3DTests.fs" />
     <Compile Include="Legend3DTests.fs" />
+    <Compile Include="GraphScene3DTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Ranvier.D5/Ranvier.D5.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.Graph/Ranvier.D5.Graph.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.Graph3D/Ranvier.D5.Graph3D.fsproj" />
     <ProjectReference Include="../../src/Ranvier.D5.Wgpu/Ranvier.D5.Wgpu.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.Graph3D.Wgpu/Ranvier.D5.Graph3D.Wgpu.fsproj" />
     <PackageReference Include="Expecto" Version="11.0.0" />
   </ItemGroup>
 </Project>

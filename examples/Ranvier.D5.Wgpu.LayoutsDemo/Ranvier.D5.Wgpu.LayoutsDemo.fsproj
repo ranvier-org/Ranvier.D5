@@ -14,6 +14,7 @@
     <ProjectReference Include="../../src/Ranvier.D5.Graph3D/Ranvier.D5.Graph3D.fsproj" />
     <ProjectReference Include="../../src/Ranvier.D5.View/Ranvier.D5.View.fsproj" />
     <ProjectReference Include="../../src/Ranvier.D5.Wgpu/Ranvier.D5.Wgpu.fsproj" />
+    <ProjectReference Include="../../src/Ranvier.D5.Graph3D.Wgpu/Ranvier.D5.Graph3D.Wgpu.fsproj" />
     <ProjectReference Include="../../src/Ranvier.D5.Wgpu.Sdl/Ranvier.D5.Wgpu.Sdl.fsproj" />
   </ItemGroup>
 </Project>
