@@ -24,4 +24,4 @@ All public algorithm configuration is immutable. Mutation is confined to local a
 
 Safe numeric ranges are enforced at API boundaries. Empty/singleton datasets are valid. Degenerate domains use midpoint mapping and constant ticks. Descending domains/ranges work. Caller data is never mutated. Selection/zoom operates in explicit scene coordinates. Animation is deterministic under an injected clock, with no ambient timers. Rendering and signal graph mutation follow the host's owner thread. Browser/Fable support is a future adapter unless tested in this release.
 
-The dependency cohort is set once, as minimum versions, in Directory.Build.props: Ranvier 0.2.0 with the matching Anime, CSS and View packages. The renderer uses the `Ranvier.View.Dsl` element surface. Source snapshots record upstream commits independently from package pins.
+The dependency cohort is set once, as minimum versions, in Directory.Build.props: Ranvier 0.2.1 with the matching Anime, CSS and View packages. The renderer uses the `Ranvier.View.Dsl` element surface. Source snapshots record upstream commits independently from package pins.
