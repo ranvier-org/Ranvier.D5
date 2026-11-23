@@ -18,7 +18,7 @@ Functional-first visualization foundations for native F# applications. Compose i
 - **Fable.Ranvier.D5.Wgpu.View**: Browser WebGPU and WebGL2 interactive 3D plot host (`PlotView3D.create`, `PlotView3D.createContextAsync`, `PlotPass3D`, `PlotViewConfig3D`, `PlotKeyMap3D`) and multi-pass `SubplotGrid3D` over `Ranvier.View.Dsl` and `Fable.Ranvier.D5.Wgpu`.
 - All 12 packages (`Ranvier.D5*` and `Fable.Ranvier.D5.*`) have a **.Traced** variant (`-p:RanvierTrace=true`). Use one variant throughout the dependency graph.
 
-Target: .NET 10. Version: **0.5.0**. This is a pre-1.0 release: APIs may still change between 0.x versions. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
+Target: .NET 10. Version: **0.5.1**. This is a pre-1.0 release: APIs may still change between 0.x versions. [Contracts and limits](docs/contracts.md) describe the algorithms and integration responsibilities.
 
 ## A reactive scene
 
@@ -72,7 +72,7 @@ Run `dotnet run --project examples/Ranvier.D5.Gallery -c Release -- --linked` fo
 
 Run `dotnet run --project examples/Ranvier.D5.Wgpu.WaveDemo -c Release` (or `-- --capture wgpu-wave.bmp` for a hidden-window frame capture) to explore the live WebGPU `(96 × 96)` wave plane colored by instantaneous phase velocity (`4`th dimension `ColorRamp.turbo`), `Axis3D` bounded frame, `Editable<PlotCamera3D>`, interactive `Editable<SectionPlane>`, and `KeyedCollection` extrema markers.
 
-Run `dotnet run --project examples/Ranvier.D5.Wgpu.LayoutsDemo -c Release` (or `-- --capture-all artifacts` for hidden-window captures of all four scenes) to explore the interactive `0.5.0` 3D layout showcase driven by `KeyedCollection`, `Projection`, and `Reactive3D` GPU sinks: `H3` Poincaré hyperbolic Lorentz focus, `CodeCity` ↔ exploded `CubeHilbert` `Treemap3D` morphing, `SphericalStress3D` + `HierarchicalBundle3D`/`KdeBundle3D` 3D streamtube bundling with animated packet discs, and `Umap3D` + reactive `Dbscan3D` density clustering with `Hilbert3D` tour and `Bvh3D` raycasting.
+Run `dotnet run --project examples/Ranvier.D5.Wgpu.LayoutsDemo -c Release` (or `-- --capture-all artifacts` for hidden-window captures of all four scenes) to explore the interactive `0.5.1` 3D layout showcase driven by `KeyedCollection`, `Projection`, and `Reactive3D` GPU sinks: `H3` Poincaré hyperbolic Lorentz focus, `CodeCity` ↔ exploded `CubeHilbert` `Treemap3D` morphing, `SphericalStress3D` + `HierarchicalBundle3D`/`KdeBundle3D` 3D streamtube bundling with animated packet discs, and `Umap3D` + reactive `Dbscan3D` density clustering with `Hilbert3D` tour and `Bvh3D` raycasting.
 
 ## Build and verify
 
@@ -113,7 +113,7 @@ Append `-p:RanvierTrace=true` for Traced. Native acceptance requires WebCore and
 python tools/snapshot-kit.py ../snapshots
 ```
 
-Snapshots are reference material; builds use the published cohort set as minimum versions in [Directory.Build.props](Directory.Build.props): Ranvier 0.2.0, Anime 0.1.0, CSS 0.1.1, View 0.2.0 (its `Ranvier.View.Dsl` surface), View.WebCore 0.2.0, View.WebCore.Sdl 0.2.1, Wgpu 0.4.0, Wgpu.Sdl 0.3.0, and Fable.Ranvier.Wgpu 0.3.0. See [design](docs/design.md).
+Snapshots are reference material; builds use the published cohort set as minimum versions in [Directory.Build.props](Directory.Build.props): Ranvier 0.2.1, Anime 0.3.0, CSS 0.3.0, View 0.4.0 (its `Ranvier.View.Dsl` surface), View.WebCore 0.3.0, View.WebCore.Sdl 0.2.3, Wgpu 0.4.0, Wgpu.Sdl 0.3.1, and Fable.Ranvier.Wgpu 0.3.1. See [design](docs/design.md).
 
 D5 provides reusable foundations, not every D3 algorithm. Spatial indexing, triangulation and force/network layouts are available; see [network examples and measured limits](docs/network.md). [Chord layouts and ribbons](docs/chord.md) provide matrix relationship geometry. [DAG Sankey layouts](docs/sankey.md) support explicit flow imbalance. [Interactive flow recipes](docs/flow-charts.md) include staged alluvial and constrained node dragging. [Density grids, Gaussian blur and 1D KDE](docs/density.md) provide bounded aggregation and an owned-worker native example. [Contour topology](docs/contours.md) provides closed shells and holes with bilinear saddle decisions. [Hexbin and source-preserving line reduction](docs/reduction.md) bound visible data. [Heatmap, hexbin, contour and isoband recipes](docs/density-charts.md) add explicit aggregate membership and region-aware picking, with working native snapshots. [Violin and reduced-series compositions](docs/distribution-series.md) preserve original statistics while bounding visible geometry. Geographic clipping/projections remain planned. Large scenes need aggregation/windowing; SVG does not promise million-mark frame rates.
 
